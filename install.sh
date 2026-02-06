@@ -80,7 +80,8 @@ detect_platform() {
 
 # Get latest version from GitHub releases
 get_latest_version() {
-    info "Fetching latest version..."
+    # Note: info messages go to stderr to avoid polluting the version output
+    printf "${BLUE}==>${NC} Fetching latest version...\n" >&2
     LATEST=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
     
     if [ -z "$LATEST" ]; then
@@ -129,8 +130,8 @@ install() {
     # Extract
     tar -xzf "${TMP_DIR}/diane.tar.gz" -C "${TMP_DIR}"
     
-    # Install binary
-    mv "${TMP_DIR}/${BINARY_NAME}-${PLATFORM}" "${INSTALL_DIR}/bin/diane-mcp"
+    # Install binary (tarball contains diane-mcp directly)
+    mv "${TMP_DIR}/diane-mcp" "${INSTALL_DIR}/bin/diane-mcp"
     chmod +x "${INSTALL_DIR}/bin/diane-mcp"
     
     success "DIANE MCP Server installed to ${INSTALL_DIR}/bin/diane-mcp"
