@@ -214,8 +214,14 @@ install() {
         rm -f "$OLD_BINARY_PATH"
     fi
     
-    # Install binary (tarball contains diane directly)
-    mv "${TMP_DIR}/diane" "${INSTALL_DIR}/bin/diane"
+    # Install binary (handle both old 'diane-mcp' and new 'diane' tarball formats)
+    if [ -f "${TMP_DIR}/diane" ]; then
+        mv "${TMP_DIR}/diane" "${INSTALL_DIR}/bin/diane"
+    elif [ -f "${TMP_DIR}/diane-mcp" ]; then
+        mv "${TMP_DIR}/diane-mcp" "${INSTALL_DIR}/bin/diane"
+    else
+        error "Binary not found in tarball"
+    fi
     chmod +x "${INSTALL_DIR}/bin/diane"
     
     success "DIANE installed to ${INSTALL_DIR}/bin/diane"
