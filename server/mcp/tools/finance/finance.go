@@ -305,7 +305,7 @@ func (p *Provider) CheckDependencies() error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	secretsDir = filepath.Join(home, "code/diane/.opencode/secrets")
+	secretsDir = filepath.Join(home, ".diane", "secrets")
 
 	// Check Enable Banking
 	ebConfigPath := filepath.Join(secretsDir, "enablebanking-config.json")
@@ -346,7 +346,7 @@ func (p *Provider) CheckDependencies() error {
 	}
 
 	// Check Actual Budget CLI
-	actualCLIPath = filepath.Join(home, "code/diane/.opencode/tools/lib/actualbudget-cli.mjs")
+	actualCLIPath = filepath.Join(home, ".diane", "tools", "actualbudget-cli.mjs")
 	if _, err := os.Stat(actualCLIPath); err == nil {
 		// Check if Node.js is available
 		if _, err := exec.LookPath("node"); err == nil {

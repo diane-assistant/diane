@@ -19,12 +19,14 @@ if [ -t 1 ]; then
     GREEN='\033[0;32m'
     YELLOW='\033[0;33m'
     BLUE='\033[0;34m'
+    MUTED='\033[0;2m'
     NC='\033[0m' # No Color
 else
     RED=''
     GREEN=''
     YELLOW=''
     BLUE=''
+    MUTED=''
     NC=''
 fi
 
@@ -91,15 +93,79 @@ get_latest_version() {
     echo "$LATEST"
 }
 
+# Get installed version by querying the MCP server
+get_installed_version() {
+    INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
+    BINARY_PATH="${INSTALL_DIR}/bin/diane-mcp"
+    
+    if [ ! -x "$BINARY_PATH" ]; then
+        echo ""
+        return
+    fi
+    
+    # Send MCP initialize request and extract version from response
+    # The server responds with serverInfo.version in the initialize response
+    INSTALLED=$(echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"installer","version":"1.0.0"}}}' | \
+        timeout 2 "$BINARY_PATH" 2>/dev/null | \
+        grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"//;s/"//')
+    
+    if [ -n "$INSTALLED" ]; then
+        echo "v${INSTALLED}"
+    else
+        echo ""
+    fi
+}
+
+# Check if upgrade is needed
+check_version() {
+    INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
+    BINARY_PATH="${INSTALL_DIR}/bin/diane-mcp"
+    
+    if [ ! -x "$BINARY_PATH" ]; then
+        return 0  # Not installed, proceed with installation
+    fi
+    
+    INSTALLED_VERSION=$(get_installed_version)
+    
+    if [ -z "$INSTALLED_VERSION" ]; then
+        info "DIANE is installed but version could not be determined. Reinstalling..."
+        return 0
+    fi
+    
+    # If specific version requested, compare with that
+    if [ -n "$DIANE_VERSION" ]; then
+        TARGET_VERSION="$DIANE_VERSION"
+    else
+        TARGET_VERSION="$VERSION"
+    fi
+    
+    if [ "$INSTALLED_VERSION" = "$TARGET_VERSION" ]; then
+        success "DIANE ${INSTALLED_VERSION} is already installed and up to date"
+        exit 0
+    fi
+    
+    info "${MUTED}Installed version:${NC} ${INSTALLED_VERSION}"
+    info "${MUTED}Available version:${NC} ${TARGET_VERSION}"
+    info "Upgrading..."
+    return 0
+}
+
 # Download and install
 install() {
     INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
     VERSION="${DIANE_VERSION:-$(get_latest_version)}"
     
+    # Check if already up to date
+    check_version
+    
     info "Installing DIANE MCP Server ${VERSION}..."
     
     # Create installation directory
     mkdir -p "${INSTALL_DIR}/bin"
+    mkdir -p "${INSTALL_DIR}/secrets"
+    mkdir -p "${INSTALL_DIR}/tools"
+    mkdir -p "${INSTALL_DIR}/data"
+    mkdir -p "${INSTALL_DIR}/logs"
     
     # Construct download URL
     DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/${BINARY_NAME}-${PLATFORM}.tar.gz"
@@ -136,10 +202,6 @@ install() {
     
     success "DIANE MCP Server installed to ${INSTALL_DIR}/bin/diane-mcp"
     
-    # Create data directories
-    mkdir -p "${INSTALL_DIR}/data"
-    mkdir -p "${INSTALL_DIR}/logs"
-    
     # Check if bin is in PATH
     case ":${PATH}:" in
         *":${INSTALL_DIR}/bin:"*)
@@ -161,11 +223,24 @@ install() {
     echo "  Version: ${VERSION}"
     echo "  Binary:  ${INSTALL_DIR}/bin/diane-mcp"
     echo ""
+    echo "Directory structure:"
+    echo "  ${INSTALL_DIR}/"
+    echo "  ├── bin/          # diane-mcp binary"
+    echo "  ├── secrets/      # API keys and config files"
+    echo "  ├── tools/        # Helper scripts (actualbudget-cli.mjs, etc.)"
+    echo "  ├── data/         # Persistent data"
+    echo "  └── logs/         # Log files"
+    echo ""
     echo "Next steps:"
     echo "  1. Configure your MCP client to use: ${INSTALL_DIR}/bin/diane-mcp"
     echo "  2. Copy secrets to: ${INSTALL_DIR}/secrets/"
     echo "  3. Run: diane-mcp --help"
     echo ""
+}
+
+# Upgrade (alias for install with version check)
+upgrade() {
+    install
 }
 
 # Uninstall
@@ -185,6 +260,20 @@ uninstall() {
     echo "  To remove completely: rm -rf ${INSTALL_DIR}"
 }
 
+# Show version
+version() {
+    INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
+    INSTALLED_VERSION=$(get_installed_version)
+    
+    if [ -n "$INSTALLED_VERSION" ]; then
+        echo "DIANE MCP Server ${INSTALLED_VERSION}"
+        echo "Installed at: ${INSTALL_DIR}/bin/diane-mcp"
+    else
+        echo "DIANE MCP Server is not installed"
+        echo "Run: curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh"
+    fi
+}
+
 # Main
 main() {
     case "${1:-install}" in
@@ -192,11 +281,18 @@ main() {
             detect_platform
             install
             ;;
+        upgrade)
+            detect_platform
+            upgrade
+            ;;
         uninstall)
             uninstall
             ;;
+        version)
+            version
+            ;;
         --version|-v)
-            echo "DIANE Installer v1.0.0"
+            echo "DIANE Installer v1.1.0"
             ;;
         --help|-h)
             echo "DIANE MCP Server Installer"
@@ -204,8 +300,10 @@ main() {
             echo "Usage: $0 [command]"
             echo ""
             echo "Commands:"
-            echo "  install     Install DIANE MCP Server (default)"
+            echo "  install     Install or upgrade DIANE MCP Server (default)"
+            echo "  upgrade     Upgrade to latest version (same as install)"
             echo "  uninstall   Remove DIANE MCP Server"
+            echo "  version     Show installed version"
             echo ""
             echo "Environment variables:"
             echo "  DIANE_VERSION  Specific version to install (default: latest)"
@@ -214,6 +312,7 @@ main() {
             echo "Examples:"
             echo "  curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh"
             echo "  DIANE_VERSION=v1.0.0 ./install.sh"
+            echo "  ./install.sh upgrade"
             echo "  ./install.sh uninstall"
             ;;
         *)

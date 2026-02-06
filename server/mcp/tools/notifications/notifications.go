@@ -60,10 +60,10 @@ func loadChannelMappings() (channelMappings, error) {
 		return nil, err
 	}
 
-	// Try project-local config first
+	// Try DIANE config directories
 	paths := []string{
-		filepath.Join(home, "code/diane/.opencode/secrets/discord-channels.json"),
-		filepath.Join(home, ".opencode/secrets/discord-channels.json"),
+		filepath.Join(home, ".diane", "secrets", "discord-channels.json"),
+		filepath.Join(home, ".opencode", "secrets", "discord-channels.json"),
 	}
 
 	for _, path := range paths {
@@ -95,11 +95,10 @@ func getDefaultChannelID() (string, error) {
 	}
 	defer db.Close()
 
-	// Look for diane project channel mapping
+	// Look for diane channel in Kimaki database
 	var channelID string
 	err = db.QueryRow(
-		"SELECT channel_id FROM channel_directories WHERE directory = ?",
-		filepath.Join(home, "code/diane"),
+		"SELECT channel_id FROM channel_directories WHERE directory LIKE '%diane%' ORDER BY id LIMIT 1",
 	).Scan(&channelID)
 	if err != nil {
 		return "", fmt.Errorf("no Discord channel mapping found for diane: %w", err)
@@ -143,7 +142,7 @@ func getHomeAssistantConfig() (*homeAssistantConfig, error) {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configPath := filepath.Join(home, "code/diane/.opencode/secrets/homeassistant-config.json")
+	configPath := filepath.Join(home, ".diane", "secrets", "homeassistant-config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("Home Assistant config not found. Create %s with server_url, access_token, notify_service", configPath)

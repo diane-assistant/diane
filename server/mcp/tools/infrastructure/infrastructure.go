@@ -23,7 +23,7 @@ func getCloudflareConfig() (*cloudflareConfig, error) {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configPath := filepath.Join(home, "code/diane/.opencode/secrets/cloudflare-config.json")
+	configPath := filepath.Join(home, ".diane", "secrets", "cloudflare-config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("Cloudflare config not found at %s. Please create it with your API token", configPath)

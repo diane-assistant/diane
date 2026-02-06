@@ -19,7 +19,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const configPath = "/Users/mcj/code/diane/.opencode/secrets/github-bot-token.json"
+// getConfigPath returns the path to the GitHub bot config file
+func getConfigPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".diane", "secrets", "github-bot-token.json")
+}
+
 const userAgent = "diane-assistant-bot"
 
 // Config holds GitHub App configuration
@@ -43,6 +48,7 @@ type Provider struct {
 // NewProvider creates a new GitHub provider
 func NewProvider() (*Provider, error) {
 	// Read config
+	configPath := getConfigPath()
 	configData, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %w", err)
@@ -93,6 +99,7 @@ func NewProvider() (*Provider, error) {
 
 // CheckDependencies verifies GitHub App configuration exists
 func (p *Provider) CheckDependencies() error {
+	configPath := getConfigPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return fmt.Errorf("GitHub App config not found at %s", configPath)
 	}

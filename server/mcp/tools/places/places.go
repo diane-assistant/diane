@@ -173,7 +173,7 @@ func (p *Provider) CheckDependencies() error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	secretsDir = filepath.Join(home, "code/diane/.opencode/secrets")
+	secretsDir = filepath.Join(home, ".diane", "secrets")
 	configPath := filepath.Join(secretsDir, "google-places-config.json")
 
 	data, err := os.ReadFile(configPath)
