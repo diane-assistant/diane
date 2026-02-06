@@ -5,7 +5,7 @@ Your personal AI assistant for automating life's tedious tasks.
 ## Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/diane-assitant/diane/main/install.sh | sh
 ```
 
 This installs the latest version to `~/.diane/bin/diane`.
@@ -14,15 +14,15 @@ This installs the latest version to `~/.diane/bin/diane`.
 
 ```bash
 # Install specific version
-DIANE_VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh
+DIANE_VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/diane-assitant/diane/main/install.sh | sh
 
 # Install to custom directory
-DIANE_DIR=/opt/diane curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh
+DIANE_DIR=/opt/diane curl -fsSL https://raw.githubusercontent.com/diane-assitant/diane/main/install.sh | sh
 ```
 
 ## Manual Download
 
-Download binaries from [GitHub Releases](https://github.com/Emergent-Comapny/diane/releases):
+Download binaries from [GitHub Releases](https://github.com/diane-assitant/diane/releases):
 
 | Platform | Architecture | Download |
 |----------|--------------|----------|
@@ -144,7 +144,7 @@ Diane can also proxy other MCP servers. Configure them in `~/.diane/mcp-config.j
 ## Building from Source
 
 ```bash
-git clone https://github.com/Emergent-Comapny/diane.git
+git clone https://github.com/diane-assitant/diane.git
 cd diane
 make build      # Build for current platform
 make install    # Install to ~/.diane/bin/
@@ -154,7 +154,7 @@ make build-all  # Build for all platforms
 ## Uninstall
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh -s uninstall
+curl -fsSL https://raw.githubusercontent.com/diane-assitant/diane/main/install.sh | sh -s uninstall
 # Or manually:
 rm -rf ~/.diane
 ```

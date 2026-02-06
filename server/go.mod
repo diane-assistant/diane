@@ -1,4 +1,4 @@
-module github.com/Emergent-Comapny/diane
+module github.com/diane-assitant/diane
 
 go 1.25.5
 

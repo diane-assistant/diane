@@ -11,16 +11,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Emergent-Comapny/diane/internal/db"
-	"github.com/Emergent-Comapny/diane/internal/mcpproxy"
-	"github.com/Emergent-Comapny/diane/mcp/tools/apple"
-	"github.com/Emergent-Comapny/diane/mcp/tools/finance"
-	githubbot "github.com/Emergent-Comapny/diane/mcp/tools/github"
-	"github.com/Emergent-Comapny/diane/mcp/tools/google"
-	"github.com/Emergent-Comapny/diane/mcp/tools/infrastructure"
-	"github.com/Emergent-Comapny/diane/mcp/tools/notifications"
-	"github.com/Emergent-Comapny/diane/mcp/tools/places"
-	"github.com/Emergent-Comapny/diane/mcp/tools/weather"
+	"github.com/diane-assitant/diane/internal/db"
+	"github.com/diane-assitant/diane/internal/mcpproxy"
+	"github.com/diane-assitant/diane/mcp/tools/apple"
+	"github.com/diane-assitant/diane/mcp/tools/finance"
+	githubbot "github.com/diane-assitant/diane/mcp/tools/github"
+	"github.com/diane-assitant/diane/mcp/tools/google"
+	"github.com/diane-assitant/diane/mcp/tools/infrastructure"
+	"github.com/diane-assitant/diane/mcp/tools/notifications"
+	"github.com/diane-assitant/diane/mcp/tools/places"
+	"github.com/diane-assitant/diane/mcp/tools/weather"
 )
 
 // MCP Server for Diane

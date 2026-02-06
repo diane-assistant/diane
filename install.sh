@@ -1,6 +1,6 @@
 #!/bin/sh
 # DIANE Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/diane-assitant/diane/main/install.sh | sh
 #
 # Environment variables:
 #   DIANE_VERSION  - Specific version to install (default: latest)
@@ -9,7 +9,7 @@
 set -e
 
 # Configuration
-GITHUB_REPO="Emergent-Comapny/diane"
+GITHUB_REPO="diane-assitant/diane"
 BINARY_NAME="diane"
 DEFAULT_INSTALL_DIR="${HOME}/.diane"
 
@@ -290,7 +290,7 @@ version() {
         echo "Installed at: ${INSTALL_DIR}/bin/diane"
     else
         echo "DIANE is not installed"
-        echo "Run: curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh"
+        echo "Run: curl -fsSL https://raw.githubusercontent.com/diane-assitant/diane/main/install.sh | sh"
     fi
 }
 
@@ -330,7 +330,7 @@ main() {
             echo "  DIANE_DIR      Installation directory (default: ~/.diane)"
             echo ""
             echo "Examples:"
-            echo "  curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh"
+            echo "  curl -fsSL https://raw.githubusercontent.com/diane-assitant/diane/main/install.sh | sh"
             echo "  DIANE_VERSION=v1.0.0 ./install.sh"
             echo "  ./install.sh upgrade"
             echo "  ./install.sh uninstall"
