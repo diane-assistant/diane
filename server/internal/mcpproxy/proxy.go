@@ -1,0 +1,273 @@
+package mcpproxy
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"sync"
+)
+
+// ServerConfig represents configuration for an MCP server
+type ServerConfig struct {
+	Name    string            `json:"name"`
+	Enabled bool              `json:"enabled"`
+	Type    string            `json:"type"` // stdio, http, etc.
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
+}
+
+// Config represents the MCP proxy configuration
+type Config struct {
+	Servers []ServerConfig `json:"servers"`
+}
+
+// Proxy manages multiple MCP clients
+type Proxy struct {
+	clients    map[string]*MCPClient
+	config     *Config
+	configPath string // Store config path for reload
+	mu         sync.RWMutex
+	notifyChan chan string // Aggregated notifications channel
+}
+
+// NewProxy creates a new MCP proxy
+func NewProxy(configPath string) (*Proxy, error) {
+	config, err := loadConfig(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	proxy := &Proxy{
+		clients:    make(map[string]*MCPClient),
+		config:     config,
+		configPath: configPath,
+		notifyChan: make(chan string, 10), // Buffered channel for notifications
+	}
+
+	// Start enabled MCP servers
+	for _, server := range config.Servers {
+		if server.Enabled && server.Type == "stdio" {
+			if err := proxy.startClient(server); err != nil {
+				log.Printf("Failed to start MCP server %s: %v", server.Name, err)
+			}
+		}
+	}
+
+	// Start notification monitor
+	go proxy.monitorNotifications()
+
+	return proxy, nil
+}
+
+// startClient starts an MCP client
+func (p *Proxy) startClient(config ServerConfig) error {
+	client, err := NewMCPClient(config.Name, config.Command, config.Args, config.Env)
+	if err != nil {
+		return err
+	}
+
+	p.mu.Lock()
+	p.clients[config.Name] = client
+	p.mu.Unlock()
+
+	log.Printf("Started MCP server: %s", config.Name)
+	return nil
+}
+
+// ListAllTools aggregates tools from all MCP clients
+func (p *Proxy) ListAllTools() ([]map[string]interface{}, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var allTools []map[string]interface{}
+
+	for serverName, client := range p.clients {
+		tools, err := client.ListTools()
+		if err != nil {
+			log.Printf("Failed to list tools from %s: %v", serverName, err)
+			continue
+		}
+
+		// Prefix tool names with server name to avoid conflicts
+		for _, tool := range tools {
+			if name, ok := tool["name"].(string); ok {
+				tool["name"] = serverName + "_" + name
+				tool["_server"] = serverName // Track which server this tool belongs to
+			}
+			allTools = append(allTools, tool)
+		}
+	}
+
+	return allTools, nil
+}
+
+// CallTool routes a tool call to the appropriate MCP client
+func (p *Proxy) CallTool(toolName string, arguments map[string]interface{}) (json.RawMessage, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	// Parse server name from tool name (format: server_toolname)
+	var serverName, actualToolName string
+	for sName := range p.clients {
+		prefix := sName + "_"
+		if len(toolName) > len(prefix) && toolName[:len(prefix)] == prefix {
+			serverName = sName
+			actualToolName = toolName[len(prefix):]
+			break
+		}
+	}
+
+	if serverName == "" {
+		return nil, fmt.Errorf("unknown tool: %s", toolName)
+	}
+
+	client, ok := p.clients[serverName]
+	if !ok {
+		return nil, fmt.Errorf("server not found: %s", serverName)
+	}
+
+	return client.CallTool(actualToolName, arguments)
+}
+
+// monitorNotifications watches all client notification channels
+func (p *Proxy) monitorNotifications() {
+	p.mu.RLock()
+	clients := make([]*MCPClient, 0, len(p.clients))
+	for _, client := range p.clients {
+		clients = append(clients, client)
+	}
+	p.mu.RUnlock()
+
+	// Start a goroutine for each client to forward notifications
+	for _, client := range clients {
+		go p.monitorClient(client)
+	}
+}
+
+// NotificationChan returns the channel for receiving aggregated notifications
+func (p *Proxy) NotificationChan() <-chan string {
+	return p.notifyChan
+}
+
+// Reload reloads the MCP configuration and starts/stops servers as needed
+func (p *Proxy) Reload() error {
+	log.Printf("Reloading MCP configuration from %s", p.configPath)
+
+	newConfig, err := loadConfig(p.configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load new config: %w", err)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Build map of new enabled servers
+	newServers := make(map[string]ServerConfig)
+	for _, s := range newConfig.Servers {
+		if s.Enabled && s.Type == "stdio" {
+			newServers[s.Name] = s
+		}
+	}
+
+	// Stop removed servers
+	for name, client := range p.clients {
+		if _, exists := newServers[name]; !exists {
+			log.Printf("Stopping removed MCP server: %s", name)
+			client.Close()
+			delete(p.clients, name)
+		}
+	}
+
+	// Start new servers
+	for name, serverConfig := range newServers {
+		if _, exists := p.clients[name]; !exists {
+			log.Printf("Starting new MCP server: %s", name)
+			if err := p.startClientUnlocked(serverConfig); err != nil {
+				log.Printf("Failed to start %s: %v", name, err)
+			}
+		}
+	}
+
+	p.config = newConfig
+
+	// Send notification that tools changed
+	select {
+	case p.notifyChan <- "config-reload":
+		log.Printf("Sent config-reload notification")
+	default:
+		log.Printf("Notification channel full, dropping config-reload notification")
+	}
+
+	log.Printf("MCP configuration reload complete")
+	return nil
+}
+
+// startClientUnlocked starts a client (assumes lock is held by caller)
+func (p *Proxy) startClientUnlocked(config ServerConfig) error {
+	client, err := NewMCPClient(config.Name, config.Command, config.Args, config.Env)
+	if err != nil {
+		return err
+	}
+
+	p.clients[config.Name] = client
+
+	// Start monitoring this client's notifications
+	go p.monitorClient(client)
+
+	log.Printf("Started MCP server: %s", config.Name)
+	return nil
+}
+
+// monitorClient monitors a single client for notifications
+func (p *Proxy) monitorClient(client *MCPClient) {
+	for method := range client.NotificationChan() {
+		if method == "notifications/tools/list_changed" {
+			log.Printf("[%s] Tools changed, forwarding notification", client.Name)
+			select {
+			case p.notifyChan <- client.Name:
+			default:
+				log.Printf("Proxy notification channel full, dropping notification from %s", client.Name)
+			}
+		}
+	}
+}
+
+// Close shuts down all MCP clients
+func (p *Proxy) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for name, client := range p.clients {
+		log.Printf("Shutting down MCP server: %s", name)
+		if err := client.Close(); err != nil {
+			log.Printf("Error closing %s: %v", name, err)
+		}
+	}
+
+	p.clients = make(map[string]*MCPClient)
+	return nil
+}
+
+// loadConfig loads the MCP proxy configuration
+func loadConfig(configPath string) (*Config, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+// GetDefaultConfigPath returns the default config path
+func GetDefaultConfigPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".diane", "mcp-servers.json")
+}
