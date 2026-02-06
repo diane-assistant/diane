@@ -1,5 +1,5 @@
 #!/bin/sh
-# DIANE MCP Server Installer
+# DIANE Installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh
 #
 # Environment variables:
@@ -93,14 +93,20 @@ get_latest_version() {
     echo "$LATEST"
 }
 
-# Get installed version by querying the MCP server
+# Get installed version by querying the binary
 get_installed_version() {
     INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
-    BINARY_PATH="${INSTALL_DIR}/bin/diane-mcp"
+    BINARY_PATH="${INSTALL_DIR}/bin/diane"
+    OLD_BINARY_PATH="${INSTALL_DIR}/bin/diane-mcp"
     
+    # Check new binary first, then fall back to old name
     if [ ! -x "$BINARY_PATH" ]; then
-        echo ""
-        return
+        if [ -x "$OLD_BINARY_PATH" ]; then
+            BINARY_PATH="$OLD_BINARY_PATH"
+        else
+            echo ""
+            return
+        fi
     fi
     
     # Send MCP initialize request and extract version from response
@@ -117,16 +123,18 @@ get_installed_version() {
 # Check if upgrade is needed
 check_version() {
     INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
-    BINARY_PATH="${INSTALL_DIR}/bin/diane-mcp"
+    BINARY_PATH="${INSTALL_DIR}/bin/diane"
+    OLD_BINARY_PATH="${INSTALL_DIR}/bin/diane-mcp"
     
-    if [ ! -x "$BINARY_PATH" ]; then
+    # Check if either binary exists
+    if [ ! -x "$BINARY_PATH" ] && [ ! -x "$OLD_BINARY_PATH" ]; then
         return 0  # Not installed, proceed with installation
     fi
     
     INSTALLED_VERSION=$(get_installed_version)
     
     if [ -z "$INSTALLED_VERSION" ]; then
-        info "DIANE is installed but version could not be determined. Reinstalling..."
+    info "DIANE is installed but version could not be determined. Reinstalling..."
         return 0
     fi
     
@@ -138,6 +146,11 @@ check_version() {
     fi
     
     if [ "$INSTALLED_VERSION" = "$TARGET_VERSION" ]; then
+        # Check if we need to migrate from old binary name
+        if [ -x "$OLD_BINARY_PATH" ] && [ ! -x "$BINARY_PATH" ]; then
+            info "Migrating from diane-mcp to diane..."
+            return 0
+        fi
         success "DIANE ${INSTALLED_VERSION} is already installed and up to date"
         exit 0
     fi
@@ -156,7 +169,7 @@ install() {
     # Check if already up to date
     check_version
     
-    info "Installing DIANE MCP Server ${VERSION}..."
+    info "Installing DIANE ${VERSION}..."
     
     # Create installation directory
     mkdir -p "${INSTALL_DIR}/bin"
@@ -194,11 +207,18 @@ install() {
     # Extract
     tar -xzf "${TMP_DIR}/diane.tar.gz" -C "${TMP_DIR}"
     
-    # Install binary (tarball contains diane-mcp directly)
-    mv "${TMP_DIR}/diane-mcp" "${INSTALL_DIR}/bin/diane-mcp"
-    chmod +x "${INSTALL_DIR}/bin/diane-mcp"
+    # Clean up old binary name if exists (migration from diane-mcp to diane)
+    OLD_BINARY_PATH="${INSTALL_DIR}/bin/diane-mcp"
+    if [ -f "$OLD_BINARY_PATH" ]; then
+        info "Removing old binary (diane-mcp)..."
+        rm -f "$OLD_BINARY_PATH"
+    fi
     
-    success "DIANE MCP Server installed to ${INSTALL_DIR}/bin/diane-mcp"
+    # Install binary (tarball contains diane directly)
+    mv "${TMP_DIR}/diane" "${INSTALL_DIR}/bin/diane"
+    chmod +x "${INSTALL_DIR}/bin/diane"
+    
+    success "DIANE installed to ${INSTALL_DIR}/bin/diane"
     
     # Check if bin is in PATH
     case ":${PATH}:" in
@@ -219,20 +239,20 @@ install() {
     success "Installation complete!"
     echo ""
     echo "  Version: ${VERSION}"
-    echo "  Binary:  ${INSTALL_DIR}/bin/diane-mcp"
+    echo "  Binary:  ${INSTALL_DIR}/bin/diane"
     echo ""
     echo "Directory structure:"
     echo "  ${INSTALL_DIR}/"
-    echo "  ├── bin/          # diane-mcp binary"
+    echo "  ├── bin/          # diane binary"
     echo "  ├── secrets/      # API keys and config files"
     echo "  ├── tools/        # Helper scripts (actualbudget-cli.mjs, etc.)"
     echo "  ├── data/         # Persistent data"
     echo "  └── logs/         # Log files"
     echo ""
     echo "Next steps:"
-    echo "  1. Configure your MCP client to use: ${INSTALL_DIR}/bin/diane-mcp"
+    echo "  1. Configure your AI client to use: ${INSTALL_DIR}/bin/diane"
     echo "  2. Copy secrets to: ${INSTALL_DIR}/secrets/"
-    echo "  3. Run: diane-mcp --help"
+    echo "  3. Run: diane --help"
     echo ""
 }
 
@@ -251,9 +271,11 @@ uninstall() {
     
     info "Uninstalling DIANE from ${INSTALL_DIR}..."
     
+    # Remove both old and new binary names
+    rm -f "${INSTALL_DIR}/bin/diane"
     rm -f "${INSTALL_DIR}/bin/diane-mcp"
     
-    success "DIANE MCP Server uninstalled"
+    success "DIANE uninstalled"
     warn "Data directory preserved at ${INSTALL_DIR}/data"
     echo "  To remove completely: rm -rf ${INSTALL_DIR}"
 }
@@ -264,10 +286,10 @@ version() {
     INSTALLED_VERSION=$(get_installed_version)
     
     if [ -n "$INSTALLED_VERSION" ]; then
-        echo "DIANE MCP Server ${INSTALLED_VERSION}"
-        echo "Installed at: ${INSTALL_DIR}/bin/diane-mcp"
+        echo "DIANE ${INSTALLED_VERSION}"
+        echo "Installed at: ${INSTALL_DIR}/bin/diane"
     else
-        echo "DIANE MCP Server is not installed"
+        echo "DIANE is not installed"
         echo "Run: curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh"
     fi
 }
@@ -293,14 +315,14 @@ main() {
             echo "DIANE Installer v1.1.0"
             ;;
         --help|-h)
-            echo "DIANE MCP Server Installer"
+            echo "DIANE Installer"
             echo ""
             echo "Usage: $0 [command]"
             echo ""
             echo "Commands:"
-            echo "  install     Install or upgrade DIANE MCP Server (default)"
+            echo "  install     Install or upgrade DIANE (default)"
             echo "  upgrade     Upgrade to latest version (same as install)"
-            echo "  uninstall   Remove DIANE MCP Server"
+            echo "  uninstall   Remove DIANE"
             echo "  version     Show installed version"
             echo ""
             echo "Environment variables:"

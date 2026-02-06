@@ -1,6 +1,6 @@
-# DIANE MCP Server
+# Installing Diane
 
-A unified MCP (Model Context Protocol) server that provides 69+ native tools for personal automation and integrates with external MCP servers.
+Your personal AI assistant for automating life's tedious tasks.
 
 ## Quick Install
 
@@ -8,9 +8,9 @@ A unified MCP (Model Context Protocol) server that provides 69+ native tools for
 curl -fsSL https://raw.githubusercontent.com/Emergent-Comapny/diane/main/install.sh | sh
 ```
 
-This installs the latest version to `~/.diane/bin/diane-mcp`.
+This installs the latest version to `~/.diane/bin/diane`.
 
-### Custom Installation
+### Options
 
 ```bash
 # Install specific version
@@ -31,9 +31,11 @@ Download binaries from [GitHub Releases](https://github.com/Emergent-Comapny/dia
 | Linux    | x86_64 | `diane-linux-amd64.tar.gz` |
 | Linux    | ARM64 | `diane-linux-arm64.tar.gz` |
 
-## Configuration
+## Connect to Your AI
 
-### OpenCode Integration
+Diane speaks MCP, so it works with any compatible AI client.
+
+### OpenCode
 
 Add to your `opencode.json`:
 
@@ -41,13 +43,13 @@ Add to your `opencode.json`:
 {
   "mcp": {
     "diane": {
-      "command": ["~/.diane/bin/diane-mcp"]
+      "command": ["~/.diane/bin/diane"]
     }
   }
 }
 ```
 
-### Claude Desktop Integration
+### Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -55,13 +57,13 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "diane": {
-      "command": "/Users/YOUR_USERNAME/.diane/bin/diane-mcp"
+      "command": "/Users/YOUR_USERNAME/.diane/bin/diane"
     }
   }
 }
 ```
 
-## Native Tools (69+)
+## Available Tools (69+)
 
 ### Apple (macOS only)
 - `reminders_list_reminders` - List Apple Reminders
@@ -119,9 +121,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 - `job_enable` / `job_disable` - Toggle jobs
 - `job_logs` - View execution logs
 
-## MCP Proxy
+## Proxy Other Tools
 
-DIANE also proxies other MCP servers configured in `~/.diane/mcp-config.json`:
+Diane can also proxy other MCP servers. Configure them in `~/.diane/mcp-config.json`:
 
 ```json
 {

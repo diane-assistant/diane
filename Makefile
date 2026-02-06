@@ -1,8 +1,8 @@
-# DIANE MCP Server Makefile
+# DIANE Makefile
 # Usage: make [target]
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-BINARY_NAME := diane-mcp
+BINARY_NAME := diane
 BUILD_DIR := dist
 SERVER_DIR := server/mcp
 
@@ -85,7 +85,7 @@ version:
 
 ## Show help
 help:
-	@echo "DIANE MCP Server Build System"
+	@echo "DIANE Build System"
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""
