@@ -5,7 +5,7 @@ Your personal AI assistant for automating life's tedious tasks.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/diane-assitant/diane/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/diane-assistant/diane/main/install.sh | sh
 ```
 
 Works on macOS and Linux. The installer auto-detects your platform and installs to `~/.diane/bin/`.
@@ -69,7 +69,7 @@ Each capability requires its own credentials. Place config files in `~/.diane/se
 
 | Capability | Config File | Notes |
 |------------|-------------|-------|
-| Google (Gmail, Drive, Calendar) | — | Uses [gog](https://github.com/diane-assitant/gog) CLI for auth |
+| Google (Gmail, Drive, Calendar) | — | Uses [gog](https://github.com/diane-assistant/gog) CLI for auth |
 | Apple (Reminders, Contacts) | — | macOS only, uses `remindctl` and `contacts-cli` |
 | Banking | `enablebanking-config.json` | PSD2 Open Banking credentials |
 | Budgets | `actualbudget-config.json` | Actual Budget server URL |
@@ -85,10 +85,10 @@ See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 
 | Platform | Architecture | Download |
 |----------|--------------|----------|
-| macOS | Apple Silicon | [diane-darwin-arm64.tar.gz](https://github.com/diane-assitant/diane/releases/latest/download/diane-darwin-arm64.tar.gz) |
-| macOS | Intel | [diane-darwin-amd64.tar.gz](https://github.com/diane-assitant/diane/releases/latest/download/diane-darwin-amd64.tar.gz) |
-| Linux | x64 | [diane-linux-amd64.tar.gz](https://github.com/diane-assitant/diane/releases/latest/download/diane-linux-amd64.tar.gz) |
-| Linux | ARM64 | [diane-linux-arm64.tar.gz](https://github.com/diane-assitant/diane/releases/latest/download/diane-linux-arm64.tar.gz) |
+| macOS | Apple Silicon | [diane-darwin-arm64.tar.gz](https://github.com/diane-assistant/diane/releases/latest/download/diane-darwin-arm64.tar.gz) |
+| macOS | Intel | [diane-darwin-amd64.tar.gz](https://github.com/diane-assistant/diane/releases/latest/download/diane-darwin-amd64.tar.gz) |
+| Linux | x64 | [diane-linux-amd64.tar.gz](https://github.com/diane-assistant/diane/releases/latest/download/diane-linux-amd64.tar.gz) |
+| Linux | ARM64 | [diane-linux-arm64.tar.gz](https://github.com/diane-assistant/diane/releases/latest/download/diane-linux-arm64.tar.gz) |
 
 ```bash
 tar xzf diane-*.tar.gz
@@ -98,7 +98,7 @@ mkdir -p ~/.diane/bin && mv diane ~/.diane/bin/
 ## Build from Source
 
 ```bash
-git clone https://github.com/diane-assitant/diane.git
+git clone https://github.com/diane-assistant/diane.git
 cd diane
 make build && make install
 ```

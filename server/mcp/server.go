@@ -11,16 +11,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/diane-assitant/diane/internal/db"
-	"github.com/diane-assitant/diane/internal/mcpproxy"
-	"github.com/diane-assitant/diane/mcp/tools/apple"
-	"github.com/diane-assitant/diane/mcp/tools/finance"
-	githubbot "github.com/diane-assitant/diane/mcp/tools/github"
-	"github.com/diane-assitant/diane/mcp/tools/google"
-	"github.com/diane-assitant/diane/mcp/tools/infrastructure"
-	"github.com/diane-assitant/diane/mcp/tools/notifications"
-	"github.com/diane-assitant/diane/mcp/tools/places"
-	"github.com/diane-assitant/diane/mcp/tools/weather"
+	"github.com/diane-assistant/diane/internal/db"
+	"github.com/diane-assistant/diane/internal/mcpproxy"
+	"github.com/diane-assistant/diane/mcp/tools/apple"
+	"github.com/diane-assistant/diane/mcp/tools/finance"
+	githubbot "github.com/diane-assistant/diane/mcp/tools/github"
+	"github.com/diane-assistant/diane/mcp/tools/google"
+	"github.com/diane-assistant/diane/mcp/tools/infrastructure"
+	"github.com/diane-assistant/diane/mcp/tools/notifications"
+	"github.com/diane-assistant/diane/mcp/tools/places"
+	"github.com/diane-assistant/diane/mcp/tools/weather"
 )
 
 // MCP Server for Diane

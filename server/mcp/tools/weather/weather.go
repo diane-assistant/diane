@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const userAgent = "diane github.com/diane-assitant/diane"
+const userAgent = "diane github.com/diane-assistant/diane"
 
 // Tool represents an MCP tool definition
 type Tool struct {

@@ -1,4 +1,4 @@
-module github.com/diane-assitant/diane
+module github.com/diane-assistant/diane
 
 go 1.25.5
 
