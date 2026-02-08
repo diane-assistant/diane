@@ -1,5 +1,8 @@
 import Foundation
 import AppKit
+import os.log
+
+private let logger = Logger(subsystem: "com.diane.DianeMenu", category: "UpdateChecker")
 
 /// Checks for updates from GitHub releases and handles auto-update
 @MainActor
@@ -20,6 +23,9 @@ class UpdateChecker: ObservableObject {
     private let checkInterval: TimeInterval = 180 // Check every 3 minutes
     private var hasStarted = false
     private var downloadAssetURL: URL?
+    
+    // Reference to status monitor to pause during updates
+    weak var statusMonitor: StatusMonitor?
     
     // Minimum version that has the Unix socket API required by DianeMenu
     // Versions before this don't have the API and will break DianeMenu
@@ -128,10 +134,18 @@ class UpdateChecker: ObservableObject {
     
     /// Perform the auto-update
     func performUpdate() async {
+        logger.info("performUpdate called")
+        
         guard let assetURL = downloadAssetURL else {
+            logger.error("No download URL available")
             updateError = "No download URL available"
             return
         }
+        
+        logger.info("Starting update from: \(assetURL.absoluteString)")
+        
+        // Pause status monitor during update to prevent error flashing
+        statusMonitor?.isPaused = true
         
         isUpdating = true
         updateError = nil
@@ -198,7 +212,7 @@ class UpdateChecker: ObservableObject {
             try startDiane()
             
             // Wait for it to start
-            try await Task.sleep(nanoseconds: 2_000_000_000)
+            try await Task.sleep(nanoseconds: 3_000_000_000)
             
             updateProgress = 1.0
             updateStatus = "Update complete!"
@@ -207,7 +221,12 @@ class UpdateChecker: ObservableObject {
             // Clean up backup after successful start
             try? fm.removeItem(atPath: backupPath)
             
+            // Resume status monitor and refresh
+            statusMonitor?.isPaused = false
+            await statusMonitor?.refresh()
+            
         } catch {
+            logger.error("Update failed: \(error.localizedDescription)")
             updateError = error.localizedDescription
             updateStatus = "Update failed"
             
@@ -217,6 +236,9 @@ class UpdateChecker: ObservableObject {
                 try? fm.moveItem(atPath: backupPath, toPath: binaryPath)
                 try? startDiane()
             }
+            
+            // Resume status monitor even on failure
+            statusMonitor?.isPaused = false
         }
         
         // Keep showing status for a moment, then reset

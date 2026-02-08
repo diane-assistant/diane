@@ -11,6 +11,7 @@ class StatusMonitor: ObservableObject {
     @Published var connectionState: ConnectionState = .unknown
     @Published var isLoading: Bool = false
     @Published var lastError: String?
+    @Published var isPaused: Bool = false  // Pause during updates
     
     private let client = DianeClient()
     private var pollTimer: Timer?
@@ -90,6 +91,12 @@ class StatusMonitor: ObservableObject {
     
     /// Refresh status
     func refresh() async {
+        // Skip refresh if paused (e.g., during update)
+        guard !isPaused else {
+            logger.info("Refresh skipped - monitor is paused")
+            return
+        }
+        
         let socketExists = client.socketExists
         let processRunning = client.isProcessRunning()
         logger.info("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)")

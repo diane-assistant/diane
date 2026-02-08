@@ -75,44 +75,43 @@ struct MenuBarView: View {
                 .cornerRadius(6)
             } else {
                 // Show update available button
-                Button {
-                    Task { await updateChecker.performUpdate() }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .foregroundStyle(.orange)
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .foregroundStyle(.orange)
+                    
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Update Available")
+                            .font(.subheadline.weight(.medium))
                         
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Update Available")
-                                .font(.subheadline.weight(.medium))
-                            
-                            // Show current -> new version
-                            HStack(spacing: 4) {
-                                Text(statusMonitor.status.version)
-                                    .font(.caption.monospaced())
-                                Image(systemName: "arrow.right")
-                                    .font(.caption2)
-                                Text(version)
-                                    .font(.caption.monospaced().weight(.medium))
-                            }
-                            .foregroundStyle(.secondary)
+                        // Show current -> new version
+                        HStack(spacing: 4) {
+                            Text(statusMonitor.status.version)
+                                .font(.caption.monospaced())
+                            Image(systemName: "arrow.right")
+                                .font(.caption2)
+                            Text(version)
+                                .font(.caption.monospaced().weight(.medium))
                         }
-                        
-                        Spacer()
-                        
-                        Text("Install")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.orange)
-                            .cornerRadius(4)
+                        .foregroundStyle(.secondary)
                     }
-                    .padding(8)
-                    .background(Color.orange.opacity(0.1))
-                    .cornerRadius(6)
+                    
+                    Spacer()
+                    
+                    Text("Install")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.orange)
+                        .cornerRadius(4)
                 }
-                .buttonStyle(.plain)
+                .padding(8)
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(6)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    Task { await updateChecker.performUpdate() }
+                }
             }
         }
     }

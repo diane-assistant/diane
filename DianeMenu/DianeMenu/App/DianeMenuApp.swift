@@ -26,6 +26,10 @@ struct DianeMenuApp: App {
                     // Start services once, with a small delay to let UI settle
                     guard !hasStarted else { return }
                     hasStarted = true
+                    
+                    // Wire up the status monitor reference for pausing during updates
+                    updateChecker.statusMonitor = statusMonitor
+                    
                     try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
                     await statusMonitor.start()
                     await updateChecker.start()
