@@ -202,13 +202,15 @@ func (d *DianeStatusProvider) GetJobs() ([]api.Job, error) {
 	jobs := make([]api.Job, 0, len(dbJobs))
 	for _, j := range dbJobs {
 		jobs = append(jobs, api.Job{
-			ID:        j.ID,
-			Name:      j.Name,
-			Command:   j.Command,
-			Schedule:  j.Schedule,
-			Enabled:   j.Enabled,
-			CreatedAt: j.CreatedAt,
-			UpdatedAt: j.UpdatedAt,
+			ID:         j.ID,
+			Name:       j.Name,
+			Command:    j.Command,
+			Schedule:   j.Schedule,
+			Enabled:    j.Enabled,
+			ActionType: j.ActionType,
+			AgentName:  j.AgentName,
+			CreatedAt:  j.CreatedAt,
+			UpdatedAt:  j.UpdatedAt,
 		})
 	}
 	return jobs, nil
@@ -277,6 +279,53 @@ func (d *DianeStatusProvider) ToggleJob(name string, enabled bool) error {
 	}
 
 	return database.UpdateJob(job.ID, nil, nil, &enabled)
+}
+
+// GetAgentLogs returns agent communication logs
+func (d *DianeStatusProvider) GetAgentLogs(agentName string, limit int) ([]api.AgentLog, error) {
+	database, err := getDB()
+	if err != nil {
+		return nil, err
+	}
+	defer database.Close()
+
+	var agentNamePtr *string
+	if agentName != "" {
+		agentNamePtr = &agentName
+	}
+
+	dbLogs, err := database.ListAgentLogs(agentNamePtr, limit, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	logs := make([]api.AgentLog, len(dbLogs))
+	for i, l := range dbLogs {
+		logs[i] = api.AgentLog{
+			ID:          l.ID,
+			AgentName:   l.AgentName,
+			Direction:   l.Direction,
+			MessageType: l.MessageType,
+			Content:     l.Content,
+			Error:       l.Error,
+			DurationMs:  l.DurationMs,
+			Timestamp:   l.CreatedAt,
+		}
+	}
+
+	return logs, nil
+}
+
+// CreateAgentLog creates an agent communication log entry
+func (d *DianeStatusProvider) CreateAgentLog(agentName, direction, messageType string, content, errMsg *string, durationMs *int) error {
+	database, err := getDB()
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	_, err = database.CreateAgentLog(agentName, direction, messageType, content, errMsg, durationMs)
+	return err
 }
 
 // GetAllTools returns detailed information about all available tools

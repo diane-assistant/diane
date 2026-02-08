@@ -7,6 +7,8 @@ struct Job: Codable, Identifiable {
     let command: String
     let schedule: String
     let enabled: Bool
+    let actionType: String?
+    let agentName: String?
     let createdAt: Date
     let updatedAt: Date
     
@@ -16,6 +18,8 @@ struct Job: Codable, Identifiable {
         case command
         case schedule
         case enabled
+        case actionType = "action_type"
+        case agentName = "agent_name"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -23,6 +27,11 @@ struct Job: Codable, Identifiable {
     /// Human-readable description of the cron schedule
     var scheduleDescription: String {
         CronParser.describe(schedule)
+    }
+    
+    /// Whether this is an agent action job
+    var isAgentAction: Bool {
+        actionType == "agent"
     }
 }
 

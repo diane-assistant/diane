@@ -18,13 +18,15 @@ type DB struct {
 
 // Job represents a scheduled job in the database
 type Job struct {
-	ID        int64
-	Name      string
-	Command   string
-	Schedule  string
-	Enabled   bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         int64
+	Name       string
+	Command    string
+	Schedule   string
+	Enabled    bool
+	ActionType string  // "shell" (default) or "agent"
+	AgentName  *string // Agent name for agent actions
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // JobExecution represents a job execution log entry
@@ -89,6 +91,8 @@ func (db *DB) migrate() error {
 		command TEXT NOT NULL,
 		schedule TEXT NOT NULL,
 		enabled INTEGER NOT NULL DEFAULT 1,
+		action_type TEXT NOT NULL DEFAULT 'shell',
+		agent_name TEXT,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
@@ -128,6 +132,20 @@ func (db *DB) migrate() error {
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE SET NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS agent_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		agent_name TEXT NOT NULL,
+		direction TEXT NOT NULL,
+		message_type TEXT NOT NULL,
+		content TEXT,
+		error TEXT,
+		duration_ms INTEGER,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_agent_logs_agent_name ON agent_logs(agent_name);
+	CREATE INDEX IF NOT EXISTS idx_agent_logs_created_at ON agent_logs(created_at);
 	`
 
 	_, err := db.conn.Exec(schema)

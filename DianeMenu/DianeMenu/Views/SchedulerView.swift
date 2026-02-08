@@ -313,6 +313,21 @@ struct JobRow: View {
                             .font(.system(.body, design: .monospaced))
                             .fontWeight(.medium)
                         
+                        // Action type badge
+                        if job.isAgentAction {
+                            HStack(spacing: 2) {
+                                Image(systemName: "person.fill")
+                                    .font(.caption2)
+                                Text(job.agentName ?? "agent")
+                                    .font(.caption2)
+                            }
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.15))
+                            .cornerRadius(4)
+                        }
+                        
                         if !job.enabled {
                             Text("disabled")
                                 .font(.caption2)

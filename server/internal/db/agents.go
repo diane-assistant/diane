@@ -156,3 +156,101 @@ func (db *DB) ToggleAgent(id int64, enabled bool) error {
 	_, err := db.conn.Exec("UPDATE agents SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", val, id)
 	return err
 }
+
+// AgentLog represents a log entry for agent communication
+type AgentLog struct {
+	ID          int64
+	AgentName   string
+	Direction   string // "request" or "response"
+	MessageType string // "ping", "run", "list", etc.
+	Content     *string
+	Error       *string
+	DurationMs  *int
+	CreatedAt   time.Time
+}
+
+// CreateAgentLog creates a new agent log entry
+func (db *DB) CreateAgentLog(agentName, direction, messageType string, content, errMsg *string, durationMs *int) (*AgentLog, error) {
+	query := `
+		INSERT INTO agent_logs (agent_name, direction, message_type, content, error, duration_ms, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		RETURNING id, created_at
+	`
+
+	log := &AgentLog{
+		AgentName:   agentName,
+		Direction:   direction,
+		MessageType: messageType,
+		Content:     content,
+		Error:       errMsg,
+		DurationMs:  durationMs,
+	}
+
+	err := db.conn.QueryRow(query, agentName, direction, messageType, content, errMsg, durationMs).Scan(&log.ID, &log.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	return log, nil
+}
+
+// ListAgentLogs returns agent logs, optionally filtered by agent name
+func (db *DB) ListAgentLogs(agentName *string, limit, offset int) ([]*AgentLog, error) {
+	var query string
+	var args []interface{}
+
+	if agentName != nil && *agentName != "" {
+		query = `
+			SELECT id, agent_name, direction, message_type, content, error, duration_ms, created_at
+			FROM agent_logs
+			WHERE agent_name = ?
+			ORDER BY created_at DESC
+			LIMIT ? OFFSET ?
+		`
+		args = []interface{}{*agentName, limit, offset}
+	} else {
+		query = `
+			SELECT id, agent_name, direction, message_type, content, error, duration_ms, created_at
+			FROM agent_logs
+			ORDER BY created_at DESC
+			LIMIT ? OFFSET ?
+		`
+		args = []interface{}{limit, offset}
+	}
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []*AgentLog
+	for rows.Next() {
+		log := &AgentLog{}
+		if err := rows.Scan(
+			&log.ID,
+			&log.AgentName,
+			&log.Direction,
+			&log.MessageType,
+			&log.Content,
+			&log.Error,
+			&log.DurationMs,
+			&log.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		logs = append(logs, log)
+	}
+
+	return logs, nil
+}
+
+// DeleteOldAgentLogs deletes logs older than the specified duration
+func (db *DB) DeleteOldAgentLogs(olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-olderThan)
+	result, err := db.conn.Exec("DELETE FROM agent_logs WHERE created_at < ?", cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

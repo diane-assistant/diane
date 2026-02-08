@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/diane-assistant/diane/internal/acp"
 )
 
 // MCPServerStatus represents the status of an MCP server
@@ -47,13 +49,15 @@ type ToolInfo struct {
 
 // Job represents a scheduled job
 type Job struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Command   string    `json:"command"`
-	Schedule  string    `json:"schedule"`
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	Command    string    `json:"command"`
+	Schedule   string    `json:"schedule"`
+	Enabled    bool      `json:"enabled"`
+	ActionType string    `json:"action_type,omitempty"`
+	AgentName  *string   `json:"agent_name,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // JobExecution represents a job execution log entry
@@ -79,6 +83,20 @@ type StatusProvider interface {
 	GetJobs() ([]Job, error)
 	GetJobLogs(jobName string, limit int) ([]JobExecution, error)
 	ToggleJob(name string, enabled bool) error
+	GetAgentLogs(agentName string, limit int) ([]AgentLog, error)
+	CreateAgentLog(agentName, direction, messageType string, content, errMsg *string, durationMs *int) error
+}
+
+// AgentLog represents an agent communication log entry
+type AgentLog struct {
+	ID          int64     `json:"id"`
+	AgentName   string    `json:"agent_name"`
+	Direction   string    `json:"direction"`
+	MessageType string    `json:"message_type"`
+	Content     *string   `json:"content,omitempty"`
+	Error       *string   `json:"error,omitempty"`
+	DurationMs  *int      `json:"duration_ms,omitempty"`
+	Timestamp   time.Time `json:"timestamp"`
 }
 
 // Server is the Unix socket HTTP API server
@@ -87,6 +105,8 @@ type Server struct {
 	listener       net.Listener
 	server         *http.Server
 	statusProvider StatusProvider
+	acpManager     *acp.Manager
+	gallery        *acp.Gallery
 }
 
 // NewServer creates a new API server
@@ -103,9 +123,23 @@ func NewServer(statusProvider StatusProvider) (*Server, error) {
 		return nil, fmt.Errorf("failed to remove existing socket: %w", err)
 	}
 
+	// Initialize ACP manager
+	acpManager, err := acp.NewManager()
+	if err != nil {
+		log.Printf("Warning: failed to initialize ACP manager: %v", err)
+	}
+
+	// Initialize Gallery
+	gallery, err := acp.NewGallery()
+	if err != nil {
+		log.Printf("Warning: failed to initialize ACP gallery: %v", err)
+	}
+
 	return &Server{
 		socketPath:     socketPath,
 		statusProvider: statusProvider,
+		acpManager:     acpManager,
+		gallery:        gallery,
 	}, nil
 }
 
@@ -132,6 +166,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/jobs", s.handleJobs)
 	mux.HandleFunc("/jobs/logs", s.handleJobLogs)
 	mux.HandleFunc("/jobs/", s.handleJobAction)
+	mux.HandleFunc("/agents", s.handleAgents)
+	mux.HandleFunc("/agents/logs", s.handleAgentLogs)
+	mux.HandleFunc("/agents/", s.handleAgentAction)
+	mux.HandleFunc("/gallery", s.handleGallery)
+	mux.HandleFunc("/gallery/", s.handleGalleryAction)
 
 	s.server = &http.Server{Handler: mux}
 
@@ -376,4 +415,370 @@ func GetPIDFromFile(pidPath string) (int, error) {
 		return 0, err
 	}
 	return strconv.Atoi(strings.TrimSpace(string(data)))
+}
+
+// handleAgents handles listing and adding ACP agents
+func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.acpManager == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "ACP manager not initialized"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		agents := s.acpManager.ListAgents()
+		json.NewEncoder(w).Encode(agents)
+
+	case http.MethodPost:
+		var agent acp.AgentConfig
+		if err := json.NewDecoder(r.Body).Decode(&agent); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body: " + err.Error()})
+			return
+		}
+
+		if agent.Name == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Agent name is required"})
+			return
+		}
+
+		if agent.URL == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Agent URL is required"})
+			return
+		}
+
+		if err := s.acpManager.AddAgent(agent); err != nil {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "created", "agent": agent.Name})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+	}
+}
+
+// handleAgentAction handles actions on specific ACP agents
+func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.acpManager == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "ACP manager not initialized"})
+		return
+	}
+
+	// Parse the path: /agents/{name} or /agents/{name}/action
+	path := strings.TrimPrefix(r.URL.Path, "/agents/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) == 0 || parts[0] == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Agent name required"})
+		return
+	}
+
+	agentName := parts[0]
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	switch action {
+	case "": // GET /agents/{name} or DELETE /agents/{name}
+		switch r.Method {
+		case http.MethodGet:
+			agent, err := s.acpManager.GetAgent(agentName)
+			if err != nil {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(agent)
+
+		case http.MethodDelete:
+			if err := s.acpManager.RemoveAgent(agentName); err != nil {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "agent": agentName})
+
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		}
+
+	case "toggle":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		var body struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+			return
+		}
+
+		if err := s.acpManager.EnableAgent(agentName, body.Enabled); err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "agent": agentName, "enabled": body.Enabled})
+
+	case "test":
+		if r.Method != http.MethodPost && r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		result, err := s.acpManager.TestAgent(agentName)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(result)
+
+	case "run":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		var body struct {
+			Prompt    string `json:"prompt"`
+			AgentName string `json:"agent_name,omitempty"` // Remote agent name (optional)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+			return
+		}
+
+		if body.Prompt == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Prompt is required"})
+			return
+		}
+
+		client, err := s.acpManager.GetClient(agentName)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		// Get the remote agent name to use
+		remoteAgentName := body.AgentName
+		if remoteAgentName == "" {
+			// Try to get the first available agent
+			agents, err := client.ListAgents(1, 0)
+			if err != nil || len(agents) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "No agents available on the remote server"})
+				return
+			}
+			remoteAgentName = agents[0].Name
+		}
+
+		run, err := client.RunSync(remoteAgentName, body.Prompt)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(run)
+
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Unknown action: " + action})
+	}
+}
+
+// handleAgentLogs handles agent communication logs
+func (s *Server) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	agentName := r.URL.Query().Get("agent_name")
+	limitStr := r.URL.Query().Get("limit")
+	limit := 50
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	logs, err := s.statusProvider.GetAgentLogs(agentName, limit)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(logs)
+}
+
+// handleGallery handles the agent gallery endpoints
+func (s *Server) handleGallery(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.gallery == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Gallery not initialized"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		// Check for ?featured=true query param
+		if r.URL.Query().Get("featured") == "true" {
+			entries, err := s.gallery.ListFeatured()
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(entries)
+		} else {
+			entries, err := s.gallery.ListGallery()
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(entries)
+		}
+
+	case http.MethodPost:
+		// POST /gallery refreshes the registry
+		if err := s.gallery.RefreshRegistry(); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "refreshed"})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+	}
+}
+
+// handleGalleryAction handles actions on gallery entries
+func (s *Server) handleGalleryAction(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.gallery == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Gallery not initialized"})
+		return
+	}
+
+	// Parse path: /gallery/{id} or /gallery/{id}/install
+	path := strings.TrimPrefix(r.URL.Path, "/gallery/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) == 0 || parts[0] == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Agent ID required"})
+		return
+	}
+
+	agentID := parts[0]
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	switch action {
+	case "": // GET /gallery/{id}
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		info, err := s.gallery.GetInstallInfo(agentID)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(info)
+
+	case "install":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		// Get install info
+		info, err := s.gallery.GetInstallInfo(agentID)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		// Add to configured agents (doesn't actually install, just configures)
+		if s.acpManager != nil {
+			agentConfig := acp.AgentConfig{
+				Name:        agentID,
+				Type:        "stdio", // Local agents use stdio
+				Command:     info.Command,
+				Args:        info.Args,
+				Env:         info.Env,
+				Enabled:     true,
+				Description: info.Description,
+			}
+
+			if err := s.acpManager.AddAgent(agentConfig); err != nil {
+				// Agent might already exist
+				if !strings.Contains(err.Error(), "already exists") {
+					w.WriteHeader(http.StatusConflict)
+					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+					return
+				}
+			}
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":      "configured",
+			"agent":       agentID,
+			"install_cmd": info.InstallCmd,
+			"info":        info,
+		})
+
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Unknown action: " + action})
+	}
 }
