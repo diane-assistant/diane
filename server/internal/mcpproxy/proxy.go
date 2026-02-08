@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // ServerConfig represents configuration for an MCP server
@@ -233,6 +234,103 @@ func (p *Proxy) monitorClient(client *MCPClient) {
 			}
 		}
 	}
+}
+
+// ServerStatus represents the status of an MCP server
+type ServerStatus struct {
+	Name      string `json:"name"`
+	Enabled   bool   `json:"enabled"`
+	Connected bool   `json:"connected"`
+	ToolCount int    `json:"tool_count"`
+	Error     string `json:"error,omitempty"`
+}
+
+// GetServerStatuses returns the status of all configured MCP servers (non-blocking)
+func (p *Proxy) GetServerStatuses() []ServerStatus {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var statuses []ServerStatus
+
+	for _, server := range p.config.Servers {
+		status := ServerStatus{
+			Name:    server.Name,
+			Enabled: server.Enabled,
+		}
+
+		if client, ok := p.clients[server.Name]; ok {
+			status.Connected = client.IsConnected()
+			// Use cached tool count for fast response
+			cachedCount := client.GetCachedToolCount()
+			if cachedCount >= 0 {
+				status.ToolCount = cachedCount
+			}
+			// If no cache, trigger async refresh (only one at a time)
+			if cachedCount < 0 && status.Connected {
+				client.TriggerAsyncRefresh(30 * time.Second)
+			}
+		}
+
+		statuses = append(statuses, status)
+	}
+
+	return statuses
+}
+
+// RestartServer restarts a specific MCP server by name
+func (p *Proxy) RestartServer(name string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Find the server config
+	var serverConfig *ServerConfig
+	for _, s := range p.config.Servers {
+		if s.Name == name {
+			serverConfig = &s
+			break
+		}
+	}
+
+	if serverConfig == nil {
+		return fmt.Errorf("server not found: %s", name)
+	}
+
+	// Close existing client if running
+	if client, ok := p.clients[name]; ok {
+		log.Printf("Stopping MCP server for restart: %s", name)
+		client.Close()
+		delete(p.clients, name)
+	}
+
+	// Start fresh
+	if serverConfig.Enabled && serverConfig.Type == "stdio" {
+		log.Printf("Restarting MCP server: %s", name)
+		if err := p.startClientUnlocked(*serverConfig); err != nil {
+			return fmt.Errorf("failed to restart %s: %w", name, err)
+		}
+	}
+
+	// Notify about tool changes
+	select {
+	case p.notifyChan <- name:
+	default:
+	}
+
+	return nil
+}
+
+// GetTotalToolCount returns the total number of tools across all connected servers (uses cache)
+func (p *Proxy) GetTotalToolCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	total := 0
+	for _, client := range p.clients {
+		if count := client.GetCachedToolCount(); count > 0 {
+			total += count
+		}
+	}
+	return total
 }
 
 // Close shuts down all MCP clients

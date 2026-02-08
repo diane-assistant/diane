@@ -8,23 +8,28 @@ import (
 	"log"
 	"os/exec"
 	"sync"
+	"syscall"
+	"time"
 )
 
 // MCPClient represents a connection to an MCP server
 type MCPClient struct {
-	Name       string
-	cmd        *exec.Cmd
-	stdin      io.WriteCloser
-	stdout     io.ReadCloser
-	stderr     io.ReadCloser
-	encoder    *json.Encoder
-	decoder    *json.Decoder
-	mu         sync.Mutex
-	notifyChan chan string // Channel for notifications (method names)
-	responseCh chan MCPResponse
-	nextID     int
-	pendingMu  sync.Mutex
-	pending    map[interface{}]chan MCPResponse
+	Name            string
+	cmd             *exec.Cmd
+	stdin           io.WriteCloser
+	stdout          io.ReadCloser
+	stderr          io.ReadCloser
+	encoder         *json.Encoder
+	decoder         *json.Decoder
+	mu              sync.Mutex
+	notifyChan      chan string // Channel for notifications (method names)
+	responseCh      chan MCPResponse
+	nextID          int
+	pendingMu       sync.Mutex
+	pending         map[interface{}]chan MCPResponse
+	cachedToolCount int  // Cached tool count for fast status queries
+	toolCountValid  bool // Whether cached count is valid
+	refreshing      bool // Whether a cache refresh is in progress
 }
 
 // MCPRequest represents a JSON-RPC request
@@ -149,15 +154,20 @@ func (c *MCPClient) messageLoop() {
 		// Check if it's a response (has ID) or notification (has method, no ID)
 		if msg.ID != nil {
 			// It's a response - route to pending request
+			// Normalize ID to int (JSON decodes numbers as float64)
+			var reqID interface{} = msg.ID
+			if f, ok := msg.ID.(float64); ok {
+				reqID = int(f)
+			}
 			c.pendingMu.Lock()
-			if ch, ok := c.pending[msg.ID]; ok {
+			if ch, ok := c.pending[reqID]; ok {
 				ch <- MCPResponse{
 					JSONRPC: msg.JSONRPC,
 					ID:      msg.ID,
 					Result:  msg.Result,
 					Error:   msg.Error,
 				}
-				delete(c.pending, msg.ID)
+				delete(c.pending, reqID)
 			} else {
 				log.Printf("[%s] Received response for unknown request ID: %v", c.Name, msg.ID)
 			}
@@ -174,8 +184,13 @@ func (c *MCPClient) messageLoop() {
 	}
 }
 
-// sendRequest sends a request and waits for response asynchronously
+// sendRequest sends a request and waits for response with timeout
 func (c *MCPClient) sendRequest(method string, params json.RawMessage) (json.RawMessage, error) {
+	return c.sendRequestWithTimeout(method, params, 5*time.Second)
+}
+
+// sendRequestWithTimeout sends a request and waits for response with a specific timeout
+func (c *MCPClient) sendRequestWithTimeout(method string, params json.RawMessage, timeout time.Duration) (json.RawMessage, error) {
 	// Generate unique request ID
 	c.mu.Lock()
 	c.nextID++
@@ -207,17 +222,22 @@ func (c *MCPClient) sendRequest(method string, params json.RawMessage) (json.Raw
 		return nil, fmt.Errorf("failed to send %s: %w", method, err)
 	}
 
-	// Wait for response
-	resp, ok := <-respCh
-	if !ok {
-		return nil, fmt.Errorf("connection closed while waiting for response")
+	// Wait for response with timeout
+	select {
+	case resp, ok := <-respCh:
+		if !ok {
+			return nil, fmt.Errorf("connection closed while waiting for response")
+		}
+		if resp.Error != nil {
+			return nil, fmt.Errorf("%s error: %s", method, resp.Error.Message)
+		}
+		return resp.Result, nil
+	case <-time.After(timeout):
+		c.pendingMu.Lock()
+		delete(c.pending, reqID)
+		c.pendingMu.Unlock()
+		return nil, fmt.Errorf("%s timed out after %v", method, timeout)
 	}
-
-	if resp.Error != nil {
-		return nil, fmt.Errorf("%s error: %s", method, resp.Error.Message)
-	}
-
-	return resp.Result, nil
 }
 
 // initialize sends the initialize request to the MCP server
@@ -254,7 +274,12 @@ func (c *MCPClient) initialize() error {
 
 // ListTools requests the list of tools from the MCP server
 func (c *MCPClient) ListTools() ([]map[string]interface{}, error) {
-	result, err := c.sendRequest("tools/list", nil)
+	return c.ListToolsWithTimeout(5 * time.Second)
+}
+
+// ListToolsWithTimeout requests the list of tools with a custom timeout
+func (c *MCPClient) ListToolsWithTimeout(timeout time.Duration) ([]map[string]interface{}, error) {
+	result, err := c.sendRequestWithTimeout("tools/list", nil, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +291,51 @@ func (c *MCPClient) ListTools() ([]map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to parse tools: %w", err)
 	}
 
+	// Cache the tool count
+	c.mu.Lock()
+	c.cachedToolCount = len(toolsResult.Tools)
+	c.toolCountValid = true
+	c.mu.Unlock()
+
 	return toolsResult.Tools, nil
+}
+
+// GetCachedToolCount returns the cached tool count (fast, non-blocking)
+// Returns -1 if no cached value is available
+func (c *MCPClient) GetCachedToolCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.toolCountValid {
+		return c.cachedToolCount
+	}
+	return -1
+}
+
+// InvalidateToolCache marks the tool cache as invalid
+func (c *MCPClient) InvalidateToolCache() {
+	c.mu.Lock()
+	c.toolCountValid = false
+	c.mu.Unlock()
+}
+
+// TriggerAsyncRefresh starts a background cache refresh if one isn't already running
+// Returns true if a refresh was started, false if one was already in progress
+func (c *MCPClient) TriggerAsyncRefresh(timeout time.Duration) bool {
+	c.mu.Lock()
+	if c.refreshing {
+		c.mu.Unlock()
+		return false
+	}
+	c.refreshing = true
+	c.mu.Unlock()
+
+	go func() {
+		_, _ = c.ListToolsWithTimeout(timeout)
+		c.mu.Lock()
+		c.refreshing = false
+		c.mu.Unlock()
+	}()
+	return true
 }
 
 // CallTool calls a tool on the MCP server
@@ -285,6 +354,17 @@ func (c *MCPClient) CallTool(toolName string, arguments map[string]interface{}) 
 // NotificationChan returns the channel for receiving notifications from this client
 func (c *MCPClient) NotificationChan() <-chan string {
 	return c.notifyChan
+}
+
+// IsConnected returns true if the MCP client process is still running
+func (c *MCPClient) IsConnected() bool {
+	if c.cmd == nil || c.cmd.Process == nil {
+		return false
+	}
+	// Check if process has exited by sending signal 0
+	// This is the standard Unix way to check if a process is alive
+	err := c.cmd.Process.Signal(syscall.Signal(0))
+	return err == nil
 }
 
 // Close terminates the MCP server process

@@ -3,8 +3,10 @@
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BINARY_NAME := diane
+CTL_BINARY_NAME := diane-ctl
 BUILD_DIR := dist
 SERVER_DIR := server/mcp
+CTL_DIR := server/cmd/diane-ctl
 
 # Build flags
 LDFLAGS := -s -w -X main.Version=$(VERSION)
@@ -13,16 +15,22 @@ CGO_ENABLED := 0
 # Platforms
 PLATFORMS := darwin-arm64 darwin-amd64 linux-amd64 linux-arm64
 
-.PHONY: all build clean install test release help
+.PHONY: all build build-ctl clean install test release help
 
 ## Default target
-all: build
+all: build build-ctl
 
 ## Build for current platform
 build:
 	@echo "Building $(BINARY_NAME) $(VERSION)..."
 	cd $(SERVER_DIR) && go build -ldflags="$(LDFLAGS)" -o ../../$(BUILD_DIR)/$(BINARY_NAME) .
 	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME)"
+
+## Build diane-ctl for current platform
+build-ctl:
+	@echo "Building $(CTL_BINARY_NAME)..."
+	cd $(CTL_DIR) && go build -ldflags="$(LDFLAGS)" -o ../../../$(BUILD_DIR)/$(CTL_BINARY_NAME) .
+	@echo "Built: $(BUILD_DIR)/$(CTL_BINARY_NAME)"
 
 ## Build for all platforms
 build-all: $(PLATFORMS)
@@ -58,12 +66,15 @@ release: build-all
 	@echo "Release archives created in $(BUILD_DIR)/"
 
 ## Install locally
-install: build
+install: build build-ctl
 	@echo "Installing to ~/.diane/bin/..."
 	@mkdir -p ~/.diane/bin
 	@cp $(BUILD_DIR)/$(BINARY_NAME) ~/.diane/bin/$(BINARY_NAME)
+	@cp $(BUILD_DIR)/$(CTL_BINARY_NAME) ~/.diane/bin/$(CTL_BINARY_NAME)
 	@chmod +x ~/.diane/bin/$(BINARY_NAME)
+	@chmod +x ~/.diane/bin/$(CTL_BINARY_NAME)
 	@echo "Installed: ~/.diane/bin/$(BINARY_NAME)"
+	@echo "Installed: ~/.diane/bin/$(CTL_BINARY_NAME)"
 
 ## Run tests
 test:
@@ -90,7 +101,8 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build       Build for current platform (default)"
+	@echo "  build       Build diane for current platform"
+	@echo "  build-ctl   Build diane-ctl for current platform"
 	@echo "  build-all   Build for all platforms (darwin/linux, arm64/amd64)"
 	@echo "  release     Build all platforms and create release archives"
 	@echo "  install     Install to ~/.diane/bin/"
@@ -101,6 +113,6 @@ help:
 	@echo "  help        Show this help"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make                    # Build for current platform"
+	@echo "  make                    # Build diane and diane-ctl for current platform"
 	@echo "  make install            # Build and install locally"
 	@echo "  make VERSION=v1.0.0 release  # Create versioned release"

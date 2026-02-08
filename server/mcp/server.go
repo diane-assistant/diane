@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/diane-assistant/diane/internal/api"
 	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/mcpproxy"
 	"github.com/diane-assistant/diane/mcp/tools/apple"
@@ -39,6 +40,437 @@ var financeProvider *finance.Provider
 var placesProvider *places.Provider
 var weatherProvider *weather.Provider
 var githubProvider *githubbot.Provider
+var apiServer *api.Server
+var startTime time.Time
+
+// DianeStatusProvider implements api.StatusProvider
+type DianeStatusProvider struct{}
+
+func (d *DianeStatusProvider) GetStatus() api.Status {
+	status := api.Status{
+		Running:       true,
+		PID:           os.Getpid(),
+		Version:       Version,
+		StartedAt:     startTime,
+		UptimeSeconds: int64(time.Since(startTime).Seconds()),
+		Uptime:        formatDuration(time.Since(startTime)),
+	}
+
+	// Get all MCP servers (builtin providers + external)
+	status.MCPServers = d.getAllMCPServers()
+
+	// Calculate total tools
+	status.TotalTools = d.countTotalTools()
+
+	return status
+}
+
+func (d *DianeStatusProvider) GetMCPServers() []api.MCPServerStatus {
+	return d.getAllMCPServers()
+}
+
+// getAllMCPServers returns all MCP servers including builtin providers
+func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
+	var servers []api.MCPServerStatus
+
+	// Add builtin providers as MCP servers
+	if appleProvider != nil {
+		servers = append(servers, api.MCPServerStatus{
+			Name:      "apple",
+			Enabled:   true,
+			Connected: true,
+			ToolCount: len(appleProvider.Tools()),
+			Builtin:   true,
+		})
+	}
+
+	if googleProvider != nil {
+		servers = append(servers, api.MCPServerStatus{
+			Name:      "google",
+			Enabled:   true,
+			Connected: true,
+			ToolCount: len(googleProvider.Tools()),
+			Builtin:   true,
+		})
+	}
+
+	if infrastructureProvider != nil {
+		servers = append(servers, api.MCPServerStatus{
+			Name:      "infrastructure",
+			Enabled:   true,
+			Connected: true,
+			ToolCount: len(infrastructureProvider.Tools()),
+			Builtin:   true,
+		})
+	}
+
+	if notificationsProvider != nil {
+		servers = append(servers, api.MCPServerStatus{
+			Name:      "notifications",
+			Enabled:   true,
+			Connected: true,
+			ToolCount: len(notificationsProvider.Tools()),
+			Builtin:   true,
+		})
+	}
+
+	if financeProvider != nil {
+		servers = append(servers, api.MCPServerStatus{
+			Name:      "finance",
+			Enabled:   true,
+			Connected: true,
+			ToolCount: len(financeProvider.Tools()),
+			Builtin:   true,
+		})
+	}
+
+	if placesProvider != nil {
+		servers = append(servers, api.MCPServerStatus{
+			Name:      "places",
+			Enabled:   true,
+			Connected: true,
+			ToolCount: len(placesProvider.Tools()),
+			Builtin:   true,
+		})
+	}
+
+	if weatherProvider != nil {
+		servers = append(servers, api.MCPServerStatus{
+			Name:      "weather",
+			Enabled:   true,
+			Connected: true,
+			ToolCount: len(weatherProvider.Tools()),
+			Builtin:   true,
+		})
+	}
+
+	if githubProvider != nil {
+		servers = append(servers, api.MCPServerStatus{
+			Name:      "github",
+			Enabled:   true,
+			Connected: true,
+			ToolCount: len(githubProvider.Tools()),
+			Builtin:   true,
+		})
+	}
+
+	// Add external MCP servers from proxy
+	if proxy != nil {
+		proxyStatuses := proxy.GetServerStatuses()
+		for _, s := range proxyStatuses {
+			servers = append(servers, api.MCPServerStatus{
+				Name:      s.Name,
+				Enabled:   s.Enabled,
+				Connected: s.Connected,
+				ToolCount: s.ToolCount,
+				Error:     s.Error,
+				Builtin:   false,
+			})
+		}
+	}
+
+	return servers
+}
+
+func (d *DianeStatusProvider) RestartMCPServer(name string) error {
+	if proxy == nil {
+		return fmt.Errorf("proxy not initialized")
+	}
+	return proxy.RestartServer(name)
+}
+
+func (d *DianeStatusProvider) ReloadConfig() error {
+	if proxy == nil {
+		return fmt.Errorf("proxy not initialized")
+	}
+	return proxy.Reload()
+}
+
+// GetJobs returns all scheduled jobs
+func (d *DianeStatusProvider) GetJobs() ([]api.Job, error) {
+	database, err := getDB()
+	if err != nil {
+		return nil, err
+	}
+	defer database.Close()
+
+	dbJobs, err := database.ListJobs(false)
+	if err != nil {
+		return nil, err
+	}
+
+	jobs := make([]api.Job, 0, len(dbJobs))
+	for _, j := range dbJobs {
+		jobs = append(jobs, api.Job{
+			ID:        j.ID,
+			Name:      j.Name,
+			Command:   j.Command,
+			Schedule:  j.Schedule,
+			Enabled:   j.Enabled,
+			CreatedAt: j.CreatedAt,
+			UpdatedAt: j.UpdatedAt,
+		})
+	}
+	return jobs, nil
+}
+
+// GetJobLogs returns job execution logs
+func (d *DianeStatusProvider) GetJobLogs(jobName string, limit int) ([]api.JobExecution, error) {
+	database, err := getDB()
+	if err != nil {
+		return nil, err
+	}
+	defer database.Close()
+
+	var jobID *int64
+	var jobNameMap = make(map[int64]string)
+
+	// Build job name map for all jobs
+	allJobs, _ := database.ListJobs(false)
+	for _, j := range allJobs {
+		jobNameMap[j.ID] = j.Name
+	}
+
+	// If filtering by job name, get the job ID
+	if jobName != "" {
+		job, err := database.GetJobByName(jobName)
+		if err != nil {
+			return nil, fmt.Errorf("job not found: %s", jobName)
+		}
+		jobID = &job.ID
+	}
+
+	dbExecs, err := database.ListJobExecutions(jobID, limit, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	execs := make([]api.JobExecution, 0, len(dbExecs))
+	for _, e := range dbExecs {
+		exec := api.JobExecution{
+			ID:        e.ID,
+			JobID:     e.JobID,
+			JobName:   jobNameMap[e.JobID],
+			StartedAt: e.StartedAt,
+			EndedAt:   e.EndedAt,
+			ExitCode:  e.ExitCode,
+			Stdout:    e.Stdout,
+			Stderr:    e.Stderr,
+			Error:     e.Error,
+		}
+		execs = append(execs, exec)
+	}
+	return execs, nil
+}
+
+// ToggleJob enables or disables a job
+func (d *DianeStatusProvider) ToggleJob(name string, enabled bool) error {
+	database, err := getDB()
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	job, err := database.GetJobByName(name)
+	if err != nil {
+		return fmt.Errorf("job not found: %s", name)
+	}
+
+	return database.UpdateJob(job.ID, nil, nil, &enabled)
+}
+
+// GetAllTools returns detailed information about all available tools
+func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
+	var tools []api.ToolInfo
+
+	// Built-in job tools
+	builtinTools := []struct{ name, desc string }{
+		{"job_list", "List all cron jobs with their schedules and enabled status"},
+		{"job_add", "Add a new cron job with schedule and command"},
+		{"job_enable", "Enable a previously disabled job"},
+		{"job_disable", "Disable a job without deleting it"},
+		{"job_delete", "Delete a job permanently"},
+		{"job_pause", "Pause all job execution temporarily"},
+		{"job_resume", "Resume paused job execution"},
+		{"job_logs", "View recent execution logs for a job"},
+		{"server_status", "Get Diane server status and statistics"},
+	}
+	for _, t := range builtinTools {
+		tools = append(tools, api.ToolInfo{
+			Name:        t.name,
+			Description: t.desc,
+			Server:      "diane",
+			Builtin:     true,
+		})
+	}
+
+	// Apple tools
+	if appleProvider != nil {
+		for _, tool := range appleProvider.Tools() {
+			tools = append(tools, api.ToolInfo{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Server:      "apple",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// Google tools
+	if googleProvider != nil {
+		for _, tool := range googleProvider.Tools() {
+			tools = append(tools, api.ToolInfo{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Server:      "google",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// Infrastructure tools
+	if infrastructureProvider != nil {
+		for _, tool := range infrastructureProvider.Tools() {
+			tools = append(tools, api.ToolInfo{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Server:      "infrastructure",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// Notifications tools
+	if notificationsProvider != nil {
+		for _, tool := range notificationsProvider.Tools() {
+			tools = append(tools, api.ToolInfo{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Server:      "notifications",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// Finance tools
+	if financeProvider != nil {
+		for _, tool := range financeProvider.Tools() {
+			tools = append(tools, api.ToolInfo{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Server:      "finance",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// Places tools
+	if placesProvider != nil {
+		for _, tool := range placesProvider.Tools() {
+			tools = append(tools, api.ToolInfo{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Server:      "places",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// Weather tools
+	if weatherProvider != nil {
+		for _, tool := range weatherProvider.Tools() {
+			tools = append(tools, api.ToolInfo{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Server:      "weather",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// GitHub tools
+	if githubProvider != nil {
+		for _, tool := range githubProvider.Tools() {
+			tools = append(tools, api.ToolInfo{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Server:      "github",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// External MCP server tools (from proxy)
+	if proxy != nil {
+		proxiedTools, err := proxy.ListAllTools()
+		if err == nil {
+			for _, t := range proxiedTools {
+				name, _ := t["name"].(string)
+				desc, _ := t["description"].(string)
+				server, _ := t["_server"].(string)
+				tools = append(tools, api.ToolInfo{
+					Name:        name,
+					Description: desc,
+					Server:      server,
+					Builtin:     false,
+				})
+			}
+		}
+	}
+
+	return tools
+}
+
+func (d *DianeStatusProvider) countTotalTools() int {
+	total := 9 // Built-in job tools count
+
+	if appleProvider != nil {
+		total += len(appleProvider.Tools())
+	}
+	if googleProvider != nil {
+		total += len(googleProvider.Tools())
+	}
+	if infrastructureProvider != nil {
+		total += len(infrastructureProvider.Tools())
+	}
+	if notificationsProvider != nil {
+		total += len(notificationsProvider.Tools())
+	}
+	if financeProvider != nil {
+		total += len(financeProvider.Tools())
+	}
+	if placesProvider != nil {
+		total += len(placesProvider.Tools())
+	}
+	if weatherProvider != nil {
+		total += len(weatherProvider.Tools())
+	}
+	if githubProvider != nil {
+		total += len(githubProvider.Tools())
+	}
+	if proxy != nil {
+		total += proxy.GetTotalToolCount()
+	}
+
+	return total
+}
+
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	h := d / time.Hour
+	d -= h * time.Hour
+	m := d / time.Minute
+	d -= m * time.Minute
+	s := d / time.Second
+
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm %ds", h, m, s)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
+}
 
 type MCPRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -59,12 +491,63 @@ type MCPError struct {
 	Message string `json:"message"`
 }
 
+// acquireLock tries to acquire an exclusive lock on the lock file.
+// Returns the file handle if successful, error if another instance is running.
+func acquireLock(lockPath string) (*os.File, error) {
+	// Ensure the directory exists
+	dir := filepath.Dir(lockPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create lock directory: %w", err)
+	}
+
+	// Open or create the lock file
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open lock file: %w", err)
+	}
+
+	// Try to acquire an exclusive lock (non-blocking)
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to acquire lock (another instance running?): %w", err)
+	}
+
+	// Write our PID to the lock file for debugging
+	file.Truncate(0)
+	file.Seek(0, 0)
+	fmt.Fprintf(file, "%d\n", os.Getpid())
+
+	return file, nil
+}
+
+// releaseLock releases the file lock and removes the lock file.
+func releaseLock(file *os.File, lockPath string) {
+	if file != nil {
+		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		file.Close()
+	}
+	os.Remove(lockPath)
+}
+
 func main() {
-	// Write PID file for reload command
+	// Track start time
+	startTime = time.Now()
+
+	// Get home directory for pid/lock files
 	home, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatalf("Failed to get home directory: %v", err)
 	}
+
+	// Single instance check: try to acquire exclusive lock on lock file
+	lockFile := filepath.Join(home, ".diane", "diane.lock")
+	lock, err := acquireLock(lockFile)
+	if err != nil {
+		log.Fatalf("Another instance of Diane is already running: %v", err)
+	}
+	defer releaseLock(lock, lockFile)
+
+	// Write PID file for reload command
 	pidFile := filepath.Join(home, ".diane", "mcp.pid")
 	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
 		log.Printf("Warning: Failed to write PID file: %v", err)
@@ -156,6 +639,24 @@ func main() {
 	} else {
 		log.Printf("GitHub Bot tools initialized successfully")
 	}
+
+	// Start the Unix socket API server for companion app
+	statusProvider := &DianeStatusProvider{}
+	apiServer, err = api.NewServer(statusProvider)
+	if err != nil {
+		log.Printf("Warning: Failed to create API server: %v", err)
+	} else {
+		if err := apiServer.Start(); err != nil {
+			log.Printf("Warning: Failed to start API server: %v", err)
+		} else {
+			log.Printf("API server started successfully")
+		}
+	}
+	defer func() {
+		if apiServer != nil {
+			apiServer.Stop()
+		}
+	}()
 
 	// MCP servers communicate via stdin/stdout
 	decoder := json.NewDecoder(os.Stdin)
