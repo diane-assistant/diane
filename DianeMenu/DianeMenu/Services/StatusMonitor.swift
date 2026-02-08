@@ -20,6 +20,7 @@ class StatusMonitor: ObservableObject {
     
     init() {
         logger.info("StatusMonitor initialized")
+        FileLogger.shared.info("StatusMonitor initialized", category: "StatusMonitor")
     }
     
     deinit {
@@ -104,6 +105,7 @@ class StatusMonitor: ObservableObject {
         // Quick check if socket exists
         guard socketExists || processRunning else {
             logger.info("No socket and no process, setting disconnected")
+            FileLogger.shared.info("No socket and no process, setting disconnected", category: "StatusMonitor")
             connectionState = .disconnected
             status = .empty
             return
@@ -115,14 +117,18 @@ class StatusMonitor: ObservableObject {
             connectionState = .connected
             lastError = nil
             logger.info("Status refresh successful: connected, \(newStatus.totalTools) tools")
+            FileLogger.shared.info("Status refresh successful: connected, \(newStatus.totalTools) tools", category: "StatusMonitor")
         } catch {
             logger.error("Status refresh failed: \(error.localizedDescription)")
+            FileLogger.shared.error("Status refresh failed: \(error.localizedDescription)", category: "StatusMonitor")
             // Fallback: check if process is running via PID
             if client.isProcessRunning() {
                 logger.warning("Process running but API failed, setting error state")
+                FileLogger.shared.warning("Process running but API failed, setting error state", category: "StatusMonitor")
                 connectionState = .error("API unavailable")
             } else {
                 logger.info("Process not running, setting disconnected")
+                FileLogger.shared.info("Process not running, setting disconnected", category: "StatusMonitor")
                 connectionState = .disconnected
                 status = .empty
             }

@@ -35,6 +35,12 @@ struct MenuBarView: View {
                 
                 Divider()
                     .padding(.vertical, 8)
+            } else {
+                // Debug: show connection state
+                Text("Connection: \(String(describing: statusMonitor.connectionState))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
             }
             
             // Footer

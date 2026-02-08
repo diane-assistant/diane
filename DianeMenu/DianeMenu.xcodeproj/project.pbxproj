@@ -21,6 +21,7 @@
 		012 /* SchedulerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113 /* SchedulerView.swift */; };
 		013 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114 /* Agent.swift */; };
 		014 /* AgentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115 /* AgentsView.swift */; };
+		015 /* FileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 116 /* FileLogger.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +41,7 @@
 		113 /* SchedulerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerView.swift; sourceTree = "<group>"; };
 		114 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
 		115 /* AgentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsView.swift; sourceTree = "<group>"; };
+		116 /* FileLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLogger.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -109,6 +111,7 @@
 				105 /* StatusMonitor.swift */,
 				109 /* UpdateChecker.swift */,
 				111 /* WindowManager.swift */,
+				116 /* FileLogger.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -213,6 +216,7 @@
 				012 /* SchedulerView.swift in Sources */,
 				013 /* Agent.swift in Sources */,
 				014 /* AgentsView.swift in Sources */,
+				015 /* FileLogger.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

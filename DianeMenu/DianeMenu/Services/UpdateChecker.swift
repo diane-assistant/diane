@@ -100,6 +100,9 @@ class UpdateChecker: ObservableObject {
             let isCompatible = !isNewerVersion(minimumCompatibleVersion, than: release.tagName)
             updateAvailable = isNewer && isCompatible
             
+            logger.info("Update check: latest=\(release.tagName), current=\(currentVersion), isNewer=\(isNewer), isCompatible=\(isCompatible), updateAvailable=\(self.updateAvailable)")
+            FileLogger.shared.info("Update check: latest=\(release.tagName), current=\(currentVersion), isNewer=\(isNewer), isCompatible=\(isCompatible), updateAvailable=\(self.updateAvailable)", category: "UpdateChecker")
+            
         } catch {
             // Silently fail - don't bother user with update check errors
             print("Update check failed: \(error)")
@@ -408,6 +411,8 @@ class UpdateChecker: ObservableObject {
                     process.waitUntilExit()
                     
                     guard process.terminationStatus == 0 else {
+                        logger.warning("getCurrentVersionFromAPI: curl failed with status \(process.terminationStatus)")
+                        FileLogger.shared.warning("getCurrentVersionFromAPI: curl failed with status \(process.terminationStatus)", category: "UpdateChecker")
                         continuation.resume(returning: "unknown")
                         return
                     }
@@ -417,11 +422,18 @@ class UpdateChecker: ObservableObject {
                     // Parse JSON to extract version
                     if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                        let version = json["version"] as? String {
+                        logger.info("getCurrentVersionFromAPI: got version \(version)")
+                        FileLogger.shared.info("getCurrentVersionFromAPI: got version \(version)", category: "UpdateChecker")
                         continuation.resume(returning: version)
                     } else {
+                        let rawData = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+                        logger.warning("getCurrentVersionFromAPI: failed to parse JSON")
+                        FileLogger.shared.warning("getCurrentVersionFromAPI: failed to parse JSON, raw=\(rawData.prefix(200))", category: "UpdateChecker")
                         continuation.resume(returning: "unknown")
                     }
                 } catch {
+                    logger.error("getCurrentVersionFromAPI: error \(error.localizedDescription)")
+                    FileLogger.shared.error("getCurrentVersionFromAPI: error \(error.localizedDescription)", category: "UpdateChecker")
                     continuation.resume(returning: "unknown")
                 }
             }
@@ -440,6 +452,9 @@ class UpdateChecker: ObservableObject {
         let maxLen = max(latestParts.count, currentParts.count)
         let latestPadded = latestParts + Array(repeating: 0, count: maxLen - latestParts.count)
         let currentPadded = currentParts + Array(repeating: 0, count: maxLen - currentParts.count)
+        
+        logger.debug("isNewerVersion: latest='\(latest)' -> '\(latestClean)' -> \(latestPadded), current='\(current)' -> '\(currentClean)' -> \(currentPadded)")
+        FileLogger.shared.debug("isNewerVersion: latest='\(latest)' -> '\(latestClean)' -> \(latestPadded), current='\(current)' -> '\(currentClean)' -> \(currentPadded)", category: "UpdateChecker")
         
         for i in 0..<maxLen {
             if latestPadded[i] > currentPadded[i] {
