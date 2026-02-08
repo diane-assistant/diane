@@ -12,7 +12,7 @@ ACP_DIR := server/cmd/acp-server
 
 # Build flags
 LDFLAGS := -s -w -X main.Version=$(VERSION)
-CGO_ENABLED := 0
+CGO_ENABLED := 1
 
 # Platforms
 PLATFORMS := darwin-arm64 darwin-amd64 linux-amd64 linux-arm64

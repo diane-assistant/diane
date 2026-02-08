@@ -19,6 +19,8 @@
 		010 /* WindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111 /* WindowManager.swift */; };
 		011 /* Job.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112 /* Job.swift */; };
 		012 /* SchedulerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113 /* SchedulerView.swift */; };
+		013 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114 /* Agent.swift */; };
+		014 /* AgentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115 /* AgentsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +38,8 @@
 		111 /* WindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManager.swift; sourceTree = "<group>"; };
 		112 /* Job.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Job.swift; sourceTree = "<group>"; };
 		113 /* SchedulerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerView.swift; sourceTree = "<group>"; };
+		114 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
+		115 /* AgentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -93,6 +97,7 @@
 				103 /* SettingsView.swift */,
 				110 /* ToolsBrowserView.swift */,
 				113 /* SchedulerView.swift */,
+				115 /* AgentsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -113,6 +118,7 @@
 			children = (
 				106 /* DianeStatus.swift */,
 				112 /* Job.swift */,
+				114 /* Agent.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -205,6 +211,8 @@
 				010 /* WindowManager.swift in Sources */,
 				011 /* Job.swift in Sources */,
 				012 /* SchedulerView.swift in Sources */,
+				013 /* Agent.swift in Sources */,
+				014 /* AgentsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

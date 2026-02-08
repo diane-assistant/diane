@@ -4,6 +4,31 @@ import os.log
 
 private let logger = Logger(subsystem: "com.diane.DianeMenu", category: "DianeClient")
 
+/// Creates a JSONDecoder configured for Go's time.Time format
+private func makeGoCompatibleDecoder() -> JSONDecoder {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .custom { decoder in
+        let container = try decoder.singleValueContainer()
+        let dateString = try container.decode(String.self)
+        
+        // Try ISO8601 with fractional seconds first (Go's default format)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: dateString) {
+            return date
+        }
+        
+        // Fallback to without fractional seconds
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: dateString) {
+            return date
+        }
+        
+        throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode date: \(dateString)")
+    }
+    return decoder
+}
+
 /// Client for communicating with Diane via Unix socket
 class DianeClient {
     private let socketPath: String
@@ -67,8 +92,8 @@ class DianeClient {
             "http://localhost\(path)"
         ]
         
-        if method == "POST" {
-            args.insert(contentsOf: ["-X", "POST"], at: 0)
+        if method != "GET" {
+            args.insert(contentsOf: ["-X", method], at: 0)
             if let body = body {
                 args.insert(contentsOf: ["-H", "Content-Type: application/json"], at: 0)
                 args.insert(contentsOf: ["-d", String(data: body, encoding: .utf8) ?? "{}"], at: 0)
@@ -96,7 +121,7 @@ class DianeClient {
                         let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
                         let errorStr = String(data: errorData, encoding: .utf8) ?? "unknown"
                         logger.error("curl failed with exit code \(exitCode): \(errorStr)")
-                        continuation.resume(throwing: DianeClientError.requestFailed)
+                        continuation.resume(throwing: DianeClientError.requestFailed(path: path, exitCode: exitCode, stderr: errorStr))
                         return
                     }
                     
@@ -126,11 +151,8 @@ class DianeClient {
         logger.info("Getting status...")
         let data = try await request("/status")
         
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        
         do {
-            let status = try decoder.decode(DianeStatus.self, from: data)
+            let status = try makeGoCompatibleDecoder().decode(DianeStatus.self, from: data)
             logger.info("Status decoded successfully: running=\(status.running), version=\(status.version)")
             return status
         } catch {
@@ -167,9 +189,7 @@ class DianeClient {
     /// Get all scheduled jobs
     func getJobs() async throws -> [Job] {
         let data = try await request("/jobs")
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode([Job].self, from: data)
+        return try makeGoCompatibleDecoder().decode([Job].self, from: data)
     }
     
     /// Get job execution logs
@@ -179,9 +199,7 @@ class DianeClient {
             path += "&job_name=\(jobName)"
         }
         let data = try await request(path)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode([JobExecution].self, from: data)
+        return try makeGoCompatibleDecoder().decode([JobExecution].self, from: data)
     }
     
     /// Toggle a job's enabled status
@@ -244,10 +262,97 @@ class DianeClient {
             throw DianeClientError.signalFailed
         }
     }
+    
+    // MARK: - Agents API
+    
+    /// Get all configured agents
+    func getAgents() async throws -> [AgentConfig] {
+        let data = try await request("/agents")
+        return try JSONDecoder().decode([AgentConfig].self, from: data)
+    }
+    
+    /// Get a specific agent by name
+    func getAgent(name: String) async throws -> AgentConfig {
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let data = try await request("/agents/\(encodedName)")
+        return try JSONDecoder().decode(AgentConfig.self, from: data)
+    }
+    
+    /// Test an agent's connectivity
+    func testAgent(name: String) async throws -> AgentTestResult {
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let data = try await request("/agents/\(encodedName)/test", method: "POST", timeout: 10)
+        return try JSONDecoder().decode(AgentTestResult.self, from: data)
+    }
+    
+    /// Toggle an agent's enabled status
+    func toggleAgent(name: String, enabled: Bool) async throws {
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let body = ["enabled": enabled]
+        let bodyData = try JSONEncoder().encode(body)
+        _ = try await request("/agents/\(encodedName)/toggle", method: "POST", body: bodyData)
+    }
+    
+    /// Run a prompt on an agent
+    func runAgentPrompt(agentName: String, prompt: String, remoteAgentName: String? = nil) async throws -> AgentRunResult {
+        let encodedName = agentName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentName
+        var body: [String: String] = ["prompt": prompt]
+        if let remoteAgent = remoteAgentName {
+            body["agent_name"] = remoteAgent
+        }
+        let bodyData = try JSONEncoder().encode(body)
+        let data = try await request("/agents/\(encodedName)/run", method: "POST", timeout: 60, body: bodyData)
+        return try makeGoCompatibleDecoder().decode(AgentRunResult.self, from: data)
+    }
+    
+    /// Get agent communication logs
+    func getAgentLogs(agentName: String? = nil, limit: Int = 50) async throws -> [AgentLog] {
+        var path = "/agents/logs?limit=\(limit)"
+        if let agentName = agentName {
+            let encodedName = agentName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? agentName
+            path += "&agent_name=\(encodedName)"
+        }
+        let data = try await request(path)
+        return try makeGoCompatibleDecoder().decode([AgentLog].self, from: data)
+    }
+    
+    /// Remove an agent
+    func removeAgent(name: String) async throws {
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        _ = try await request("/agents/\(encodedName)", method: "DELETE")
+    }
+    
+    // MARK: - Gallery API
+    
+    /// Get all available agents from the gallery
+    func getGallery(featured: Bool = false) async throws -> [GalleryEntry] {
+        let path = featured ? "/gallery?featured=true" : "/gallery"
+        let data = try await request(path)
+        return try JSONDecoder().decode([GalleryEntry].self, from: data)
+    }
+    
+    /// Install an agent from the gallery
+    func installGalleryAgent(id: String, name: String? = nil, workdir: String? = nil, port: Int? = nil) async throws -> GalleryInstallResponse {
+        var body: [String: Any] = [:]
+        if let name = name {
+            body["name"] = name
+        }
+        if let workdir = workdir {
+            body["workdir"] = workdir
+        }
+        if let port = port, port > 0 {
+            body["port"] = port
+            body["type"] = "acp"
+        }
+        
+        let bodyData = body.isEmpty ? nil : try JSONSerialization.data(withJSONObject: body)
+        let data = try await request("/gallery/\(id)/install", method: "POST", body: bodyData)
+        return try JSONDecoder().decode(GalleryInstallResponse.self, from: data)
+    }
 }
 
 enum DianeClientError: LocalizedError {
-    case requestFailed
+    case requestFailed(path: String, exitCode: Int32, stderr: String)
     case binaryNotFound
     case notRunning
     case stopFailed
@@ -255,8 +360,12 @@ enum DianeClientError: LocalizedError {
     
     var errorDescription: String? {
         switch self {
-        case .requestFailed:
-            return "Failed to communicate with Diane"
+        case .requestFailed(let path, let exitCode, let stderr):
+            if stderr.isEmpty {
+                return "Request to \(path) failed (exit code: \(exitCode))"
+            } else {
+                return "Request to \(path) failed: \(stderr)"
+            }
         case .binaryNotFound:
             return "Diane binary not found at ~/.diane/bin/diane"
         case .notRunning:

@@ -27,9 +27,11 @@ type MCPClient struct {
 	nextID          int
 	pendingMu       sync.Mutex
 	pending         map[interface{}]chan MCPResponse
-	cachedToolCount int  // Cached tool count for fast status queries
-	toolCountValid  bool // Whether cached count is valid
-	refreshing      bool // Whether a cache refresh is in progress
+	cachedToolCount int    // Cached tool count for fast status queries
+	toolCountValid  bool   // Whether cached count is valid
+	refreshing      bool   // Whether a cache refresh is in progress
+	lastError       string // Last error message
+	stderrOutput    string // Last stderr output (truncated)
 }
 
 // MCPRequest represents a JSON-RPC request
@@ -113,11 +115,27 @@ func NewMCPClient(name string, command string, args []string, env map[string]str
 		pending:    make(map[interface{}]chan MCPResponse),
 	}
 
-	// Start goroutine to log stderr output
+	// Start goroutine to log stderr output and capture it
 	go func() {
 		scanner := bufio.NewScanner(stderr)
+		var stderrLines []string
 		for scanner.Scan() {
-			log.Printf("[%s stderr] %s", name, scanner.Text())
+			line := scanner.Text()
+			log.Printf("[%s stderr] %s", name, line)
+			// Keep last few lines for error display
+			stderrLines = append(stderrLines, line)
+			if len(stderrLines) > 10 {
+				stderrLines = stderrLines[1:]
+			}
+			client.mu.Lock()
+			client.stderrOutput = ""
+			for _, l := range stderrLines {
+				if client.stderrOutput != "" {
+					client.stderrOutput += "\n"
+				}
+				client.stderrOutput += l
+			}
+			client.mu.Unlock()
 		}
 	}()
 
@@ -365,6 +383,27 @@ func (c *MCPClient) IsConnected() bool {
 	// This is the standard Unix way to check if a process is alive
 	err := c.cmd.Process.Signal(syscall.Signal(0))
 	return err == nil
+}
+
+// GetLastError returns the last error message for this client
+func (c *MCPClient) GetLastError() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastError
+}
+
+// SetError sets the last error message
+func (c *MCPClient) SetError(err string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastError = err
+}
+
+// GetStderrOutput returns the last stderr output
+func (c *MCPClient) GetStderrOutput() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.stderrOutput
 }
 
 // Close terminates the MCP server process

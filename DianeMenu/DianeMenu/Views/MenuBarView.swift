@@ -274,6 +274,34 @@ struct MenuBarView: View {
             .buttonStyle(.plain)
             .help("View scheduled jobs")
             
+            // Agents row
+            Button {
+                NSApp.keyWindow?.close()
+                WindowManager.shared.openAgents()
+            } label: {
+                HStack(spacing: 16) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "person.3.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("ACP Agents")
+                            .font(.subheadline)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 6)
+                .background(Color.primary.opacity(0.05))
+                .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .help("Manage ACP agents")
+            
             HStack {
                 Spacer()
                 

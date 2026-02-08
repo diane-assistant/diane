@@ -41,11 +41,12 @@ struct AgentTestResult: Codable {
     let enabled: Bool
     let status: String  // "connected", "unreachable", "error", "disabled"
     let error: String?
+    let version: String?
     let agentCount: Int?
     let agents: [String]?
     
     enum CodingKeys: String, CodingKey {
-        case name, url, workdir, enabled, status, error
+        case name, url, workdir, enabled, status, error, version
         case agentCount = "agent_count"
         case agents
     }
@@ -62,6 +63,11 @@ struct AgentTestResult: Codable {
         case "disabled": return "gray"
         default: return "gray"
         }
+    }
+    
+    /// Formatted version string (trimmed)
+    var displayVersion: String? {
+        version?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -107,13 +113,208 @@ struct AgentLog: Codable, Identifiable {
 
 /// Response from running a prompt on an agent
 struct AgentRunResult: Codable {
-    let runId: String?
-    let status: String?
-    let output: String?
-    let error: String?
+    let agentName: String
+    let sessionId: String?
+    let runId: String
+    let status: String
+    let awaitRequest: String?
+    let output: [AgentMessage]
+    let error: AgentError?
+    let createdAt: Date
+    let finishedAt: Date?
     
     enum CodingKeys: String, CodingKey {
+        case agentName = "agent_name"
+        case sessionId = "session_id"
         case runId = "run_id"
-        case status, output, error
+        case status
+        case awaitRequest = "await_request"
+        case output
+        case error
+        case createdAt = "created_at"
+        case finishedAt = "finished_at"
+    }
+    
+    /// Get the text output from the run
+    var textOutput: String {
+        output.compactMap { message in
+            message.parts.compactMap { part in
+                if part.contentType == "text/plain" || part.contentType == nil || part.contentType == "" {
+                    return part.content
+                }
+                return nil
+            }.joined()
+        }.joined()
+    }
+    
+    /// Check if the run completed successfully
+    var isSuccess: Bool {
+        status == "completed" && error == nil
+    }
+    
+    /// Check if the run failed
+    var isFailed: Bool {
+        status == "failed" || error != nil
+    }
+}
+
+/// Represents a message in the agent output
+struct AgentMessage: Codable {
+    let role: String
+    let parts: [AgentMessagePart]
+    let createdAt: Date?
+    let completedAt: Date?
+    
+    enum CodingKeys: String, CodingKey {
+        case role, parts
+        case createdAt = "created_at"
+        case completedAt = "completed_at"
+    }
+}
+
+/// Represents a part of a message
+struct AgentMessagePart: Codable {
+    let name: String?
+    let contentType: String?
+    let content: String?
+    let contentEncoding: String?
+    let contentUrl: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case name
+        case contentType = "content_type"
+        case content
+        case contentEncoding = "content_encoding"
+        case contentUrl = "content_url"
+    }
+}
+
+/// Represents an error from the agent
+struct AgentError: Codable {
+    let code: String
+    let message: String
+    let data: AnyCodable?
+    
+    /// Format the error for display
+    var displayMessage: String {
+        if code.isEmpty {
+            return message
+        }
+        return "[\(code)] \(message)"
+    }
+}
+
+/// A type-erased Codable wrapper for arbitrary JSON data
+struct AnyCodable: Codable {
+    let value: Any
+    
+    init(_ value: Any) {
+        self.value = value
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        
+        if container.decodeNil() {
+            self.value = NSNull()
+        } else if let bool = try? container.decode(Bool.self) {
+            self.value = bool
+        } else if let int = try? container.decode(Int.self) {
+            self.value = int
+        } else if let double = try? container.decode(Double.self) {
+            self.value = double
+        } else if let string = try? container.decode(String.self) {
+            self.value = string
+        } else if let array = try? container.decode([AnyCodable].self) {
+            self.value = array.map { $0.value }
+        } else if let dict = try? container.decode([String: AnyCodable].self) {
+            self.value = dict.mapValues { $0.value }
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode value")
+        }
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        
+        switch value {
+        case is NSNull:
+            try container.encodeNil()
+        case let bool as Bool:
+            try container.encode(bool)
+        case let int as Int:
+            try container.encode(int)
+        case let double as Double:
+            try container.encode(double)
+        case let string as String:
+            try container.encode(string)
+        case let array as [Any]:
+            try container.encode(array.map { AnyCodable($0) })
+        case let dict as [String: Any]:
+            try container.encode(dict.mapValues { AnyCodable($0) })
+        default:
+            throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: encoder.codingPath, debugDescription: "Cannot encode value"))
+        }
+    }
+}
+
+/// Represents an agent available in the gallery
+struct GalleryEntry: Codable, Identifiable, Hashable {
+    var id: String { entryId }
+    
+    let entryId: String
+    let name: String
+    let description: String
+    let icon: String?
+    let category: String
+    let provider: String
+    let installType: String
+    let tags: [String]?
+    let featured: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case entryId = "id"
+        case name, description, icon, category, provider
+        case installType = "install_type"
+        case tags, featured
+    }
+    
+    // Hashable conformance
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(entryId)
+    }
+    
+    static func == (lhs: GalleryEntry, rhs: GalleryEntry) -> Bool {
+        lhs.entryId == rhs.entryId
+    }
+    
+    /// Provider display name with proper capitalization
+    var providerDisplayName: String {
+        switch provider.lowercased() {
+        case "anthropic": return "Anthropic"
+        case "google": return "Google"
+        case "microsoft": return "Microsoft"
+        case "openai": return "OpenAI"
+        case "sst": return "SST"
+        default: return provider.capitalized
+        }
+    }
+}
+
+/// Request to install an agent from the gallery
+struct GalleryInstallRequest: Codable {
+    let name: String?
+    let workdir: String?
+}
+
+/// Response from installing an agent
+struct GalleryInstallResponse: Codable {
+    let status: String
+    let agent: String
+    let installCmd: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case status, agent
+        case installCmd = "install_cmd"
     }
 }

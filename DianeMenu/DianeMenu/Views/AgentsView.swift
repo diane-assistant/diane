@@ -12,6 +12,17 @@ struct AgentsView: View {
     @State private var isRunningPrompt = false
     @State private var promptResult: AgentRunResult?
     
+    // Gallery state
+    @State private var showAddAgent = false
+    @State private var galleryEntries: [GalleryEntry] = []
+    @State private var isLoadingGallery = false
+    @State private var selectedGalleryEntry: GalleryEntry?
+    @State private var newAgentName = ""
+    @State private var newAgentWorkdir = ""
+    @State private var newAgentPort = ""
+    @State private var isInstalling = false
+    @State private var installError: String?
+    
     private let client = DianeClient()
     
     var body: some View {
@@ -55,6 +66,14 @@ struct AgentsView: View {
             
             Spacer()
             
+            // Add Agent button
+            Button {
+                showAddAgent = true
+                Task { await loadGallery() }
+            } label: {
+                Label("Add Agent", systemImage: "plus")
+            }
+            
             // Refresh button
             Button {
                 Task { await loadData() }
@@ -70,6 +89,9 @@ struct AgentsView: View {
                 .foregroundStyle(.secondary)
         }
         .padding()
+        .sheet(isPresented: $showAddAgent) {
+            addAgentSheet
+        }
     }
     
     // MARK: - Loading View
@@ -160,6 +182,9 @@ struct AgentsView: View {
                                 selectedAgent = agent
                                 promptResult = nil
                                 Task { await loadLogs(forAgent: agent.name) }
+                            },
+                            onRemove: {
+                                Task { await removeAgent(name: agent.name) }
                             }
                         )
                         Divider()
@@ -223,6 +248,37 @@ struct AgentsView: View {
                 }
                 .padding()
                 .background(Color(nsColor: .windowBackgroundColor))
+                
+                // Connection error section
+                if let result = testResults[agent.name], let error = result.error {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text("Connection Error")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Button {
+                                Task { await testAgent(agent) }
+                            } label: {
+                                Label("Retry", systemImage: "arrow.clockwise")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        
+                        Text(error)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.red.opacity(0.1))
+                            .cornerRadius(6)
+                    }
+                    .padding()
+                    .background(Color.orange.opacity(0.05))
+                }
                 
                 Divider()
                 
@@ -290,26 +346,29 @@ struct AgentsView: View {
                             Text("Error")
                                 .font(.caption.weight(.semibold))
                         }
-                        Text(error)
+                        Text(error.displayMessage)
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.red)
-                    } else if let output = result.output {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("Response")
-                                .font(.caption.weight(.semibold))
+                    } else {
+                        let output = result.textOutput
+                        if !output.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text("Response")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            ScrollView {
+                                Text(output)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: 150)
+                            .padding(8)
+                            .background(Color(nsColor: .textBackgroundColor))
+                            .cornerRadius(6)
                         }
-                        ScrollView {
-                            Text(output)
-                                .font(.system(.caption, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(maxHeight: 150)
-                        .padding(8)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .cornerRadius(6)
                     }
                 }
             }
@@ -401,6 +460,13 @@ struct AgentsView: View {
         
         do {
             agents = try await client.getAgents()
+            
+            // Auto-test enabled agents in the background
+            for agent in agents where agent.enabled {
+                Task {
+                    await testAgent(agent)
+                }
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -429,6 +495,7 @@ struct AgentsView: View {
                 enabled: agent.enabled,
                 status: "error",
                 error: error.localizedDescription,
+                version: nil,
                 agentCount: nil,
                 agents: nil
             )
@@ -451,7 +518,17 @@ struct AgentsView: View {
         do {
             promptResult = try await client.runAgentPrompt(agentName: agent.name, prompt: testPrompt)
         } catch {
-            promptResult = AgentRunResult(runId: nil, status: "error", output: nil, error: error.localizedDescription)
+            promptResult = AgentRunResult(
+                agentName: agent.name,
+                sessionId: nil,
+                runId: UUID().uuidString,
+                status: "failed",
+                awaitRequest: nil,
+                output: [],
+                error: AgentError(code: "client_error", message: error.localizedDescription, data: nil),
+                createdAt: Date(),
+                finishedAt: Date()
+            )
         }
         
         isRunningPrompt = false
@@ -460,6 +537,254 @@ struct AgentsView: View {
         if let agentName = selectedAgent?.name {
             await loadLogs(forAgent: agentName)
         }
+    }
+    
+    // MARK: - Gallery Methods
+    
+    private func loadGallery() async {
+        isLoadingGallery = true
+        
+        do {
+            galleryEntries = try await client.getGallery(featured: false)
+        } catch {
+            galleryEntries = []
+        }
+        
+        isLoadingGallery = false
+    }
+    
+    private func installAgent() async {
+        guard let entry = selectedGalleryEntry else { return }
+        
+        isInstalling = true
+        installError = nil
+        
+        do {
+            let name = newAgentName.isEmpty ? nil : newAgentName
+            let workdir = newAgentWorkdir.isEmpty ? nil : newAgentWorkdir
+            let port = Int(newAgentPort)
+            
+            let result = try await client.installGalleryAgent(id: entry.id, name: name, workdir: workdir, port: port)
+            
+            // Refresh agents list
+            agents = try await client.getAgents()
+            
+            // Auto-test the newly installed agent
+            let agentName = result.agent
+            Task {
+                if let agent = agents.first(where: { $0.name == agentName }) {
+                    await testAgent(agent)
+                }
+            }
+            
+            // Reset and close sheet
+            selectedGalleryEntry = nil
+            newAgentName = ""
+            newAgentWorkdir = ""
+            newAgentPort = ""
+            showAddAgent = false
+        } catch {
+            installError = error.localizedDescription
+        }
+        
+        isInstalling = false
+    }
+    
+    private func removeAgent(name: String) async {
+        do {
+            try await client.removeAgent(name: name)
+            agents = try await client.getAgents()
+            
+            // Clear selection if removed agent was selected
+            if selectedAgent?.name == name {
+                selectedAgent = nil
+            }
+        } catch {
+            // TODO: Show error
+        }
+    }
+    
+    // MARK: - Add Agent Sheet
+    
+    private var addAgentSheet: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Add Agent from Gallery")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    showAddAgent = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding()
+            
+            Divider()
+            
+            if isLoadingGallery {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading gallery...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if galleryEntries.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "tray")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("No agents available")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Gallery list
+                List(galleryEntries, selection: $selectedGalleryEntry) { entry in
+                    GalleryEntryRow(entry: entry, isSelected: selectedGalleryEntry?.id == entry.id)
+                        .tag(entry)
+                }
+                .listStyle(.inset)
+                
+                Divider()
+                
+                // Configuration section
+                if let entry = selectedGalleryEntry {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Configuration")
+                            .font(.subheadline.weight(.semibold))
+                        
+                        HStack {
+                            Text("Name:")
+                                .frame(width: 70, alignment: .trailing)
+                            TextField("Leave empty for default", text: $newAgentName)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        
+                        HStack {
+                            Text("Workdir:")
+                                .frame(width: 70, alignment: .trailing)
+                            TextField("Optional working directory", text: $newAgentWorkdir)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        
+                        HStack {
+                            Text("Port:")
+                                .frame(width: 70, alignment: .trailing)
+                            TextField("e.g. 4322 for ACP agents", text: $newAgentPort)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 150)
+                            Spacer()
+                        }
+                        
+                        if entry.id == "opencode" {
+                            Text("OpenCode uses port 4322 by default when running in ACP mode")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Set a port to connect to an already-running ACP agent")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        // Show install error if any
+                        if let error = installError {
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.red)
+                                Text(error)
+                                    .foregroundStyle(.red)
+                            }
+                            .font(.caption)
+                        }
+                    }
+                    .padding()
+                }
+            }
+            
+            Divider()
+            
+            // Footer
+            HStack {
+                Button("Cancel") {
+                    showAddAgent = false
+                }
+                .keyboardShortcut(.escape)
+                
+                Spacer()
+                
+                Button {
+                    Task { await installAgent() }
+                } label: {
+                    if isInstalling {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                    } else {
+                        Text("Install")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedGalleryEntry == nil || isInstalling)
+                .keyboardShortcut(.return)
+            }
+            .padding()
+        }
+        .frame(width: 500, height: 450)
+    }
+}
+
+// MARK: - Gallery Entry Row
+
+struct GalleryEntryRow: View {
+    let entry: GalleryEntry
+    let isSelected: Bool
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(entry.id)
+                        .font(.system(.body, design: .default))
+                        .fontWeight(.medium)
+                    
+                    if entry.featured {
+                        Text("Featured")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.2))
+                            .foregroundStyle(.orange)
+                            .cornerRadius(4)
+                    }
+                }
+                
+                if !entry.description.isEmpty {
+                    Text(entry.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                
+                HStack(spacing: 8) {
+                    Text(entry.provider)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    
+                    Text(entry.installType)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            Spacer()
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 }
 
@@ -472,9 +797,11 @@ struct AgentRow: View {
     let onTest: () -> Void
     let onToggle: (Bool) -> Void
     let onSelect: () -> Void
+    let onRemove: () -> Void
     
     @State private var isHovering = false
     @State private var isTesting = false
+    @State private var showDeleteConfirm = false
     
     var body: some View {
         Button(action: onSelect) {
@@ -529,7 +856,7 @@ struct AgentRow: View {
                 
                 Spacer()
                 
-                // Test button
+                // Reconnect button
                 Button {
                     isTesting = true
                     onTest()
@@ -541,12 +868,12 @@ struct AgentRow: View {
                         ProgressView()
                             .scaleEffect(0.6)
                     } else {
-                        Image(systemName: "bolt.fill")
+                        Image(systemName: "arrow.triangle.2.circlepath")
                             .font(.caption)
                     }
                 }
                 .buttonStyle(.plain)
-                .help("Test connection")
+                .help("Reconnect / Test connection")
                 .disabled(!agent.enabled)
                 
                 // Toggle
@@ -557,6 +884,17 @@ struct AgentRow: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .scaleEffect(0.8)
+                
+                // Delete button
+                Button {
+                    showDeleteConfirm = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                        .foregroundStyle(.red.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .help("Remove agent")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -565,6 +903,14 @@ struct AgentRow: View {
         .buttonStyle(.plain)
         .onHover { hovering in
             isHovering = hovering
+        }
+        .alert("Remove Agent", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) { }
+            Button("Remove", role: .destructive) {
+                onRemove()
+            }
+        } message: {
+            Text("Are you sure you want to remove '\(agent.name)'? This cannot be undone.")
         }
     }
     

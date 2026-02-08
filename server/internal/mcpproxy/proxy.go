@@ -31,7 +31,8 @@ type Proxy struct {
 	config     *Config
 	configPath string // Store config path for reload
 	mu         sync.RWMutex
-	notifyChan chan string // Aggregated notifications channel
+	notifyChan chan string       // Aggregated notifications channel
+	initErrors map[string]string // Store initialization errors per server
 }
 
 // NewProxy creates a new MCP proxy
@@ -46,13 +47,15 @@ func NewProxy(configPath string) (*Proxy, error) {
 		config:     config,
 		configPath: configPath,
 		notifyChan: make(chan string, 10), // Buffered channel for notifications
+		initErrors: make(map[string]string),
 	}
 
 	// Start enabled MCP servers
 	for _, server := range config.Servers {
-		if server.Enabled && server.Type == "stdio" {
+		if server.Enabled {
 			if err := proxy.startClient(server); err != nil {
 				log.Printf("Failed to start MCP server %s: %v", server.Name, err)
+				proxy.initErrors[server.Name] = err.Error()
 			}
 		}
 	}
@@ -210,8 +213,12 @@ func (p *Proxy) Reload() error {
 func (p *Proxy) startClientUnlocked(config ServerConfig) error {
 	client, err := NewMCPClient(config.Name, config.Command, config.Args, config.Env)
 	if err != nil {
+		p.initErrors[config.Name] = err.Error()
 		return err
 	}
+
+	// Clear any previous init error
+	delete(p.initErrors, config.Name)
 
 	p.clients[config.Name] = client
 
@@ -268,6 +275,19 @@ func (p *Proxy) GetServerStatuses() []ServerStatus {
 			// If no cache, trigger async refresh (only one at a time)
 			if cachedCount < 0 && status.Connected {
 				client.TriggerAsyncRefresh(30 * time.Second)
+			}
+			// Include error info if not connected
+			if !status.Connected {
+				if errMsg := client.GetLastError(); errMsg != "" {
+					status.Error = errMsg
+				} else if stderr := client.GetStderrOutput(); stderr != "" {
+					status.Error = stderr
+				}
+			}
+		} else if server.Enabled {
+			// Client not created - check if there's an init error stored
+			if errMsg, ok := p.initErrors[server.Name]; ok {
+				status.Error = errMsg
 			}
 		}
 

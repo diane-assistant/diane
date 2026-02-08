@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/diane-assistant/diane/internal/acp"
 	"github.com/diane-assistant/diane/internal/api"
@@ -118,6 +120,7 @@ func handleAgentCommand(client *api.Client, args []string) {
 		fmt.Fprintf(os.Stderr, "  test <name>         Test connectivity to an ACP agent\n")
 		fmt.Fprintf(os.Stderr, "  run <name> <prompt> Run a prompt against an ACP agent\n")
 		fmt.Fprintf(os.Stderr, "  info <name>         Show detailed info for an ACP agent\n")
+		fmt.Fprintf(os.Stderr, "  logs [name]         Show agent communication logs\n")
 		os.Exit(1)
 	}
 
@@ -193,7 +196,9 @@ func handleAgentCommand(client *api.Client, args []string) {
 			fmt.Fprintf(os.Stderr, "Usage: diane-ctl agent run <name> <prompt>\n")
 			os.Exit(1)
 		}
-		run, err := client.RunAgent(args[1], args[2], "")
+		// Use longer timeout for agent runs (5 minutes)
+		longClient := api.NewClientWithTimeout(5 * time.Minute)
+		run, err := longClient.RunAgent(args[1], args[2], "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -219,6 +224,53 @@ func handleAgentCommand(client *api.Client, args []string) {
 		}
 		output, _ := json.MarshalIndent(agent, "", "  ")
 		fmt.Println(string(output))
+
+	case "logs":
+		agentName := ""
+		limit := 50
+		// Parse args: logs [name] [--limit N]
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--limit", "-n":
+				if i+1 < len(args) {
+					fmt.Sscanf(args[i+1], "%d", &limit)
+					i++
+				}
+			default:
+				if agentName == "" {
+					agentName = args[i]
+				}
+			}
+		}
+		logs, err := client.GetAgentLogs(agentName, limit)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if len(logs) == 0 {
+			if agentName != "" {
+				fmt.Printf("No logs found for agent '%s'\n", agentName)
+			} else {
+				fmt.Println("No agent logs found")
+			}
+			return
+		}
+		for _, log := range logs {
+			direction := "→"
+			if log.Direction == "response" {
+				direction = "←"
+			}
+			ts := log.Timestamp.Format("15:04:05")
+			duration := ""
+			if log.DurationMs != nil {
+				duration = fmt.Sprintf(" (%dms)", *log.DurationMs)
+			}
+			errStr := ""
+			if log.Error != nil {
+				errStr = fmt.Sprintf(" ERROR: %s", *log.Error)
+			}
+			fmt.Printf("%s %s %s %s%s%s\n", ts, direction, log.AgentName, log.MessageType, duration, errStr)
+		}
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown agent subcommand: %s\n", args[0])
@@ -259,12 +311,38 @@ func handleGalleryCommand(client *api.Client, args []string) {
 
 	case "install", "add":
 		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: diane-ctl gallery install <agent-id>\n")
+			fmt.Fprintf(os.Stderr, "Usage: diane-ctl gallery install <agent-id> [--name <name>] [--workdir <path>] [--port <port>]\n")
 			os.Exit(1)
 		}
 
+		agentID := args[1]
+		customName := ""
+		workDir := ""
+		port := 0
+
+		// Parse optional flags
+		for i := 2; i < len(args); i++ {
+			switch args[i] {
+			case "--name", "-n":
+				if i+1 < len(args) {
+					customName = args[i+1]
+					i++
+				}
+			case "--workdir", "-w", "--cwd":
+				if i+1 < len(args) {
+					workDir = args[i+1]
+					i++
+				}
+			case "--port", "-p":
+				if i+1 < len(args) {
+					fmt.Sscanf(args[i+1], "%d", &port)
+					i++
+				}
+			}
+		}
+
 		// Get info first
-		info, err := client.GetGalleryAgent(args[1])
+		info, err := client.GetGalleryAgent(agentID)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -272,12 +350,21 @@ func handleGalleryCommand(client *api.Client, args []string) {
 
 		fmt.Printf("Installing %s (%s)...\n", info.Name, info.Version)
 
-		if err := client.InstallGalleryAgent(args[1]); err != nil {
+		// Build the agent name
+		finalName := agentID
+		if customName != "" {
+			finalName = customName
+		} else if workDir != "" {
+			// Use type@folder format for workdir-specific agents
+			finalName = fmt.Sprintf("%s@%s", agentID, filepath.Base(workDir))
+		}
+
+		if err := client.InstallGalleryAgentWithOptions(agentID, finalName, workDir, port); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 
-		fmt.Printf("✓ Agent '%s' configured\n", args[1])
+		fmt.Printf("✓ Agent '%s' configured\n", finalName)
 
 		if info.InstallCmd != "" {
 			fmt.Printf("\nTo install the agent binary/package, run:\n  %s\n", info.InstallCmd)
@@ -377,18 +464,24 @@ ACP Agent Commands:
   agent test <name>           Test connectivity to an ACP agent
   agent run <name> <prompt>   Run a prompt against an ACP agent
   agent info <name>           Show detailed info for an ACP agent
+  agent logs [name] [-n N]    Show agent communication logs
 
 Agent Gallery (one-click install):
   gallery                     List all available agents
   gallery featured            List featured agents
   gallery info <id>           Show install info for an agent
-  gallery install <id>        Configure an agent from the gallery
+  gallery install <id> [opts] Configure an agent from the gallery
+                              Options:
+                                --name <name>     Custom agent name
+                                --workdir <path>  Working directory for the agent
   gallery refresh             Refresh the agent registry
 
 Examples:
-  diane-ctl gallery                          # Browse available agents
-  diane-ctl gallery install claude-code-acp  # Install Claude Code
-  diane-ctl gallery install gemini           # Install Gemini CLI
-  diane-ctl agent add beeai http://localhost:8000 "BeeAI Platform"
+  diane-ctl gallery                                         # Browse available agents
+  diane-ctl gallery install gemini                          # Install Gemini CLI
+  diane-ctl gallery install gemini --workdir ~/myproject    # Install for a specific project
+  diane-ctl gallery install gemini --name gemini-work       # Install with custom name
+  diane-ctl agent run gemini "what is 2+2?"                 # Run a prompt
+  diane-ctl agent logs opencode                             # View logs for opencode agent
   diane-ctl agents`)
 }

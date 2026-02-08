@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"time"
@@ -20,6 +21,11 @@ type Client struct {
 
 // NewClient creates a new API client
 func NewClient() *Client {
+	return NewClientWithTimeout(10 * time.Second)
+}
+
+// NewClientWithTimeout creates a new API client with a custom timeout
+func NewClientWithTimeout(timeout time.Duration) *Client {
 	socketPath := GetSocketPath()
 
 	return &Client{
@@ -30,7 +36,7 @@ func NewClient() *Client {
 					return net.Dial("unix", socketPath)
 				},
 			},
-			Timeout: 10 * time.Second,
+			Timeout: timeout,
 		},
 	}
 }
@@ -299,6 +305,31 @@ func (c *Client) RunAgent(name, prompt, remoteAgentName string) (*acp.Run, error
 	return &run, nil
 }
 
+// GetAgentLogs returns communication logs for an agent
+func (c *Client) GetAgentLogs(agentName string, limit int) ([]AgentLog, error) {
+	url := fmt.Sprintf("http://unix/agents/logs?limit=%d", limit)
+	if agentName != "" {
+		url += fmt.Sprintf("&agent_name=%s", agentName)
+	}
+
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent logs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("agent logs request failed: %d", resp.StatusCode)
+	}
+
+	var logs []AgentLog
+	if err := json.NewDecoder(resp.Body).Decode(&logs); err != nil {
+		return nil, fmt.Errorf("failed to decode agent logs: %w", err)
+	}
+
+	return logs, nil
+}
+
 // ListGallery returns all agents from the gallery
 func (c *Client) ListGallery(featured bool) ([]acp.GalleryEntry, error) {
 	url := "http://unix/gallery"
@@ -351,8 +382,32 @@ func (c *Client) GetGalleryAgent(id string) (*acp.InstallInfo, error) {
 
 // InstallGalleryAgent configures an agent from the gallery
 func (c *Client) InstallGalleryAgent(id string) error {
+	return c.InstallGalleryAgentWithOptions(id, "", "", 0)
+}
+
+// InstallGalleryAgentWithOptions configures an agent from the gallery with custom name, workdir, and port
+func (c *Client) InstallGalleryAgentWithOptions(id, name, workdir string, port int) error {
 	url := fmt.Sprintf("http://unix/gallery/%s/install", id)
-	resp, err := c.httpClient.Post(url, "application/json", nil)
+
+	body := map[string]interface{}{}
+	if name != "" {
+		body["name"] = name
+	}
+	if workdir != "" {
+		body["workdir"] = workdir
+	}
+	if port > 0 {
+		body["port"] = port
+		body["type"] = "acp"
+	}
+
+	var reqBody io.Reader
+	if len(body) > 0 {
+		jsonBody, _ := json.Marshal(body)
+		reqBody = bytes.NewReader(jsonBody)
+	}
+
+	resp, err := c.httpClient.Post(url, "application/json", reqBody)
 	if err != nil {
 		return fmt.Errorf("failed to install agent: %w", err)
 	}

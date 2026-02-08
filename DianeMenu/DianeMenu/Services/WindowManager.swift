@@ -7,6 +7,7 @@ class WindowManager {
     
     private var toolsBrowserWindow: NSWindow?
     private var schedulerWindow: NSWindow?
+    private var agentsWindow: NSWindow?
     
     private init() {}
     
@@ -82,5 +83,42 @@ class WindowManager {
     /// Close the Scheduler window
     func closeScheduler() {
         schedulerWindow?.close()
+    }
+    
+    /// Open the Agents window
+    func openAgents() {
+        // If window exists and is visible, just bring it to front
+        if let window = agentsWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        
+        // Create new window
+        let contentView = AgentsView()
+        
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 950, height: 650),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        
+        window.title = "ACP Agents"
+        window.contentView = NSHostingView(rootView: contentView)
+        window.center()
+        window.setFrameAutosaveName("Agents")
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 750, height: 450)
+        
+        agentsWindow = window
+        
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    /// Close the Agents window
+    func closeAgents() {
+        agentsWindow?.close()
     }
 }

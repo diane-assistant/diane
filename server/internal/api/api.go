@@ -549,12 +549,24 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		startTime := time.Now()
 		result, err := s.acpManager.TestAgent(agentName)
+		durationMs := int(time.Since(startTime).Milliseconds())
+
 		if err != nil {
+			errMsg := err.Error()
+			s.statusProvider.CreateAgentLog(agentName, "response", "test", nil, &errMsg, &durationMs)
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
+
+		// Log the test result
+		var errMsg *string
+		if result.Error != "" {
+			errMsg = &result.Error
+		}
+		s.statusProvider.CreateAgentLog(agentName, "response", "test", &result.Status, errMsg, &durationMs)
 
 		json.NewEncoder(w).Encode(result)
 
@@ -566,8 +578,7 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var body struct {
-			Prompt    string `json:"prompt"`
-			AgentName string `json:"agent_name,omitempty"` // Remote agent name (optional)
+			Prompt string `json:"prompt"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -581,32 +592,30 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		client, err := s.acpManager.GetClient(agentName)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
+		// Log the request
+		promptContent := body.Prompt
+		s.statusProvider.CreateAgentLog(agentName, "request", "run", &promptContent, nil, nil)
 
-		// Get the remote agent name to use
-		remoteAgentName := body.AgentName
-		if remoteAgentName == "" {
-			// Try to get the first available agent
-			agents, err := client.ListAgents(1, 0)
-			if err != nil || len(agents) == 0 {
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]string{"error": "No agents available on the remote server"})
-				return
-			}
-			remoteAgentName = agents[0].Name
-		}
+		startTime := time.Now()
+		run, err := s.acpManager.RunAgent(agentName, body.Prompt)
+		durationMs := int(time.Since(startTime).Milliseconds())
 
-		run, err := client.RunSync(remoteAgentName, body.Prompt)
 		if err != nil {
+			errMsg := err.Error()
+			s.statusProvider.CreateAgentLog(agentName, "response", "run", nil, &errMsg, &durationMs)
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
+
+		// Log the response
+		responseContent := run.GetTextOutput()
+		var errMsg *string
+		if run.Error != nil {
+			e := run.Error.Message
+			errMsg = &e
+		}
+		s.statusProvider.CreateAgentLog(agentName, "response", "run", &responseContent, errMsg, &durationMs)
 
 		json.NewEncoder(w).Encode(run)
 
@@ -740,6 +749,17 @@ func (s *Server) handleGalleryAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Parse optional request body for custom name, workdir, and port
+		var body struct {
+			Name    string `json:"name"`
+			WorkDir string `json:"workdir"`
+			Port    int    `json:"port"`
+			Type    string `json:"type"` // "stdio" or "acp"
+		}
+		if r.Body != nil {
+			json.NewDecoder(r.Body).Decode(&body)
+		}
+
 		// Get install info
 		info, err := s.gallery.GetInstallInfo(agentID)
 		if err != nil {
@@ -750,14 +770,43 @@ func (s *Server) handleGalleryAction(w http.ResponseWriter, r *http.Request) {
 
 		// Add to configured agents (doesn't actually install, just configures)
 		if s.acpManager != nil {
+			// Determine the agent name
+			agentName := body.Name
+			if agentName == "" {
+				agentName = agentID
+			}
+
+			// Build args with workdir if provided
+			args := info.Args
+			if body.WorkDir != "" {
+				args = acp.BuildArgsWithWorkDir(agentID, info.Args, body.WorkDir)
+			}
+
+			// Determine agent type - use ACP if port is specified, otherwise stdio
+			agentType := body.Type
+			if agentType == "" {
+				if body.Port > 0 {
+					agentType = "acp"
+				} else {
+					agentType = "stdio"
+				}
+			}
+
 			agentConfig := acp.AgentConfig{
-				Name:        agentID,
-				Type:        "stdio", // Local agents use stdio
+				Name:        agentName,
+				Type:        agentType,
 				Command:     info.Command,
-				Args:        info.Args,
+				Args:        args,
 				Env:         info.Env,
+				WorkDir:     body.WorkDir,
+				Port:        body.Port,
 				Enabled:     true,
 				Description: info.Description,
+			}
+
+			// Set URL for ACP agents
+			if agentType == "acp" && body.Port > 0 {
+				agentConfig.URL = fmt.Sprintf("http://localhost:%d", body.Port)
 			}
 
 			if err := s.acpManager.AddAgent(agentConfig); err != nil {
@@ -768,14 +817,21 @@ func (s *Server) handleGalleryAction(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":      "configured",
-			"agent":       agentID,
-			"install_cmd": info.InstallCmd,
-			"info":        info,
-		})
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":      "configured",
+				"agent":       agentName,
+				"install_cmd": info.InstallCmd,
+				"info":        info,
+			})
+		} else {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":      "configured",
+				"agent":       agentID,
+				"install_cmd": info.InstallCmd,
+				"info":        info,
+			})
+		}
 
 	default:
 		w.WriteHeader(http.StatusBadRequest)

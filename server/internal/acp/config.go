@@ -2,11 +2,16 @@
 package acp
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // AgentConfig represents a configured ACP agent
@@ -39,10 +44,11 @@ type Config struct {
 
 // Manager handles ACP agent configuration and lifecycle
 type Manager struct {
-	mu         sync.RWMutex
-	config     *Config
-	configPath string
-	clients    map[string]*Client
+	mu           sync.RWMutex
+	config       *Config
+	configPath   string
+	clients      map[string]*Client      // Legacy HTTP clients (deprecated)
+	stdioClients map[string]*StdioClient // ACP stdio clients
 }
 
 // NewManager creates a new ACP manager
@@ -54,8 +60,9 @@ func NewManager() (*Manager, error) {
 
 	configPath := filepath.Join(home, ".diane", "acp-agents.json")
 	m := &Manager{
-		configPath: configPath,
-		clients:    make(map[string]*Client),
+		configPath:   configPath,
+		clients:      make(map[string]*Client),
+		stdioClients: make(map[string]*StdioClient),
 	}
 
 	if err := m.loadConfig(); err != nil {
@@ -130,10 +137,15 @@ func (m *Manager) RemoveAgent(name string) error {
 
 	for i, a := range m.config.Agents {
 		if a.Name == name {
-			// Remove client if exists
+			// Remove HTTP client if exists
 			if client, ok := m.clients[name]; ok {
 				_ = client // No cleanup needed for HTTP client
 				delete(m.clients, name)
+			}
+			// Remove stdio client if exists
+			if client, ok := m.stdioClients[name]; ok {
+				client.Close()
+				delete(m.stdioClients, name)
 			}
 
 			m.config.Agents = append(m.config.Agents[:i], m.config.Agents[i+1:]...)
@@ -239,28 +251,131 @@ func (m *Manager) TestAgent(name string) (*AgentTestResult, error) {
 		return result, nil
 	}
 
-	client := NewClient(agent.URL)
+	// Handle stdio agents (simple command execution agents)
+	if agent.Type == "stdio" {
+		return m.testSimpleStdioAgent(agent, result)
+	}
 
-	// Test ping
-	if err := client.Ping(); err != nil {
+	// Handle ACP agents (proper ACP protocol over stdio)
+	if agent.Type == "acp" || agent.Type == "" {
+		return m.testACPAgent(agent, result)
+	}
+
+	result.Status = "error"
+	result.Error = fmt.Sprintf("unknown agent type: %s", agent.Type)
+	return result, nil
+}
+
+// testACPAgent tests an ACP agent by initializing a connection
+func (m *Manager) testACPAgent(agent *AgentConfig, result *AgentTestResult) (*AgentTestResult, error) {
+	// ACP agents use the stdio transport with JSON-RPC
+	// We need to spawn the agent process and do the initialize handshake
+
+	// Determine command and args
+	command := agent.Command
+	args := agent.Args
+
+	// If no command specified, try to infer from name
+	if command == "" {
+		// For gallery agents like "opencode", the command is the name with "acp" arg
+		command = agent.Name
+		args = []string{"acp"}
+	}
+
+	// Check if command exists
+	cmdPath, err := exec.LookPath(command)
+	if err != nil {
 		result.Status = "unreachable"
-		result.Error = err.Error()
+		result.Error = fmt.Sprintf("command not found: %s", command)
 		return result, nil
 	}
 
-	// Get agent manifest
-	agents, err := client.ListAgents(10, 0)
+	// Create a temporary stdio client to test connectivity
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := NewStdioClient(cmdPath, args, agent.WorkDir, agent.Env)
 	if err != nil {
+		result.Status = "unreachable"
+		result.Error = fmt.Sprintf("failed to start agent: %v", err)
+		return result, nil
+	}
+	defer client.Close()
+
+	// Try to initialize
+	if err := client.Initialize(ctx); err != nil {
 		result.Status = "error"
-		result.Error = err.Error()
+		result.Error = fmt.Sprintf("initialization failed: %v", err)
 		return result, nil
 	}
 
 	result.Status = "connected"
-	result.AgentCount = len(agents)
-	result.Agents = make([]string, 0, len(agents))
-	for _, a := range agents {
-		result.Agents = append(result.Agents, a.Name)
+	result.AgentCount = 1
+	result.Agents = []string{agent.Name}
+
+	// Add version info from agent
+	if info := client.GetAgentInfo(); info != nil {
+		result.Version = fmt.Sprintf("%s %s", info.Name, info.Version)
+	}
+
+	return result, nil
+}
+
+// testSimpleStdioAgent tests a simple stdio-based agent by verifying the command exists
+// and optionally running a quick version/help check
+func (m *Manager) testSimpleStdioAgent(agent *AgentConfig, result *AgentTestResult) (*AgentTestResult, error) {
+	// Check if command exists
+	cmdPath, err := exec.LookPath(agent.Command)
+	if err != nil {
+		result.Status = "unreachable"
+		result.Error = fmt.Sprintf("command not found: %s", agent.Command)
+		return result, nil
+	}
+
+	// Try running the command with --version or --help to verify it works
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Try --version first (most CLI tools support this)
+	cmd := exec.CommandContext(ctx, cmdPath, "--version")
+	if agent.WorkDir != "" {
+		cmd.Dir = agent.WorkDir
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Try -h as fallback
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel2()
+
+		cmd2 := exec.CommandContext(ctx2, cmdPath, "-h")
+		if agent.WorkDir != "" {
+			cmd2.Dir = agent.WorkDir
+		}
+
+		output2, err2 := cmd2.CombinedOutput()
+		if err2 != nil {
+			// Command exists but doesn't respond to version/help
+			// This is still a valid state for some tools
+			result.Status = "connected"
+			result.AgentCount = 1
+			result.Agents = []string{agent.Name}
+			return result, nil
+		}
+		output = output2
+	}
+
+	result.Status = "connected"
+	result.AgentCount = 1
+	result.Agents = []string{agent.Name}
+
+	// Store version info in first 100 chars of output
+	versionInfo := string(output)
+	if len(versionInfo) > 100 {
+		versionInfo = versionInfo[:100] + "..."
+	}
+	if versionInfo != "" {
+		result.Version = versionInfo
 	}
 
 	return result, nil
@@ -289,6 +404,7 @@ type AgentTestResult struct {
 	Enabled    bool     `json:"enabled"`
 	Status     string   `json:"status"` // "connected", "unreachable", "error", "disabled"
 	Error      string   `json:"error,omitempty"`
+	Version    string   `json:"version,omitempty"`
 	AgentCount int      `json:"agent_count,omitempty"`
 	Agents     []string `json:"agents,omitempty"`
 }
@@ -298,7 +414,13 @@ func (m *Manager) Reload() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Clear cached clients
+	// Close and clear stdio clients
+	for _, client := range m.stdioClients {
+		client.Close()
+	}
+	m.stdioClients = make(map[string]*StdioClient)
+
+	// Clear cached HTTP clients
 	m.clients = make(map[string]*Client)
 
 	return m.loadConfig()
@@ -387,4 +509,207 @@ func (m *Manager) GetAvailablePort(startPort int) int {
 		}
 	}
 	return startPort + 100
+}
+
+// RunAgent runs a prompt against an agent (supports both ACP and stdio types)
+func (m *Manager) RunAgent(name, prompt string) (*Run, error) {
+	agent, err := m.GetAgent(name)
+	if err != nil {
+		return nil, err
+	}
+
+	if !agent.Enabled {
+		return nil, fmt.Errorf("agent '%s' is disabled", name)
+	}
+
+	// Handle simple stdio agents (just run command with prompt as arg)
+	if agent.Type == "stdio" {
+		return m.runSimpleStdioAgent(agent, prompt)
+	}
+
+	// Handle ACP agents (proper ACP protocol over stdio)
+	if agent.Type == "acp" || agent.Type == "" {
+		return m.runACPAgent(agent, prompt)
+	}
+
+	return nil, fmt.Errorf("unknown agent type: %s", agent.Type)
+}
+
+// runACPAgent runs a prompt against an ACP agent using the proper protocol
+func (m *Manager) runACPAgent(agent *AgentConfig, prompt string) (*Run, error) {
+	// Create run record
+	runID := make([]byte, 16)
+	rand.Read(runID)
+	run := &Run{
+		AgentName: agent.Name,
+		RunID:     hex.EncodeToString(runID),
+		Status:    RunStatusInProgress,
+		Output:    []Message{},
+		CreatedAt: time.Now(),
+	}
+
+	// Determine command and args
+	command := agent.Command
+	args := agent.Args
+
+	// If no command specified, try to infer from name
+	if command == "" {
+		command = agent.Name
+		args = []string{"acp"}
+	}
+
+	// Check if command exists
+	cmdPath, err := exec.LookPath(command)
+	if err != nil {
+		now := time.Now()
+		run.FinishedAt = &now
+		run.Status = RunStatusFailed
+		run.Error = &Error{
+			Code:    "command_not_found",
+			Message: fmt.Sprintf("command not found: %s", command),
+		}
+		return run, nil
+	}
+
+	// Create stdio client
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	client, err := NewStdioClient(cmdPath, args, agent.WorkDir, agent.Env)
+	if err != nil {
+		now := time.Now()
+		run.FinishedAt = &now
+		run.Status = RunStatusFailed
+		run.Error = &Error{
+			Code:    "start_error",
+			Message: fmt.Sprintf("failed to start agent: %v", err),
+		}
+		return run, nil
+	}
+	defer client.Close()
+
+	// Initialize
+	if err := client.Initialize(ctx); err != nil {
+		now := time.Now()
+		run.FinishedAt = &now
+		run.Status = RunStatusFailed
+		run.Error = &Error{
+			Code:    "init_error",
+			Message: fmt.Sprintf("initialization failed: %v", err),
+		}
+		return run, nil
+	}
+
+	// Create session
+	cwd := agent.WorkDir
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+
+	sessionID, err := client.NewSession(ctx, cwd)
+	if err != nil {
+		now := time.Now()
+		run.FinishedAt = &now
+		run.Status = RunStatusFailed
+		run.Error = &Error{
+			Code:    "session_error",
+			Message: fmt.Sprintf("failed to create session: %v", err),
+		}
+		return run, nil
+	}
+
+	// Collect output from updates
+	var outputText string
+
+	// Send prompt
+	result, err := client.Prompt(ctx, sessionID, prompt, func(update *SessionUpdateParams) {
+		if update.Update.SessionUpdate == "agent_message_chunk" && update.Update.Content != nil {
+			if update.Update.Content.Type == "text" {
+				outputText += update.Update.Content.Text
+			}
+		}
+	})
+
+	now := time.Now()
+	run.FinishedAt = &now
+
+	if err != nil {
+		run.Status = RunStatusFailed
+		run.Error = &Error{
+			Code:    "prompt_error",
+			Message: fmt.Sprintf("prompt failed: %v", err),
+		}
+		return run, nil
+	}
+
+	// Check stop reason
+	switch result.StopReason {
+	case "end_turn":
+		run.Status = RunStatusCompleted
+	case "cancelled":
+		run.Status = RunStatusCancelled
+	default:
+		run.Status = RunStatusCompleted
+	}
+
+	run.Output = []Message{
+		NewTextMessage("agent", outputText),
+	}
+
+	return run, nil
+}
+
+// runSimpleStdioAgent runs a prompt against a simple stdio-based agent
+func (m *Manager) runSimpleStdioAgent(agent *AgentConfig, prompt string) (*Run, error) {
+	// Build command with args and prompt
+	args := append([]string{}, agent.Args...)
+	args = append(args, prompt)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, agent.Command, args...)
+	if agent.WorkDir != "" {
+		cmd.Dir = agent.WorkDir
+	}
+
+	// Set environment variables
+	if len(agent.Env) > 0 {
+		cmd.Env = os.Environ()
+		for k, v := range agent.Env {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+		}
+	}
+
+	// Create run record
+	runID := make([]byte, 16)
+	rand.Read(runID)
+	run := &Run{
+		AgentName: agent.Name,
+		RunID:     hex.EncodeToString(runID),
+		Status:    RunStatusInProgress,
+		Output:    []Message{},
+		CreatedAt: time.Now(),
+	}
+
+	// Execute and capture output
+	output, err := cmd.CombinedOutput()
+	now := time.Now()
+	run.FinishedAt = &now
+
+	if err != nil {
+		run.Status = RunStatusFailed
+		run.Error = &Error{
+			Code:    "execution_error",
+			Message: fmt.Sprintf("%v: %s", err, string(output)),
+		}
+		return run, nil
+	}
+
+	run.Status = RunStatusCompleted
+	run.Output = []Message{
+		NewTextMessage("agent", string(output)),
+	}
+
+	return run, nil
 }
