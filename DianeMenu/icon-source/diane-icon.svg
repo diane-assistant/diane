@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background - dark green like Douglas Fir forest -->
+  <rect width="512" height="512" rx="115" fill="#1a2f23"/>
+  
+  <!-- Subtle chevron pattern at bottom (Red Room reference) -->
+  <g opacity="0.15">
+    <path d="M0 450 L64 512 L128 450 L192 512 L256 450 L320 512 L384 450 L448 512 L512 450 L512 512 L0 512 Z" fill="#c41e3a"/>
+  </g>
+  
+  <!-- Microcassette Recorder Body -->
+  <g transform="translate(106, 96)">
+    <!-- Main body -->
+    <rect x="0" y="0" width="300" height="320" rx="24" fill="#2d2d2d"/>
+    <rect x="8" y="8" width="284" height="304" rx="18" fill="#3d3d3d"/>
+    
+    <!-- Speaker grille at top -->
+    <rect x="40" y="30" width="220" height="60" rx="8" fill="#252525"/>
+    <g stroke="#4a4a4a" stroke-width="3">
+      <line x1="60" y1="45" x2="240" y2="45"/>
+      <line x1="60" y1="55" x2="240" y2="55"/>
+      <line x1="60" y1="65" x2="240" y2="65"/>
+      <line x1="60" y1="75" x2="240" y2="75"/>
+    </g>
+    
+    <!-- Cassette window -->
+    <rect x="40" y="110" width="220" height="80" rx="6" fill="#1a1a1a"/>
+    <rect x="50" y="120" width="200" height="60" rx="4" fill="#252525"/>
+    
+    <!-- Tape reels -->
+    <circle cx="95" cy="150" r="22" fill="#1a1a1a" stroke="#444" stroke-width="2"/>
+    <circle cx="95" cy="150" r="8" fill="#555"/>
+    <circle cx="205" cy="150" r="22" fill="#1a1a1a" stroke="#444" stroke-width="2"/>
+    <circle cx="205" cy="150" r="8" fill="#555"/>
+    
+    <!-- Tape between reels -->
+    <rect x="95" y="145" width="110" height="10" fill="#8B4513" opacity="0.6"/>
+    
+    <!-- Recording indicator (red dot - active) -->
+    <circle cx="260" cy="50" r="10" fill="#c41e3a">
+      <animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    
+    <!-- Control buttons -->
+    <g transform="translate(40, 210)">
+      <!-- Play/Stop buttons -->
+      <rect x="0" y="0" width="45" height="35" rx="4" fill="#252525"/>
+      <rect x="55" y="0" width="45" height="35" rx="4" fill="#252525"/>
+      <rect x="110" y="0" width="45" height="35" rx="4" fill="#252525"/>
+      <rect x="165" y="0" width="55" height="35" rx="4" fill="#c41e3a"/> <!-- Record button -->
+      
+      <!-- Button symbols -->
+      <polygon points="15,10 15,25 30,17.5" fill="#666"/> <!-- Play -->
+      <rect x="70" y="10" width="15" height="15" fill="#666"/> <!-- Stop -->
+      <polygon points="120,10 135,17.5 120,25 M140,10 155,17.5 140,25" fill="#666"/> <!-- FF -->
+      <circle cx="192" cy="17.5" r="6" fill="#fff"/> <!-- Record dot -->
+    </g>
+    
+    <!-- "DIANE" label -->
+    <text x="150" y="290" font-family="SF Pro Display, Helvetica, Arial" font-size="28" font-weight="600" fill="#888" text-anchor="middle" letter-spacing="4">DIANE</text>
+  </g>
+  
+  <!-- Subtle glow effect -->
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+</svg>

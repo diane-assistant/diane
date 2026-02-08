@@ -16,6 +16,12 @@ diane
 # macOS
 .DS_Store
 
+# Xcode
+DianeMenu/build/
+*.xcuserstate
+xcuserdata/
+DerivedData/
+
 # Secrets (NEVER commit these)
 *.pem
 *.key
