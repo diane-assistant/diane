@@ -60,6 +60,7 @@ class UpdateChecker: ObservableObject {
     
     /// Check GitHub for the latest release
     func checkForUpdates() async {
+        FileLogger.shared.info("checkForUpdates starting", category: "UpdateChecker")
         isChecking = true
         defer { isChecking = false }
         

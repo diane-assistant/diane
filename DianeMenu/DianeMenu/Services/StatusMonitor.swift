@@ -34,10 +34,12 @@ class StatusMonitor: ObservableObject {
     func start() async {
         guard !hasStarted else { 
             logger.info("StatusMonitor already started, skipping")
+            FileLogger.shared.info("StatusMonitor already started, skipping", category: "StatusMonitor")
             return 
         }
         hasStarted = true
         logger.info("StatusMonitor starting...")
+        FileLogger.shared.info("StatusMonitor starting...", category: "StatusMonitor")
         
         await startPolling()
         
@@ -101,6 +103,7 @@ class StatusMonitor: ObservableObject {
         let socketExists = client.socketExists
         let processRunning = client.isProcessRunning()
         logger.info("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)")
+        FileLogger.shared.info("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)", category: "StatusMonitor")
         
         // Quick check if socket exists
         guard socketExists || processRunning else {
