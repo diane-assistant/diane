@@ -3,9 +3,12 @@ package google
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/diane-assistant/diane/mcp/tools/google/gmail"
 )
 
 // --- Helper Functions ---
@@ -139,7 +142,7 @@ func (p *Provider) Tools() []Tool {
 		// Gmail tools
 		{
 			Name:        "google_search_emails",
-			Description: "Search Gmail messages using Gmail search syntax. Returns a list of matched email threads.",
+			Description: "Search Gmail messages using Gmail search syntax. Returns metadata (id, subject, from, date, snippet, labels). For classification workflows, prefer gmail_search_and_fetch which returns the same data but is optimized for batch operations.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
 					"query":   stringProperty("Gmail search query (e.g., 'from:alice', 'is:unread', 'label:inbox', 'subject:meeting')"),
@@ -151,13 +154,156 @@ func (p *Provider) Tools() []Tool {
 		},
 		{
 			Name:        "google_read_email",
-			Description: "Get full content of a specific Gmail message by its ID.",
+			Description: "Get full content of a specific Gmail message by its ID. Returns complete message with body, headers, and attachments info.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
-					"id":      stringProperty("The message or thread ID to retrieve"),
+					"id":      stringProperty("The message ID to retrieve"),
 					"account": stringProperty("Email account to use (optional, uses default if omitted)"),
 				},
 				[]string{"id"},
+			),
+		},
+		{
+			Name:        "gmail_batch_get_messages",
+			Description: "Get metadata or full content for multiple Gmail messages in parallel. Uses 10 concurrent requests for speed. Supports up to 100 IDs per call efficiently.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"ids":     stringProperty("Comma-separated list of message IDs to retrieve"),
+					"format":  stringProperty("Message format: 'metadata' (headers only, fast) or 'full' (with body). Default: metadata"),
+					"account": stringProperty("Email account to use (optional)"),
+				},
+				[]string{"ids"},
+			),
+		},
+		{
+			Name:        "gmail_batch_modify_labels",
+			Description: "Add or remove labels from multiple Gmail messages in one API call. Handles up to 1000 IDs per call (Gmail API limit). For bulk operations by query, use gmail_batch_label_by_query instead.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"ids":     stringProperty("Comma-separated list of message IDs to modify"),
+					"add":     stringProperty("Comma-separated labels to add (e.g., 'diane-processed,Important')"),
+					"remove":  stringProperty("Comma-separated labels to remove (e.g., 'INBOX' to archive, 'UNREAD' to mark read)"),
+					"account": stringProperty("Email account to use (optional)"),
+				},
+				[]string{"ids"},
+			),
+		},
+		{
+			Name:        "gmail_list_labels",
+			Description: "List all Gmail labels for an account. Returns label IDs, names, and types. Use this to map existing Gmail organization.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"account": stringProperty("Email account to use (optional)"),
+				},
+				nil,
+			),
+		},
+		{
+			Name:        "gmail_create_label",
+			Description: "Create a new Gmail label. Use for creating organizational labels like 'diane-processed' or 'diane-ignored'.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"name":    stringProperty("Name of the label to create (can include / for nested labels)"),
+					"account": stringProperty("Email account to use (optional)"),
+				},
+				[]string{"name"},
+			),
+		},
+		{
+			Name:        "gmail_analyze_sender",
+			Description: "Get statistical profile of a sender: email count, date range, common subjects. Useful for understanding email patterns. Supports flexible matching for forwarded/aliased emails.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"sender":  stringProperty("Email address or partial address to analyze (e.g., 'allegro@allegro.pl' or just 'allegro')"),
+					"query":   stringProperty("Custom Gmail search query instead of auto-generated from: query. Use this for complex cases like forwarded emails."),
+					"max":     numberProperty("Maximum emails to analyze (default: 100)"),
+					"account": stringProperty("Email account to use (optional)"),
+				},
+				nil, // No required fields - either sender or query must be provided
+			),
+		},
+		// New cached Gmail tools
+		{
+			Name:        "gmail_sync",
+			Description: "Sync Gmail messages to local cache. Uses History API for efficient incremental updates. Run this periodically to keep cache fresh.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"max":     numberProperty("Maximum messages to sync on full sync (default: 500)"),
+					"force":   boolProperty("Force a full sync even if incremental is available"),
+					"account": stringProperty("Email account to use (optional)"),
+				},
+				nil,
+			),
+		},
+		{
+			Name:        "gmail_cache_stats",
+			Description: "Get statistics about the local Gmail cache: message count, date range, sync status.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"account": stringProperty("Email account to use (optional)"),
+				},
+				nil,
+			),
+		},
+		{
+			Name:        "gmail_list_attachments",
+			Description: "List attachments for a Gmail message. Returns attachment metadata including ID, filename, MIME type, size, and download status.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"message_id": stringProperty("Gmail message ID"),
+					"account":    stringProperty("Email account to use (optional)"),
+				},
+				[]string{"message_id"},
+			),
+		},
+		{
+			Name:        "gmail_download_attachment",
+			Description: "Download an attachment from a Gmail message to local storage. Returns the local file path.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"message_id":    stringProperty("Gmail message ID"),
+					"attachment_id": stringProperty("Attachment ID (from gmail_list_attachments)"),
+					"account":       stringProperty("Email account to use (optional)"),
+				},
+				[]string{"message_id", "attachment_id"},
+			),
+		},
+		{
+			Name:        "gmail_get_content",
+			Description: "Get the full content of an email including extracted plain text and JSON-LD structured data (orders, shipping, etc).",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"message_id": stringProperty("Gmail message ID"),
+					"account":    stringProperty("Email account to use (optional)"),
+				},
+				[]string{"message_id"},
+			),
+		},
+		// New composite tools for speed optimization
+		{
+			Name:        "gmail_search_and_fetch",
+			Description: "Search emails AND return full metadata in one call. Returns: id, subject, from, date, snippet, labels, has_attachments. Use this instead of search + batch_get for classification workflows. Eliminates the 2-step bottleneck.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"query":   stringProperty("Gmail search query (e.g., 'is:unread newer_than:7d', 'from:newsletter@example.com')"),
+					"max":     numberProperty("Maximum results (default: 50, max: 500)"),
+					"account": stringProperty("Email account to use (optional)"),
+				},
+				[]string{"query"},
+			),
+		},
+		{
+			Name:        "gmail_batch_label_by_query",
+			Description: "Apply labels to ALL emails matching a search query in one call. Use for bulk operations like 'label all newsletters as Ignored'. Automatically handles pagination and chunking.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"query":   stringProperty("Gmail search query (e.g., 'from:newsletter@spam.com', 'is:unread older_than:30d')"),
+					"add":     stringProperty("Labels to add (comma-separated, e.g., 'diane-processed,Archived')"),
+					"remove":  stringProperty("Labels to remove (comma-separated, e.g., 'INBOX,UNREAD')"),
+					"max":     numberProperty("Safety limit on messages to modify (default: 500, max: 5000)"),
+					"account": stringProperty("Email account to use (optional)"),
+				},
+				[]string{"query"},
 			),
 		},
 		// Drive tools
@@ -374,6 +520,32 @@ func (p *Provider) Call(name string, args map[string]interface{}) (interface{}, 
 		return p.searchEmails(args)
 	case "google_read_email":
 		return p.readEmail(args)
+	case "gmail_batch_get_messages":
+		return p.batchGetMessages(args)
+	case "gmail_batch_modify_labels":
+		return p.batchModifyLabels(args)
+	case "gmail_list_labels":
+		return p.listLabels(args)
+	case "gmail_create_label":
+		return p.createLabel(args)
+	case "gmail_analyze_sender":
+		return p.analyzeSender(args)
+	// New cached Gmail tools
+	case "gmail_sync":
+		return p.gmailSync(args)
+	case "gmail_cache_stats":
+		return p.gmailCacheStats(args)
+	case "gmail_list_attachments":
+		return p.gmailListAttachments(args)
+	case "gmail_download_attachment":
+		return p.gmailDownloadAttachment(args)
+	case "gmail_get_content":
+		return p.gmailGetContent(args)
+	// New composite tools
+	case "gmail_search_and_fetch":
+		return p.gmailSearchAndFetch(args)
+	case "gmail_batch_label_by_query":
+		return p.gmailBatchLabelByQuery(args)
 	// Drive
 	case "google_search_files":
 		return p.searchFiles(args)
@@ -421,17 +593,19 @@ func (p *Provider) searchEmails(args map[string]interface{}) (interface{}, error
 	max := getInt(args, "max", 10)
 	account := getString(args, "account")
 
-	cmdArgs := []string{"gmail", "search", query, fmt.Sprintf("--max=%d", max), "--json"}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
 	}
+	defer svc.Close()
 
-	output, err := runCommand("gog", cmdArgs...)
+	emails, err := svc.SearchMessages(query, int64(max))
 	if err != nil {
 		return nil, fmt.Errorf("failed to search emails: %w", err)
 	}
 
-	return textContent(output), nil
+	results := gmail.ToSearchResults(emails)
+	return textContent(gmail.ToJSON(results)), nil
 }
 
 func (p *Provider) readEmail(args map[string]interface{}) (interface{}, error) {
@@ -442,17 +616,503 @@ func (p *Provider) readEmail(args map[string]interface{}) (interface{}, error) {
 
 	account := getString(args, "account")
 
-	cmdArgs := []string{"gmail", "get", id, "--format=full", "--json"}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
 	}
+	defer svc.Close()
 
-	output, err := runCommand("gog", cmdArgs...)
+	email, err := svc.GetMessage(id, true) // withContent=true
 	if err != nil {
 		return nil, fmt.Errorf("failed to read email: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(gmail.ToJSON(email)), nil
+}
+
+func (p *Provider) batchGetMessages(args map[string]interface{}) (interface{}, error) {
+	idsStr, err := getStringRequired(args, "ids")
+	if err != nil {
+		return nil, err
+	}
+
+	format := getString(args, "format")
+	if format == "" {
+		format = "metadata"
+	}
+	if format != "metadata" && format != "full" {
+		return nil, fmt.Errorf("format must be 'metadata' or 'full', got: %s", format)
+	}
+
+	account := getString(args, "account")
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	// Split IDs and fetch messages using parallel SDK
+	ids := strings.Split(idsStr, ",")
+	cleanIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIDs = append(cleanIDs, id)
+		}
+	}
+
+	if len(cleanIDs) == 0 {
+		return textContent("[]"), nil
+	}
+
+	withContent := format == "full"
+	emails, err := svc.BatchGetMessages(cleanIDs, withContent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch get messages: %w", err)
+	}
+
+	return textContent(gmail.ToJSON(emails)), nil
+}
+
+func (p *Provider) batchModifyLabels(args map[string]interface{}) (interface{}, error) {
+	idsStr, err := getStringRequired(args, "ids")
+	if err != nil {
+		return nil, err
+	}
+
+	addLabelsStr := getString(args, "add")
+	removeLabelsStr := getString(args, "remove")
+	account := getString(args, "account")
+
+	if addLabelsStr == "" && removeLabelsStr == "" {
+		return nil, fmt.Errorf("at least one of 'add' or 'remove' must be specified")
+	}
+
+	// Parse comma-separated IDs
+	ids := strings.Split(idsStr, ",")
+	cleanIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIDs = append(cleanIDs, id)
+		}
+	}
+
+	if len(cleanIDs) == 0 {
+		return nil, fmt.Errorf("no valid message IDs provided")
+	}
+
+	// Parse labels
+	var addLabels, removeLabels []string
+	if addLabelsStr != "" {
+		for _, l := range strings.Split(addLabelsStr, ",") {
+			if l = strings.TrimSpace(l); l != "" {
+				addLabels = append(addLabels, l)
+			}
+		}
+	}
+	if removeLabelsStr != "" {
+		for _, l := range strings.Split(removeLabelsStr, ",") {
+			if l = strings.TrimSpace(l); l != "" {
+				removeLabels = append(removeLabels, l)
+			}
+		}
+	}
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	// Batch modify in chunks of 1000 (Gmail API limit)
+	const chunkSize = 1000
+	modified := 0
+	for i := 0; i < len(cleanIDs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(cleanIDs) {
+			end = len(cleanIDs)
+		}
+		chunk := cleanIDs[i:end]
+
+		if err := svc.ModifyLabels(chunk, addLabels, removeLabels); err != nil {
+			return nil, fmt.Errorf("failed to modify labels: %w", err)
+		}
+		modified += len(chunk)
+	}
+
+	result := map[string]interface{}{
+		"modified": modified,
+		"added":    addLabels,
+		"removed":  removeLabels,
+	}
+	return textContent(gmail.ToJSON(result)), nil
+}
+
+func (p *Provider) listLabels(args map[string]interface{}) (interface{}, error) {
+	account := getString(args, "account")
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	labels, err := svc.ListLabels()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list labels: %w", err)
+	}
+
+	// Convert to simpler format for JSON output
+	type LabelInfo struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	result := make([]LabelInfo, len(labels))
+	for i, l := range labels {
+		result[i] = LabelInfo{
+			ID:   l.Id,
+			Name: l.Name,
+			Type: l.Type,
+		}
+	}
+
+	return textContent(gmail.ToJSON(result)), nil
+}
+
+func (p *Provider) createLabel(args map[string]interface{}) (interface{}, error) {
+	name, err := getStringRequired(args, "name")
+	if err != nil {
+		return nil, err
+	}
+
+	account := getString(args, "account")
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	label, err := svc.CreateLabel(name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create label: %w", err)
+	}
+
+	result := map[string]string{
+		"id":   label.Id,
+		"name": label.Name,
+		"type": label.Type,
+	}
+	return textContent(gmail.ToJSON(result)), nil
+}
+
+func (p *Provider) analyzeSender(args map[string]interface{}) (interface{}, error) {
+	sender := getString(args, "sender")
+	customQuery := getString(args, "query")
+	max := getInt(args, "max", 100)
+	account := getString(args, "account")
+
+	if sender == "" && customQuery == "" {
+		return nil, fmt.Errorf("either 'sender' or 'query' must be provided")
+	}
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	// Use custom query or build from sender
+	senderPattern := sender
+	if sender == "" {
+		senderPattern = customQuery // Use query as pattern for stats
+	}
+
+	stats, err := svc.GetSenderStats(senderPattern, max)
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze sender: %w", err)
+	}
+
+	if stats == nil {
+		return textContent(`{"message": "No emails found for this sender"}`), nil
+	}
+
+	return textContent(gmail.ToJSON(stats)), nil
+}
+
+// --- New Cached Gmail Tools ---
+
+func (p *Provider) gmailSync(args map[string]interface{}) (interface{}, error) {
+	account := getString(args, "account")
+	maxMessages := int64(getInt(args, "max", 500))
+	force := getBool(args, "force")
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	var result *gmail.SyncResult
+	if force {
+		result, err = svc.ForceFullSync(maxMessages)
+	} else {
+		result, err = svc.Sync(maxMessages)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sync failed: %w", err)
+	}
+
+	output, _ := json.MarshalIndent(result, "", "  ")
+	return textContent(string(output)), nil
+}
+
+func (p *Provider) gmailCacheStats(args map[string]interface{}) (interface{}, error) {
+	account := getString(args, "account")
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	stats, err := svc.GetCacheStats()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cache stats: %w", err)
+	}
+
+	if stats == nil {
+		return textContent(`{"error": "cache not available"}`), nil
+	}
+
+	output, _ := json.MarshalIndent(stats, "", "  ")
+	return textContent(string(output)), nil
+}
+
+func (p *Provider) gmailListAttachments(args map[string]interface{}) (interface{}, error) {
+	messageID, err := getStringRequired(args, "message_id")
+	if err != nil {
+		return nil, err
+	}
+	account := getString(args, "account")
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	attachments, err := svc.GetAttachmentInfo(messageID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list attachments: %w", err)
+	}
+
+	output, _ := json.MarshalIndent(attachments, "", "  ")
+	return textContent(string(output)), nil
+}
+
+func (p *Provider) gmailDownloadAttachment(args map[string]interface{}) (interface{}, error) {
+	messageID, err := getStringRequired(args, "message_id")
+	if err != nil {
+		return nil, err
+	}
+	attachmentID, err := getStringRequired(args, "attachment_id")
+	if err != nil {
+		return nil, err
+	}
+	account := getString(args, "account")
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	localPath, err := svc.DownloadAttachment(messageID, attachmentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download attachment: %w", err)
+	}
+
+	result := map[string]string{
+		"message_id":    messageID,
+		"attachment_id": attachmentID,
+		"local_path":    localPath,
+	}
+	output, _ := json.MarshalIndent(result, "", "  ")
+	return textContent(string(output)), nil
+}
+
+func (p *Provider) gmailGetContent(args map[string]interface{}) (interface{}, error) {
+	messageID, err := getStringRequired(args, "message_id")
+	if err != nil {
+		return nil, err
+	}
+	account := getString(args, "account")
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	email, err := svc.GetMessageContent(messageID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get message content: %w", err)
+	}
+
+	// Return a focused view of the content
+	type ContentResult struct {
+		ID          string   `json:"id"`
+		Subject     string   `json:"subject"`
+		From        string   `json:"from"`
+		Date        string   `json:"date"`
+		PlainText   string   `json:"plain_text,omitempty"`
+		JsonLD      []any    `json:"json_ld,omitempty"`
+		JsonLDTypes []string `json:"json_ld_types,omitempty"`
+		Labels      []string `json:"labels,omitempty"`
+	}
+
+	result := ContentResult{
+		ID:      email.GmailID,
+		Subject: email.Subject,
+		From:    fmt.Sprintf("%s <%s>", email.FromName, email.FromEmail),
+		Date:    email.Date.Format("2006-01-02 15:04:05"),
+		JsonLD:  email.JsonLD,
+		Labels:  email.Labels,
+	}
+
+	if email.PlainText != nil {
+		result.PlainText = *email.PlainText
+	}
+	if len(email.JsonLD) > 0 {
+		result.JsonLDTypes = gmail.GetJsonLDTypes(email.JsonLD)
+	}
+
+	output, _ := json.MarshalIndent(result, "", "  ")
+	return textContent(string(output)), nil
+}
+
+// --- New Composite Gmail Tools ---
+
+func (p *Provider) gmailSearchAndFetch(args map[string]interface{}) (interface{}, error) {
+	query, err := getStringRequired(args, "query")
+	if err != nil {
+		return nil, err
+	}
+
+	max := getInt(args, "max", 50)
+	if max > 500 {
+		max = 500
+	}
+	account := getString(args, "account")
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	// Search and fetch metadata in one operation (uses cache when available)
+	emails, err := svc.SearchMessages(query, int64(max))
+	if err != nil {
+		return nil, fmt.Errorf("failed to search and fetch emails: %w", err)
+	}
+
+	// Convert to search result format with full metadata
+	results := gmail.ToSearchResults(emails)
+
+	return textContent(gmail.ToJSON(results)), nil
+}
+
+func (p *Provider) gmailBatchLabelByQuery(args map[string]interface{}) (interface{}, error) {
+	query, err := getStringRequired(args, "query")
+	if err != nil {
+		return nil, err
+	}
+
+	addLabelsStr := getString(args, "add")
+	removeLabelsStr := getString(args, "remove")
+	account := getString(args, "account")
+
+	if addLabelsStr == "" && removeLabelsStr == "" {
+		return nil, fmt.Errorf("at least one of 'add' or 'remove' must be specified")
+	}
+
+	max := getInt(args, "max", 500)
+	if max > 5000 {
+		max = 5000
+	}
+
+	// Parse labels
+	var addLabels, removeLabels []string
+	if addLabelsStr != "" {
+		for _, l := range strings.Split(addLabelsStr, ",") {
+			if l = strings.TrimSpace(l); l != "" {
+				addLabels = append(addLabels, l)
+			}
+		}
+	}
+	if removeLabelsStr != "" {
+		for _, l := range strings.Split(removeLabelsStr, ",") {
+			if l = strings.TrimSpace(l); l != "" {
+				removeLabels = append(removeLabels, l)
+			}
+		}
+	}
+
+	svc, err := gmail.NewService(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	defer svc.Close()
+
+	// Search for all matching messages
+	emails, err := svc.SearchMessages(query, int64(max))
+	if err != nil {
+		return nil, fmt.Errorf("failed to search emails: %w", err)
+	}
+
+	if len(emails) == 0 {
+		result := map[string]interface{}{
+			"modified": 0,
+			"message":  "No emails matched the query",
+			"query":    query,
+		}
+		return textContent(gmail.ToJSON(result)), nil
+	}
+
+	// Collect IDs
+	ids := make([]string, len(emails))
+	for i, e := range emails {
+		ids[i] = e.GmailID
+	}
+
+	// Batch modify in chunks of 1000 (Gmail API limit)
+	const chunkSize = 1000
+	modified := 0
+	for i := 0; i < len(ids); i += chunkSize {
+		end := i + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[i:end]
+
+		if err := svc.ModifyLabels(chunk, addLabels, removeLabels); err != nil {
+			return nil, fmt.Errorf("failed to modify labels (modified %d before error): %w", modified, err)
+		}
+		modified += len(chunk)
+	}
+
+	result := map[string]interface{}{
+		"modified": modified,
+		"query":    query,
+		"added":    addLabels,
+		"removed":  removeLabels,
+	}
+	return textContent(gmail.ToJSON(result)), nil
 }
 
 // --- Drive Tools ---
