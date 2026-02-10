@@ -10,7 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -69,7 +69,7 @@ func (s *LocalAgentServer) Start() error {
 		Handler: mux,
 	}
 
-	log.Printf("ACP server for '%s' listening on %s", s.config.Name, addr)
+	slog.Info("ACP server starting", "agent", s.config.Name, "address", addr)
 	return s.server.ListenAndServe()
 }
 

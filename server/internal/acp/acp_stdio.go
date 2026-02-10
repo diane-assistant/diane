@@ -148,9 +148,36 @@ type HTTPHeader struct {
 	Value string `json:"value"`
 }
 
+// ModelInfo represents a model available in a session
+type ModelInfo struct {
+	ModelID string `json:"modelId"`
+	Name    string `json:"name"`
+}
+
+// ModelsInfo represents the models configuration in a session
+type ModelsInfo struct {
+	CurrentModelID  string      `json:"currentModelId"`
+	AvailableModels []ModelInfo `json:"availableModels"`
+}
+
+// ModeInfo represents an available mode
+type ModeInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// ModesInfo represents the modes configuration in a session
+type ModesInfo struct {
+	CurrentModeID  string     `json:"currentModeId"`
+	AvailableModes []ModeInfo `json:"availableModes"`
+}
+
 // SessionNewResult is the response from session/new
 type SessionNewResult struct {
-	SessionID string `json:"sessionId"`
+	SessionID string      `json:"sessionId"`
+	Models    *ModelsInfo `json:"models,omitempty"`
+	Modes     *ModesInfo  `json:"modes,omitempty"`
 }
 
 // ContentBlock represents content in a message
@@ -517,6 +544,35 @@ func (c *StdioClient) NewSession(ctx context.Context, cwd string) (string, error
 	return result.SessionID, nil
 }
 
+// NewSessionWithInfo creates a new ACP session and returns full session info including models
+func (c *StdioClient) NewSessionWithInfo(ctx context.Context, cwd string) (*SessionNewResult, error) {
+	if !c.initialized {
+		return nil, fmt.Errorf("client not initialized")
+	}
+
+	params := SessionNewParams{
+		CWD:        cwd,
+		MCPServers: []MCPServer{}, // Empty array, required by ACP spec
+	}
+
+	resp, err := c.call(ctx, "session/new", params)
+	if err != nil {
+		return nil, fmt.Errorf("session/new failed: %w", err)
+	}
+
+	if resp.Error != nil {
+		return nil, resp.Error
+	}
+
+	var result SessionNewResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse session/new result: %w", err)
+	}
+
+	c.sessionID = result.SessionID
+	return &result, nil
+}
+
 // SetConfigOption sets a configuration option for a session
 func (c *StdioClient) SetConfigOption(ctx context.Context, sessionID, configID, value string) error {
 	params := SetConfigOptionParams{
@@ -703,4 +759,41 @@ func (c *StdioClient) IsInitialized() bool {
 // GetSessionID returns the current session ID
 func (c *StdioClient) GetSessionID() string {
 	return c.sessionID
+}
+
+// GetConfigOptionsParams are the parameters for session/get_config_options
+type GetConfigOptionsParams struct {
+	SessionID string `json:"sessionId"`
+}
+
+// GetConfigOptionsResult is the response from session/get_config_options
+type GetConfigOptionsResult struct {
+	ConfigOptions []ConfigOption `json:"configOptions"`
+}
+
+// GetConfigOptions retrieves the available configuration options for a session
+func (c *StdioClient) GetConfigOptions(ctx context.Context, sessionID string) ([]ConfigOption, error) {
+	if !c.initialized {
+		return nil, fmt.Errorf("client not initialized")
+	}
+
+	params := GetConfigOptionsParams{
+		SessionID: sessionID,
+	}
+
+	resp, err := c.call(ctx, "session/get_config_options", params)
+	if err != nil {
+		return nil, fmt.Errorf("session/get_config_options failed: %w", err)
+	}
+
+	if resp.Error != nil {
+		return nil, resp.Error
+	}
+
+	var result GetConfigOptionsResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse get_config_options result: %w", err)
+	}
+
+	return result.ConfigOptions, nil
 }

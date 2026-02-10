@@ -20,6 +20,9 @@ func main() {
 	client := api.NewClient()
 
 	switch os.Args[1] {
+	case "info":
+		handleInfoCommand(client)
+
 	case "status":
 		status, err := client.GetStatus()
 		if err != nil {
@@ -74,6 +77,10 @@ func main() {
 	// Gallery commands
 	case "gallery":
 		handleGalleryCommand(client, os.Args[2:])
+
+	// Auth commands
+	case "auth":
+		handleAuthCommand(client, os.Args[2:])
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
@@ -442,6 +449,251 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
+func handleAuthCommand(client *api.Client, args []string) {
+	if len(args) < 1 {
+		// List all OAuth servers
+		servers, err := client.ListOAuthServers()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if len(servers) == 0 {
+			fmt.Println("No MCP servers with OAuth configured.")
+			fmt.Println("\nTo configure OAuth, add an 'oauth' section to your server in ~/.diane/mcp-servers.json")
+			return
+		}
+
+		fmt.Printf("OAuth-enabled MCP Servers (%d):\n\n", len(servers))
+		for _, server := range servers {
+			status := "not authenticated"
+			if server.Authenticated {
+				status = "authenticated"
+			}
+			provider := ""
+			if server.Provider != "" {
+				provider = fmt.Sprintf(" (%s)", server.Provider)
+			}
+			fmt.Printf("  %-20s %s%s [%s]\n", server.Name, status, provider, server.Status)
+		}
+		fmt.Println("\nTo authenticate:")
+		fmt.Println("  diane-ctl auth login <server-name>")
+		return
+	}
+
+	subcommand := args[0]
+
+	switch subcommand {
+	case "login":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: diane-ctl auth login <server-name>\n")
+			os.Exit(1)
+		}
+		serverName := args[1]
+
+		fmt.Printf("Starting OAuth login for %s...\n\n", serverName)
+
+		// Start the device flow
+		deviceInfo, err := client.StartOAuthLogin(serverName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Display instructions to user
+		fmt.Printf("Please visit: %s\n", deviceInfo.VerificationURI)
+		fmt.Printf("Enter code:   %s\n\n", deviceInfo.UserCode)
+		fmt.Println("Waiting for authorization...")
+
+		// Use a longer timeout client for polling
+		longClient := api.NewClientWithTimeout(10 * time.Minute)
+
+		// Poll for token
+		if err := longClient.PollOAuthToken(serverName, deviceInfo.DeviceCode, deviceInfo.Interval); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("\nSuccessfully authenticated %s!\n", serverName)
+		fmt.Println("The MCP server has been restarted with the new credentials.")
+
+	case "status":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: diane-ctl auth status <server-name>\n")
+			os.Exit(1)
+		}
+		serverName := args[1]
+
+		status, err := client.GetOAuthStatus(serverName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		output, _ := json.MarshalIndent(status, "", "  ")
+		fmt.Println(string(output))
+
+	case "logout":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: diane-ctl auth logout <server-name>\n")
+			os.Exit(1)
+		}
+		serverName := args[1]
+
+		if err := client.LogoutOAuth(serverName); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Logged out from %s\n", serverName)
+
+	default:
+		// Treat as server name for status
+		serverName := subcommand
+		status, err := client.GetOAuthStatus(serverName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "\nUsage: diane-ctl auth <subcommand>\n")
+			fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
+			fmt.Fprintf(os.Stderr, "  login <server>   Start OAuth login for a server\n")
+			fmt.Fprintf(os.Stderr, "  status <server>  Show OAuth status for a server\n")
+			fmt.Fprintf(os.Stderr, "  logout <server>  Remove OAuth credentials for a server\n")
+			os.Exit(1)
+		}
+		output, _ := json.MarshalIndent(status, "", "  ")
+		fmt.Println(string(output))
+	}
+}
+
+func handleInfoCommand(client *api.Client) {
+	home, _ := os.UserHomeDir()
+	dianeBin := filepath.Join(home, ".diane", "bin", "diane")
+
+	// Check if Diane is running
+	status := "not running"
+	httpStatus := "unavailable"
+	toolCount := 0
+
+	if err := client.Health(); err == nil {
+		status = "running"
+		httpStatus = "http://localhost:8765"
+		// Get tool count
+		if s, err := client.GetStatus(); err == nil {
+			toolCount = s.TotalTools
+		}
+	}
+
+	fmt.Println(`
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                             DIANE MCP SERVER                                 ║
+╚══════════════════════════════════════════════════════════════════════════════╝`)
+
+	fmt.Printf(`
+  Status:     %s
+  HTTP:       %s
+  Tools:      %d available
+
+`, status, httpStatus, toolCount)
+
+	fmt.Println(`══════════════════════════════════════════════════════════════════════════════
+  CONNECTING TO DIANE
+══════════════════════════════════════════════════════════════════════════════`)
+
+	fmt.Printf(`
+  ── OpenCode ─────────────────────────────────────────────────────────────────
+
+  Add to your opencode.json:
+
+    {
+      "mcp": {
+        "diane": {
+          "command": ["%s"]
+        }
+      }
+    }
+
+`, dianeBin)
+
+	fmt.Printf(`  ── Claude Desktop ───────────────────────────────────────────────────────────
+
+  Add to claude_desktop_config.json:
+
+  macOS: ~/Library/Application Support/Claude/claude_desktop_config.json
+  Linux: ~/.config/claude/claude_desktop_config.json
+
+    {
+      "mcpServers": {
+        "diane": {
+          "command": "%s"
+        }
+      }
+    }
+
+`, dianeBin)
+
+	fmt.Printf(`  ── Cursor / Windsurf / Continue ─────────────────────────────────────────────
+
+  Add to your MCP settings:
+
+    {
+      "mcpServers": {
+        "diane": {
+          "command": "%s"
+        }
+      }
+    }
+
+`, dianeBin)
+
+	fmt.Println(`  ── HTTP / Network Clients ───────────────────────────────────────────────────
+
+  Diane exposes an HTTP Streamable MCP endpoint when running:
+
+    URL:     http://localhost:8765/mcp
+    SSE:     http://localhost:8765/mcp/sse
+    Health:  http://localhost:8765/health
+
+  Example configuration:
+
+    {
+      "mcpServers": {
+        "diane": {
+          "type": "http",
+          "url": "http://localhost:8765/mcp"
+        }
+      }
+    }
+`)
+
+	fmt.Println(`══════════════════════════════════════════════════════════════════════════════
+  TESTING CONNECTION
+══════════════════════════════════════════════════════════════════════════════
+
+  Test HTTP endpoint:
+
+    curl http://localhost:8765/health
+
+  Initialize MCP session:
+
+    curl -X POST http://localhost:8765/mcp \
+      -H "Content-Type: application/json" \
+      -H "Accept: application/json" \
+      -d '{"jsonrpc":"2.0","id":1,"method":"initialize",...}'
+
+══════════════════════════════════════════════════════════════════════════════
+  MORE INFO
+══════════════════════════════════════════════════════════════════════════════
+
+  Documentation:    ~/.diane/MCP.md
+  MCP Servers:      ~/.diane/mcp-servers.json
+  Logs:             ~/.diane/server.log
+
+  Commands:
+    diane-ctl status        Full status with all MCP servers
+    diane-ctl mcp-servers   List connected MCP servers
+    diane-ctl agents        List configured ACP agents
+    diane-ctl gallery       Browse installable agents
+`)
+}
+
 func printUsage() {
 	fmt.Println(`diane-ctl - Diane control utility
 
@@ -449,11 +701,18 @@ Usage:
   diane-ctl <command> [arguments]
 
 Commands:
+  info           Show connection guide for AI tools
   status         Show full Diane status
   health         Check if Diane is running
   mcp-servers    List all MCP servers and their status
   reload         Reload MCP configuration
   restart <name> Restart a specific MCP server
+
+OAuth Commands:
+  auth                        List MCP servers with OAuth configured
+  auth login <server>         Authenticate with an MCP server
+  auth status <server>        Show OAuth status for a server
+  auth logout <server>        Remove OAuth credentials
 
 ACP Agent Commands:
   agents                      List all configured ACP agents
@@ -477,11 +736,13 @@ Agent Gallery (one-click install):
   gallery refresh             Refresh the agent registry
 
 Examples:
-  diane-ctl gallery                                         # Browse available agents
-  diane-ctl gallery install gemini                          # Install Gemini CLI
-  diane-ctl gallery install gemini --workdir ~/myproject    # Install for a specific project
-  diane-ctl gallery install gemini --name gemini-work       # Install with custom name
-  diane-ctl agent run gemini "what is 2+2?"                 # Run a prompt
-  diane-ctl agent logs opencode                             # View logs for opencode agent
+  diane-ctl info                                              # Show connection guide
+  diane-ctl auth login github                                 # Authenticate with GitHub MCP
+  diane-ctl gallery                                           # Browse available agents
+  diane-ctl gallery install gemini                            # Install Gemini CLI
+  diane-ctl gallery install gemini --workdir ~/myproject      # Install for a specific project
+  diane-ctl gallery install gemini --name gemini-work         # Install with custom name
+  diane-ctl agent run gemini "what is 2+2?"                   # Run a prompt
+  diane-ctl agent logs opencode                               # View logs for opencode agent
   diane-ctl agents`)
 }

@@ -442,3 +442,117 @@ func (c *Client) RefreshGallery() error {
 
 	return nil
 }
+
+// ListOAuthServers returns all MCP servers with OAuth configuration
+func (c *Client) ListOAuthServers() ([]OAuthServerInfo, error) {
+	resp, err := c.httpClient.Get("http://unix/auth")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get OAuth servers: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OAuth servers request failed: %d", resp.StatusCode)
+	}
+
+	var servers []OAuthServerInfo
+	if err := json.NewDecoder(resp.Body).Decode(&servers); err != nil {
+		return nil, fmt.Errorf("failed to decode OAuth servers: %w", err)
+	}
+
+	return servers, nil
+}
+
+// GetOAuthStatus returns the OAuth status for a specific server
+func (c *Client) GetOAuthStatus(serverName string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("http://unix/auth/%s", serverName)
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get OAuth status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("OAuth status failed: %s", errResp.Error)
+	}
+
+	var status map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, fmt.Errorf("failed to decode OAuth status: %w", err)
+	}
+
+	return status, nil
+}
+
+// StartOAuthLogin initiates the OAuth device flow for a server
+func (c *Client) StartOAuthLogin(serverName string) (*DeviceCodeInfo, error) {
+	url := fmt.Sprintf("http://unix/auth/%s/login", serverName)
+	resp, err := c.httpClient.Post(url, "application/json", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start OAuth login: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("OAuth login failed: %s", errResp.Error)
+	}
+
+	var deviceInfo DeviceCodeInfo
+	if err := json.NewDecoder(resp.Body).Decode(&deviceInfo); err != nil {
+		return nil, fmt.Errorf("failed to decode device info: %w", err)
+	}
+
+	return &deviceInfo, nil
+}
+
+// PollOAuthToken polls for the OAuth token after user authorization
+func (c *Client) PollOAuthToken(serverName string, deviceCode string, interval int) error {
+	url := fmt.Sprintf("http://unix/auth/%s/poll", serverName)
+	body, _ := json.Marshal(map[string]interface{}{
+		"device_code": deviceCode,
+		"interval":    interval,
+	})
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to poll OAuth token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return fmt.Errorf("OAuth poll failed: %s", errResp.Error)
+	}
+
+	return nil
+}
+
+// LogoutOAuth removes the OAuth token for a server
+func (c *Client) LogoutOAuth(serverName string) error {
+	url := fmt.Sprintf("http://unix/auth/%s/logout", serverName)
+	resp, err := c.httpClient.Post(url, "application/json", nil)
+	if err != nil {
+		return fmt.Errorf("failed to logout: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return fmt.Errorf("logout failed: %s", errResp.Error)
+	}
+
+	return nil
+}

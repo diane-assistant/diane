@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -19,12 +19,14 @@ import (
 
 // MCPServerStatus represents the status of an MCP server
 type MCPServerStatus struct {
-	Name      string `json:"name"`
-	Enabled   bool   `json:"enabled"`
-	Connected bool   `json:"connected"`
-	ToolCount int    `json:"tool_count"`
-	Error     string `json:"error,omitempty"`
-	Builtin   bool   `json:"builtin,omitempty"`
+	Name          string `json:"name"`
+	Enabled       bool   `json:"enabled"`
+	Connected     bool   `json:"connected"`
+	ToolCount     int    `json:"tool_count"`
+	Error         string `json:"error,omitempty"`
+	Builtin       bool   `json:"builtin,omitempty"`
+	RequiresAuth  bool   `json:"requires_auth,omitempty"`
+	Authenticated bool   `json:"authenticated,omitempty"`
 }
 
 // Status represents the overall Diane status
@@ -85,6 +87,29 @@ type StatusProvider interface {
 	ToggleJob(name string, enabled bool) error
 	GetAgentLogs(agentName string, limit int) ([]AgentLog, error)
 	CreateAgentLog(agentName, direction, messageType string, content, errMsg *string, durationMs *int) error
+	// OAuth methods
+	GetOAuthServers() []OAuthServerInfo
+	GetOAuthStatus(serverName string) (map[string]interface{}, error)
+	StartOAuthLogin(serverName string) (*DeviceCodeInfo, error)
+	PollOAuthToken(serverName string, deviceCode string, interval int) error
+	DeleteOAuthToken(serverName string) error
+}
+
+// OAuthServerInfo represents an MCP server with OAuth configuration
+type OAuthServerInfo struct {
+	Name          string `json:"name"`
+	Provider      string `json:"provider,omitempty"`
+	Authenticated bool   `json:"authenticated"`
+	Status        string `json:"status"`
+}
+
+// DeviceCodeInfo contains the device code flow information for the user
+type DeviceCodeInfo struct {
+	UserCode        string `json:"user_code"`
+	VerificationURI string `json:"verification_uri"`
+	ExpiresIn       int    `json:"expires_in"`
+	Interval        int    `json:"interval"`
+	DeviceCode      string `json:"device_code"`
 }
 
 // AgentLog represents an agent communication log entry
@@ -126,13 +151,13 @@ func NewServer(statusProvider StatusProvider) (*Server, error) {
 	// Initialize ACP manager
 	acpManager, err := acp.NewManager()
 	if err != nil {
-		log.Printf("Warning: failed to initialize ACP manager: %v", err)
+		slog.Warn("Failed to initialize ACP manager", "error", err)
 	}
 
 	// Initialize Gallery
 	gallery, err := acp.NewGallery()
 	if err != nil {
-		log.Printf("Warning: failed to initialize ACP gallery: %v", err)
+		slog.Warn("Failed to initialize ACP gallery", "error", err)
 	}
 
 	return &Server{
@@ -153,7 +178,7 @@ func (s *Server) Start() error {
 
 	// Set socket permissions to be readable/writable by owner only
 	if err := os.Chmod(s.socketPath, 0600); err != nil {
-		log.Printf("Warning: failed to set socket permissions: %v", err)
+		slog.Warn("Failed to set socket permissions", "error", err)
 	}
 
 	mux := http.NewServeMux()
@@ -171,13 +196,15 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/agents/", s.handleAgentAction)
 	mux.HandleFunc("/gallery", s.handleGallery)
 	mux.HandleFunc("/gallery/", s.handleGalleryAction)
+	mux.HandleFunc("/auth", s.handleAuth)
+	mux.HandleFunc("/auth/", s.handleAuthAction)
 
 	s.server = &http.Server{Handler: mux}
 
 	go func() {
-		log.Printf("API server listening on %s", s.socketPath)
+		slog.Info("API server listening", "socket", s.socketPath)
 		if err := s.server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			log.Printf("API server error: %v", err)
+			slog.Error("API server error", "error", err)
 		}
 	}()
 
@@ -619,6 +646,44 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request) {
 
 		json.NewEncoder(w).Encode(run)
 
+	case "remote-agents":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		remoteAgents, err := s.acpManager.GetRemoteAgents(agentName)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(remoteAgents)
+
+	case "update":
+		if r.Method != http.MethodPost && r.Method != http.MethodPatch {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		var updates map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+			return
+		}
+
+		if err := s.acpManager.UpdateAgent(agentName, updates); err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{"status": "updated", "agent": agentName})
+
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Unknown action: " + action})
@@ -832,6 +897,117 @@ func (s *Server) handleGalleryAction(w http.ResponseWriter, r *http.Request) {
 				"info":        info,
 			})
 		}
+
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Unknown action: " + action})
+	}
+}
+
+// handleAuth handles listing OAuth servers and their status
+func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	servers := s.statusProvider.GetOAuthServers()
+	json.NewEncoder(w).Encode(servers)
+}
+
+// handleAuthAction handles OAuth actions for specific servers
+func (s *Server) handleAuthAction(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse path: /auth/{server} or /auth/{server}/action
+	path := strings.TrimPrefix(r.URL.Path, "/auth/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) == 0 || parts[0] == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Server name required"})
+		return
+	}
+
+	serverName := parts[0]
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	switch action {
+	case "", "status": // GET /auth/{server} or /auth/{server}/status
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		status, err := s.statusProvider.GetOAuthStatus(serverName)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(status)
+
+	case "login":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		deviceInfo, err := s.statusProvider.StartOAuthLogin(serverName)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(deviceInfo)
+
+	case "poll":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		var body struct {
+			DeviceCode string `json:"device_code"`
+			Interval   int    `json:"interval"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+			return
+		}
+
+		if err := s.statusProvider.PollOAuthToken(serverName, body.DeviceCode, body.Interval); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{"status": "authenticated"})
+
+	case "logout":
+		if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		if err := s.statusProvider.DeleteOAuthToken(serverName); err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{"status": "logged_out"})
 
 	default:
 		w.WriteHeader(http.StatusBadRequest)

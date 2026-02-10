@@ -31,6 +31,70 @@ type ToolProvider interface {
 	CheckDependencies() error
 }
 
+// --- MCP Prompts ---
+
+// Prompt represents an MCP prompt template
+type Prompt struct {
+	Name        string           `json:"name"`
+	Description string           `json:"description,omitempty"`
+	Arguments   []PromptArgument `json:"arguments,omitempty"`
+}
+
+// PromptArgument defines an argument for a prompt
+type PromptArgument struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+// PromptMessage represents a message in a prompt response
+type PromptMessage struct {
+	Role    string        `json:"role"` // "user" or "assistant"
+	Content PromptContent `json:"content"`
+}
+
+// PromptContent represents the content of a prompt message
+type PromptContent struct {
+	Type string `json:"type"` // "text"
+	Text string `json:"text"`
+}
+
+// PromptProvider is optionally implemented by providers that offer prompts
+type PromptProvider interface {
+	// Prompts returns all prompts provided by this module
+	Prompts() []Prompt
+
+	// GetPrompt returns a prompt with arguments substituted
+	GetPrompt(name string, args map[string]string) ([]PromptMessage, error)
+}
+
+// --- MCP Resources ---
+
+// Resource represents an MCP resource
+type Resource struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+}
+
+// ResourceContent represents the content of a resource
+type ResourceContent struct {
+	URI      string `json:"uri"`
+	MimeType string `json:"mimeType,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Blob     string `json:"blob,omitempty"` // base64 encoded
+}
+
+// ResourceProvider is optionally implemented by providers that offer resources
+type ResourceProvider interface {
+	// Resources returns all resources provided by this module
+	Resources() []Resource
+
+	// ReadResource returns the content of a resource
+	ReadResource(uri string) (*ResourceContent, error)
+}
+
 // --- Response Helpers ---
 
 // TextContent creates an MCP text content response

@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -72,7 +72,7 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		log.Println("Shutting down...")
+		slog.Info("Shutting down...")
 		server.Stop()
 		os.Exit(0)
 	}()
@@ -83,7 +83,8 @@ func main() {
 	fmt.Println("")
 
 	if err := server.Start(); err != nil {
-		log.Fatalf("Server error: %v", err)
+		slog.Error("Server error", "error", err)
+		os.Exit(1)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,12 +19,13 @@ import (
 type AgentConfig struct {
 	Name        string            `json:"name"`
 	URL         string            `json:"url"`
-	Type        string            `json:"type,omitempty"`    // "acp" (default), "stdio" for local agents
-	Command     string            `json:"command,omitempty"` // For stdio agents
-	Args        []string          `json:"args,omitempty"`    // For stdio agents
-	Env         map[string]string `json:"env,omitempty"`     // Environment variables
-	WorkDir     string            `json:"workdir,omitempty"` // Working directory/project path for the agent
-	Port        int               `json:"port,omitempty"`    // Port for ACP server (auto-assigned if 0)
+	Type        string            `json:"type,omitempty"`      // "acp" (default), "stdio" for local agents
+	Command     string            `json:"command,omitempty"`   // For stdio agents
+	Args        []string          `json:"args,omitempty"`      // For stdio agents
+	Env         map[string]string `json:"env,omitempty"`       // Environment variables
+	WorkDir     string            `json:"workdir,omitempty"`   // Working directory/project path for the agent
+	Port        int               `json:"port,omitempty"`      // Port for ACP server (auto-assigned if 0)
+	SubAgent    string            `json:"sub_agent,omitempty"` // Sub-agent name to use (for servers with multiple agents)
 	Enabled     bool              `json:"enabled"`
 	Description string            `json:"description,omitempty"`
 	Tags        []string          `json:"tags,omitempty"`
@@ -188,6 +190,33 @@ func (m *Manager) EnableAgent(name string, enabled bool) error {
 	for i, a := range m.config.Agents {
 		if a.Name == name {
 			m.config.Agents[i].Enabled = enabled
+			return m.saveConfig()
+		}
+	}
+
+	return fmt.Errorf("agent '%s' not found", name)
+}
+
+// UpdateAgent updates an agent's configuration (partial update)
+func (m *Manager) UpdateAgent(name string, updates map[string]interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for i, a := range m.config.Agents {
+		if a.Name == name {
+			// Apply updates
+			if subAgent, ok := updates["sub_agent"].(string); ok {
+				m.config.Agents[i].SubAgent = subAgent
+			}
+			if enabled, ok := updates["enabled"].(bool); ok {
+				m.config.Agents[i].Enabled = enabled
+			}
+			if description, ok := updates["description"].(string); ok {
+				m.config.Agents[i].Description = description
+			}
+			if workDir, ok := updates["workdir"].(string); ok {
+				m.config.Agents[i].WorkDir = workDir
+			}
 			return m.saveConfig()
 		}
 	}
@@ -407,6 +436,210 @@ type AgentTestResult struct {
 	Version    string   `json:"version,omitempty"`
 	AgentCount int      `json:"agent_count,omitempty"`
 	Agents     []string `json:"agents,omitempty"`
+}
+
+// RemoteAgentInfo represents a sub-agent available from an ACP server
+type RemoteAgentInfo struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Options     []string `json:"options,omitempty"`
+}
+
+// GetRemoteAgents fetches available sub-agents/config options from an ACP agent
+func (m *Manager) GetRemoteAgents(name string) ([]RemoteAgentInfo, error) {
+	agent, err := m.GetAgent(name)
+	if err != nil {
+		return nil, err
+	}
+
+	if !agent.Enabled {
+		return nil, fmt.Errorf("agent '%s' is disabled", name)
+	}
+
+	// Only ACP agents support remote agent discovery
+	if agent.Type != "acp" && agent.Type != "" {
+		return nil, fmt.Errorf("agent '%s' is not an ACP agent", name)
+	}
+
+	// Determine command and args
+	command := agent.Command
+	args := agent.Args
+
+	if command == "" {
+		command = agent.Name
+		args = getACPArgsForAgent(agent.Name)
+	}
+
+	// Check if command exists
+	cmdPath, err := exec.LookPath(command)
+	if err != nil {
+		return nil, fmt.Errorf("command not found: %s", command)
+	}
+
+	// Create a stdio client to query config options
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := NewStdioClient(cmdPath, args, agent.WorkDir, agent.Env)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start agent: %v", err)
+	}
+	defer client.Close()
+
+	// Initialize
+	if err := client.Initialize(ctx); err != nil {
+		return nil, fmt.Errorf("initialization failed: %v", err)
+	}
+
+	// Create session to get models and config options
+	cwd := agent.WorkDir
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+
+	sessionInfo, err := client.NewSessionWithInfo(ctx, cwd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session: %v", err)
+	}
+
+	var remoteAgents []RemoteAgentInfo
+
+	// Extract models from session info (OpenCode style)
+	if sessionInfo.Models != nil && len(sessionInfo.Models.AvailableModels) > 0 {
+		var modelOptions []string
+		for _, model := range sessionInfo.Models.AvailableModels {
+			modelOptions = append(modelOptions, model.ModelID)
+		}
+		remoteAgents = append(remoteAgents, RemoteAgentInfo{
+			ID:          "model",
+			Name:        "Model",
+			Description: fmt.Sprintf("Current: %s", sessionInfo.Models.CurrentModelID),
+			Options:     modelOptions,
+		})
+	}
+
+	// Extract modes from session info
+	if sessionInfo.Modes != nil && len(sessionInfo.Modes.AvailableModes) > 0 {
+		var modeOptions []string
+		for _, mode := range sessionInfo.Modes.AvailableModes {
+			modeOptions = append(modeOptions, mode.ID)
+		}
+		remoteAgents = append(remoteAgents, RemoteAgentInfo{
+			ID:          "mode",
+			Name:        "Mode",
+			Description: fmt.Sprintf("Current: %s", sessionInfo.Modes.CurrentModeID),
+			Options:     modeOptions,
+		})
+	}
+
+	// If we got models/modes from session info, return them
+	if len(remoteAgents) > 0 {
+		return remoteAgents, nil
+	}
+
+	// Fallback: Try to get config options (for agents that support this method)
+	configOptions, err := client.GetConfigOptions(ctx, sessionInfo.SessionID)
+	if err != nil {
+		// Check if the agent doesn't support config options (Method not found error)
+		// This is expected for agents that don't implement session/get_config_options
+		errStr := err.Error()
+		if strings.Contains(errStr, "Method not found") || strings.Contains(errStr, "-32601") {
+			// Agent doesn't support config options, try known models fallback
+			if knownModels := getKnownModelsForAgent(agent.Name); knownModels != nil {
+				return knownModels, nil
+			}
+			return []RemoteAgentInfo{}, nil
+		}
+		return nil, fmt.Errorf("failed to get config options: %v", err)
+	}
+
+	// Convert config options to remote agent info
+	// Look for config options that represent agent/model selection
+	for _, opt := range configOptions {
+		// Look for agent-related config options (typically named "agent", "subagent", "model", etc.)
+		if opt.ID == "agent" || opt.ID == "subagent" || opt.ID == "sub_agent" || opt.ID == "model" || opt.Category == "agent" {
+			info := RemoteAgentInfo{
+				ID:          opt.ID,
+				Name:        opt.Name,
+				Description: opt.Description,
+			}
+			for _, optVal := range opt.Options {
+				info.Options = append(info.Options, optVal.Value)
+			}
+			remoteAgents = append(remoteAgents, info)
+		}
+	}
+
+	// If no agent-specific options found, return all config options as potential agents
+	if len(remoteAgents) == 0 {
+		for _, opt := range configOptions {
+			if len(opt.Options) > 0 {
+				info := RemoteAgentInfo{
+					ID:          opt.ID,
+					Name:        opt.Name,
+					Description: opt.Description,
+				}
+				for _, optVal := range opt.Options {
+					info.Options = append(info.Options, optVal.Value)
+				}
+				remoteAgents = append(remoteAgents, info)
+			}
+		}
+	}
+
+	return remoteAgents, nil
+}
+
+// getKnownModelsForAgent returns known models for popular agents that don't expose them via ACP
+func getKnownModelsForAgent(agentName string) []RemoteAgentInfo {
+	knownModels := map[string][]string{
+		"gemini": {
+			"gemini-3-pro",
+			"gemini-3-flash",
+			"gemini-2.5-pro",
+			"gemini-2.5-flash",
+			"gemini-2.5-flash-lite",
+			"gemini-2.0-flash",
+			"gemini-2.0-flash-lite",
+			"gemini-1.5-pro",
+			"gemini-1.5-flash",
+		},
+		"claude-code-acp": {
+			"claude-sonnet-4-5-20250514",
+			"claude-sonnet-4-20250514",
+			"claude-opus-4-20250514",
+		},
+	}
+
+	if models, ok := knownModels[agentName]; ok {
+		return []RemoteAgentInfo{
+			{
+				ID:          "model",
+				Name:        "Model",
+				Description: "Use --model flag or GEMINI_MODEL env var",
+				Options:     models,
+			},
+		}
+	}
+	return nil
+}
+
+// getACPArgsForAgent returns the ACP command-line args for known agents
+func getACPArgsForAgent(agentName string) []string {
+	acpArgs := map[string][]string{
+		"opencode":        {"acp"},
+		"gemini":          {"--experimental-acp"},
+		"claude-code-acp": {"--acp"},
+		"codex-acp":       {"acp"},
+		"auggie":          {"acp"},
+	}
+
+	if args, ok := acpArgs[agentName]; ok {
+		return args
+	}
+	// Default to "acp" subcommand
+	return []string{"acp"}
 }
 
 // Reload reloads the configuration from disk

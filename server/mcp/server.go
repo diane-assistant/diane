@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -13,8 +13,11 @@ import (
 
 	"github.com/diane-assistant/diane/internal/api"
 	"github.com/diane-assistant/diane/internal/db"
+	"github.com/diane-assistant/diane/internal/logger"
 	"github.com/diane-assistant/diane/internal/mcpproxy"
+	"github.com/diane-assistant/diane/mcp/tools"
 	"github.com/diane-assistant/diane/mcp/tools/apple"
+	"github.com/diane-assistant/diane/mcp/tools/downloads"
 	"github.com/diane-assistant/diane/mcp/tools/finance"
 	githubbot "github.com/diane-assistant/diane/mcp/tools/github"
 	"github.com/diane-assistant/diane/mcp/tools/google"
@@ -39,8 +42,10 @@ var notificationsProvider *notifications.Provider
 var financeProvider *finance.Provider
 var placesProvider *places.Provider
 var weatherProvider *weather.Provider
-var githubProvider *githubbot.Provider
+var githubProvider *githubbot.Provider    // GitHub App bot tools
+var downloadsProvider *downloads.Provider // File download tools
 var apiServer *api.Server
+var mcpHTTPServer *api.MCPHTTPServer
 var startTime time.Time
 
 // DianeStatusProvider implements api.StatusProvider
@@ -146,10 +151,20 @@ func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
 
 	if githubProvider != nil {
 		servers = append(servers, api.MCPServerStatus{
-			Name:      "github",
+			Name:      "github-bot",
 			Enabled:   true,
 			Connected: true,
 			ToolCount: len(githubProvider.Tools()),
+			Builtin:   true,
+		})
+	}
+
+	if downloadsProvider != nil {
+		servers = append(servers, api.MCPServerStatus{
+			Name:      "downloads",
+			Enabled:   true,
+			Connected: true,
+			ToolCount: len(downloadsProvider.Tools()),
 			Builtin:   true,
 		})
 	}
@@ -159,12 +174,14 @@ func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
 		proxyStatuses := proxy.GetServerStatuses()
 		for _, s := range proxyStatuses {
 			servers = append(servers, api.MCPServerStatus{
-				Name:      s.Name,
-				Enabled:   s.Enabled,
-				Connected: s.Connected,
-				ToolCount: s.ToolCount,
-				Error:     s.Error,
-				Builtin:   false,
+				Name:          s.Name,
+				Enabled:       s.Enabled,
+				Connected:     s.Connected,
+				ToolCount:     s.ToolCount,
+				Error:         s.Error,
+				Builtin:       false,
+				RequiresAuth:  s.RequiresAuth,
+				Authenticated: s.Authenticated,
 			})
 		}
 	}
@@ -328,6 +345,162 @@ func (d *DianeStatusProvider) CreateAgentLog(agentName, direction, messageType s
 	return err
 }
 
+// OAuth methods for MCP server authentication
+
+// GetOAuthServers returns all MCP servers with OAuth configuration
+func (d *DianeStatusProvider) GetOAuthServers() []api.OAuthServerInfo {
+	if proxy == nil {
+		return nil
+	}
+
+	oauthMgr := mcpproxy.GetOAuthManager()
+	servers := proxy.GetServersWithOAuth()
+	result := make([]api.OAuthServerInfo, 0, len(servers))
+
+	for _, s := range servers {
+		info := api.OAuthServerInfo{
+			Name: s.Name,
+		}
+
+		if s.OAuth != nil {
+			info.Provider = s.OAuth.Provider
+		}
+
+		if oauthMgr != nil {
+			status := oauthMgr.GetTokenStatus(s.Name)
+			if authenticated, ok := status["authenticated"].(bool); ok {
+				info.Authenticated = authenticated
+			}
+			if st, ok := status["status"].(string); ok {
+				info.Status = st
+			}
+		} else {
+			info.Status = "oauth_unavailable"
+		}
+
+		result = append(result, info)
+	}
+
+	return result
+}
+
+// GetOAuthStatus returns OAuth status for a specific server
+func (d *DianeStatusProvider) GetOAuthStatus(serverName string) (map[string]interface{}, error) {
+	if proxy == nil {
+		return nil, fmt.Errorf("proxy not initialized")
+	}
+
+	config := proxy.GetServerConfig(serverName)
+	if config == nil {
+		return nil, fmt.Errorf("server not found: %s", serverName)
+	}
+
+	if config.OAuth == nil {
+		return nil, fmt.Errorf("server %s does not have OAuth configured", serverName)
+	}
+
+	oauthMgr := mcpproxy.GetOAuthManager()
+	if oauthMgr == nil {
+		return nil, fmt.Errorf("OAuth manager not available")
+	}
+
+	status := oauthMgr.GetTokenStatus(serverName)
+	status["server"] = serverName
+	if config.OAuth.Provider != "" {
+		status["provider"] = config.OAuth.Provider
+	}
+
+	return status, nil
+}
+
+// StartOAuthLogin starts the OAuth device flow for a server
+func (d *DianeStatusProvider) StartOAuthLogin(serverName string) (*api.DeviceCodeInfo, error) {
+	if proxy == nil {
+		return nil, fmt.Errorf("proxy not initialized")
+	}
+
+	config := proxy.GetServerConfig(serverName)
+	if config == nil {
+		return nil, fmt.Errorf("server not found: %s", serverName)
+	}
+
+	if config.OAuth == nil {
+		return nil, fmt.Errorf("server %s does not have OAuth configured", serverName)
+	}
+
+	providerConfig := mcpproxy.GetProviderConfig(config.OAuth)
+	if providerConfig == nil {
+		return nil, fmt.Errorf("invalid OAuth configuration for server %s", serverName)
+	}
+
+	oauthMgr := mcpproxy.GetOAuthManager()
+	if oauthMgr == nil {
+		return nil, fmt.Errorf("OAuth manager not available")
+	}
+
+	deviceResp, err := oauthMgr.StartDeviceFlow(serverName, providerConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return &api.DeviceCodeInfo{
+		UserCode:        deviceResp.UserCode,
+		VerificationURI: deviceResp.VerificationURI,
+		ExpiresIn:       deviceResp.ExpiresIn,
+		Interval:        deviceResp.Interval,
+		DeviceCode:      deviceResp.DeviceCode,
+	}, nil
+}
+
+// PollOAuthToken polls for the OAuth token after user authorization
+func (d *DianeStatusProvider) PollOAuthToken(serverName string, deviceCode string, interval int) error {
+	if proxy == nil {
+		return fmt.Errorf("proxy not initialized")
+	}
+
+	config := proxy.GetServerConfig(serverName)
+	if config == nil {
+		return fmt.Errorf("server not found: %s", serverName)
+	}
+
+	if config.OAuth == nil {
+		return fmt.Errorf("server %s does not have OAuth configured", serverName)
+	}
+
+	providerConfig := mcpproxy.GetProviderConfig(config.OAuth)
+	if providerConfig == nil {
+		return fmt.Errorf("invalid OAuth configuration for server %s", serverName)
+	}
+
+	oauthMgr := mcpproxy.GetOAuthManager()
+	if oauthMgr == nil {
+		return fmt.Errorf("OAuth manager not available")
+	}
+
+	_, err := oauthMgr.PollForToken(serverName, providerConfig, deviceCode, interval)
+	if err != nil {
+		return err
+	}
+
+	// After successful auth, restart the server to re-initialize with the new token
+	slog.Info("OAuth authentication successful, restarting server", "server", serverName)
+	if err := proxy.RestartServer(serverName); err != nil {
+		slog.Warn("Failed to restart server after OAuth", "server", serverName, "error", err)
+	}
+
+	return nil
+}
+
+// DeleteOAuthToken removes OAuth token for a server
+func (d *DianeStatusProvider) DeleteOAuthToken(serverName string) error {
+	oauthMgr := mcpproxy.GetOAuthManager()
+	if oauthMgr == nil {
+		return fmt.Errorf("OAuth manager not available")
+	}
+
+	return oauthMgr.DeleteToken(serverName)
+}
+
 // GetAllTools returns detailed information about all available tools
 func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 	var tools []api.ToolInfo
@@ -443,7 +616,19 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 			tools = append(tools, api.ToolInfo{
 				Name:        tool.Name,
 				Description: tool.Description,
-				Server:      "github",
+				Server:      "github-bot",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// Downloads tools
+	if downloadsProvider != nil {
+		for _, tool := range downloadsProvider.Tools() {
+			tools = append(tools, api.ToolInfo{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Server:      "downloads",
 				Builtin:     true,
 			})
 		}
@@ -497,6 +682,9 @@ func (d *DianeStatusProvider) countTotalTools() int {
 	if githubProvider != nil {
 		total += len(githubProvider.Tools())
 	}
+	if downloadsProvider != nil {
+		total += len(downloadsProvider.Tools())
+	}
 	if proxy != nil {
 		total += proxy.GetTotalToolCount()
 	}
@@ -519,6 +707,51 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm %ds", m, s)
 	}
 	return fmt.Sprintf("%ds", s)
+}
+
+// MCPHandlerAdapter adapts the existing handleRequest to the api.MCPHandler interface
+type MCPHandlerAdapter struct {
+	statusProvider *DianeStatusProvider
+}
+
+// HandleRequest implements api.MCPHandler
+func (h *MCPHandlerAdapter) HandleRequest(req api.MCPRequest) api.MCPResponse {
+	// Convert api.MCPRequest to local MCPRequest
+	localReq := MCPRequest{
+		JSONRPC: req.JSONRPC,
+		ID:      req.ID,
+		Method:  req.Method,
+		Params:  req.Params,
+	}
+
+	// Call the existing handleRequest function
+	localResp := handleRequest(localReq)
+
+	// Convert local MCPResponse to api.MCPResponse
+	var result json.RawMessage
+	if localResp.Result != nil {
+		result, _ = json.Marshal(localResp.Result)
+	}
+
+	var apiErr *api.MCPError
+	if localResp.Error != nil {
+		apiErr = &api.MCPError{
+			Code:    localResp.Error.Code,
+			Message: localResp.Error.Message,
+		}
+	}
+
+	return api.MCPResponse{
+		JSONRPC: localResp.JSONRPC,
+		ID:      localResp.ID,
+		Result:  result,
+		Error:   apiErr,
+	}
+}
+
+// GetTools implements api.MCPHandler
+func (h *MCPHandlerAdapter) GetTools() ([]api.ToolInfo, error) {
+	return h.statusProvider.GetAllTools(), nil
 }
 
 type MCPRequest struct {
@@ -585,21 +818,37 @@ func main() {
 	// Get home directory for pid/lock files
 	home, err := os.UserHomeDir()
 	if err != nil {
-		log.Fatalf("Failed to get home directory: %v", err)
+		// Can't use logger yet, use stderr
+		fmt.Fprintf(os.Stderr, "Failed to get home directory: %v\n", err)
+		os.Exit(1)
 	}
+
+	// Initialize structured logging
+	logDir := filepath.Join(home, ".diane")
+	if err := logger.Init(logger.Config{
+		LogDir:    logDir,
+		Debug:     os.Getenv("DIANE_DEBUG") == "1",
+		JSON:      true,
+		Component: "diane",
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	slog.Info("Diane server starting", "version", Version, "pid", os.Getpid())
 
 	// Single instance check: try to acquire exclusive lock on lock file
 	lockFile := filepath.Join(home, ".diane", "diane.lock")
 	lock, err := acquireLock(lockFile)
 	if err != nil {
-		log.Fatalf("Another instance of Diane is already running: %v", err)
+		logger.Fatal("Another instance of Diane is already running", "error", err)
 	}
 	defer releaseLock(lock, lockFile)
 
 	// Write PID file for reload command
 	pidFile := filepath.Join(home, ".diane", "mcp.pid")
 	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
-		log.Printf("Warning: Failed to write PID file: %v", err)
+		slog.Warn("Failed to write PID file", "error", err)
 	}
 	defer os.Remove(pidFile)
 
@@ -607,7 +856,7 @@ func main() {
 	configPath := mcpproxy.GetDefaultConfigPath()
 	proxy, err = mcpproxy.NewProxy(configPath)
 	if err != nil {
-		log.Printf("Warning: Failed to initialize MCP proxy: %v", err)
+		slog.Warn("Failed to initialize MCP proxy", "error", err)
 		// Continue without proxy - built-in tools will still work
 	}
 	defer func() {
@@ -619,91 +868,115 @@ func main() {
 	// Initialize Apple tools provider (only on macOS)
 	appleProvider = apple.NewProvider()
 	if err := appleProvider.CheckDependencies(); err != nil {
-		log.Printf("Warning: Apple tools not available: %v", err)
+		slog.Warn("Apple tools not available", "error", err)
 		appleProvider = nil
 	} else {
-		log.Printf("Apple tools initialized successfully")
+		slog.Info("Apple tools initialized successfully")
 	}
 
 	// Initialize Google tools provider
 	googleProvider = google.NewProvider()
 	if err := googleProvider.CheckDependencies(); err != nil {
-		log.Printf("Warning: Google tools not available: %v", err)
+		slog.Warn("Google tools not available", "error", err)
 		googleProvider = nil
 	} else {
-		log.Printf("Google tools initialized successfully")
+		slog.Info("Google tools initialized successfully")
 	}
 
 	// Initialize Infrastructure tools provider (Cloudflare DNS)
 	infrastructureProvider = infrastructure.NewProvider()
 	if err := infrastructureProvider.CheckDependencies(); err != nil {
-		log.Printf("Warning: Infrastructure tools not available: %v", err)
+		slog.Warn("Infrastructure tools not available", "error", err)
 		infrastructureProvider = nil
 	} else {
-		log.Printf("Infrastructure tools initialized successfully")
+		slog.Info("Infrastructure tools initialized successfully")
 	}
 
 	// Initialize Notifications tools provider (Discord, Home Assistant)
 	notificationsProvider = notifications.NewProvider()
 	if err := notificationsProvider.CheckDependencies(); err != nil {
-		log.Printf("Warning: Notifications tools not available: %v", err)
+		slog.Warn("Notifications tools not available", "error", err)
 		notificationsProvider = nil
 	} else {
-		log.Printf("Notifications tools initialized successfully")
+		slog.Info("Notifications tools initialized successfully")
 	}
 
 	// Initialize Finance tools provider (Enable Banking, Actual Budget, Bank Sync)
 	financeProvider = finance.NewProvider()
 	if err := financeProvider.CheckDependencies(); err != nil {
-		log.Printf("Warning: Finance tools not available: %v", err)
+		slog.Warn("Finance tools not available", "error", err)
 		financeProvider = nil
 	} else {
-		log.Printf("Finance tools initialized successfully")
+		slog.Info("Finance tools initialized successfully")
 	}
 
 	// Initialize Google Places tools provider
 	placesProvider = places.NewProvider()
 	if err := placesProvider.CheckDependencies(); err != nil {
-		log.Printf("Warning: Google Places tools not available: %v", err)
+		slog.Warn("Google Places tools not available", "error", err)
 		placesProvider = nil
 	} else {
-		log.Printf("Google Places tools initialized successfully")
+		slog.Info("Google Places tools initialized successfully")
 	}
 
 	// Initialize Weather tools provider
 	weatherProvider = weather.NewProvider()
 	if err := weatherProvider.CheckDependencies(); err != nil {
-		log.Printf("Warning: Weather tools not available: %v", err)
+		slog.Warn("Weather tools not available", "error", err)
 		weatherProvider = nil
 	} else {
-		log.Printf("Weather tools initialized successfully")
+		slog.Info("Weather tools initialized successfully")
 	}
 
 	// Initialize GitHub Bot tools provider
 	var githubErr error
 	githubProvider, githubErr = githubbot.NewProvider()
 	if githubErr != nil {
-		log.Printf("Warning: GitHub Bot tools not available: %v", githubErr)
+		slog.Warn("GitHub Bot tools not available", "error", githubErr)
 		githubProvider = nil
 	} else {
-		log.Printf("GitHub Bot tools initialized successfully")
+		slog.Info("GitHub Bot tools initialized successfully")
+	}
+
+	// Initialize Downloads tools provider
+	var downloadsErr error
+	downloadsProvider, downloadsErr = downloads.NewProvider()
+	if downloadsErr != nil {
+		slog.Warn("Downloads tools not available", "error", downloadsErr)
+		downloadsProvider = nil
+	} else {
+		slog.Info("Downloads tools initialized successfully")
 	}
 
 	// Start the Unix socket API server for companion app
 	statusProvider := &DianeStatusProvider{}
 	apiServer, err = api.NewServer(statusProvider)
 	if err != nil {
-		log.Printf("Warning: Failed to create API server: %v", err)
+		slog.Warn("Failed to create API server", "error", err)
 	} else {
 		if err := apiServer.Start(); err != nil {
-			log.Printf("Warning: Failed to start API server: %v", err)
+			slog.Warn("Failed to start API server", "error", err)
 		} else {
-			log.Printf("API server started successfully")
+			slog.Info("API server started successfully")
 		}
 	}
 	defer func() {
 		if apiServer != nil {
 			apiServer.Stop()
+		}
+	}()
+
+	// Start the MCP HTTP/SSE server for network-based MCP clients
+	mcpHandler := &MCPHandlerAdapter{statusProvider: statusProvider}
+	mcpHTTPServer = api.NewMCPHTTPServer(statusProvider, mcpHandler, 8765)
+	if err := mcpHTTPServer.Start(); err != nil {
+		slog.Warn("Failed to start MCP HTTP server", "error", err)
+	} else {
+		slog.Info("MCP HTTP server started", "port", 8765)
+	}
+	defer func() {
+		if mcpHTTPServer != nil {
+			mcpHTTPServer.Stop()
 		}
 	}()
 
@@ -723,9 +996,9 @@ func main() {
 		signal.Notify(sigChan, syscall.SIGUSR1)
 		go func() {
 			for range sigChan {
-				log.Printf("Received SIGUSR1, reloading MCP configuration...")
+				slog.Info("Received SIGUSR1, reloading MCP configuration")
 				if err := proxy.Reload(); err != nil {
-					log.Printf("Failed to reload MCP config: %v", err)
+					slog.Error("Failed to reload MCP config", "error", err)
 				}
 			}
 		}()
@@ -740,7 +1013,7 @@ func main() {
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}
-			log.Printf("Failed to decode request: %v", err)
+			slog.Error("Failed to decode request", "error", err)
 			break
 		}
 
@@ -748,7 +1021,7 @@ func main() {
 		resp.JSONRPC = "2.0"
 		resp.ID = req.ID
 		if err := encoder.Encode(resp); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			slog.Error("Failed to encode response", "error", err)
 			break
 		}
 	}
@@ -762,6 +1035,14 @@ func handleRequest(req MCPRequest) MCPResponse {
 		return listTools()
 	case "tools/call":
 		return callTool(req.Params)
+	case "prompts/list":
+		return listPrompts()
+	case "prompts/get":
+		return getPrompt(req.Params)
+	case "resources/list":
+		return listResources()
+	case "resources/read":
+		return readResource(req.Params)
 	default:
 		return MCPResponse{
 			Error: &MCPError{
@@ -776,18 +1057,24 @@ func handleRequest(req MCPRequest) MCPResponse {
 // and forwards them to the MCP client (OpenCode)
 func forwardProxiedNotifications(p *mcpproxy.Proxy) {
 	for serverName := range p.NotificationChan() {
-		log.Printf("Received tools/list_changed notification from proxied server: %s", serverName)
+		slog.Info("Received tools/list_changed notification from proxied server", "server", serverName)
 
-		// Send notification to stdout (to OpenCode)
+		// Send notification to stdout (to OpenCode via stdio)
 		notification := map[string]interface{}{
 			"jsonrpc": "2.0",
 			"method":  "notifications/tools/list_changed",
 		}
 
 		if err := globalEncoder.Encode(notification); err != nil {
-			log.Printf("Failed to send notification: %v", err)
+			slog.Error("Failed to send notification", "error", err)
 		} else {
-			log.Printf("Forwarded tools/list_changed notification to MCP client")
+			slog.Debug("Forwarded tools/list_changed notification to MCP client")
+		}
+
+		// Also send to HTTP/SSE clients
+		if mcpHTTPServer != nil {
+			mcpHTTPServer.SendNotification("notifications/tools/list_changed", nil)
+			slog.Debug("Forwarded tools/list_changed notification to HTTP/SSE clients")
 		}
 	}
 }
@@ -799,6 +1086,13 @@ func initialize() MCPResponse {
 			"capabilities": map[string]interface{}{
 				"tools": map[string]interface{}{
 					"listChanged": true, // Diane supports dynamic tool list updates from proxied servers
+				},
+				"prompts": map[string]interface{}{
+					"listChanged": false,
+				},
+				"resources": map[string]interface{}{
+					"subscribe":   false,
+					"listChanged": false,
 				},
 			},
 			"serverInfo": map[string]interface{}{
@@ -1020,11 +1314,22 @@ func listTools() MCPResponse {
 		}
 	}
 
+	// Add Downloads tools
+	if downloadsProvider != nil {
+		for _, tool := range downloadsProvider.Tools() {
+			tools = append(tools, map[string]interface{}{
+				"name":        tool.Name,
+				"description": tool.Description,
+				"inputSchema": tool.InputSchema,
+			})
+		}
+	}
+
 	// Add proxied tools from other MCP servers
 	if proxy != nil {
 		proxiedTools, err := proxy.ListAllTools()
 		if err != nil {
-			log.Printf("Failed to list proxied tools: %v", err)
+			slog.Warn("Failed to list proxied tools", "error", err)
 		} else {
 			tools = append(tools, proxiedTools...)
 		}
@@ -1184,6 +1489,20 @@ func callTool(params json.RawMessage) MCPResponse {
 			return MCPResponse{Result: result}
 		}
 
+		// Try Downloads tools
+		if downloadsProvider != nil && downloadsProvider.HasTool(call.Name) {
+			result, err := downloadsProvider.Call(call.Name, call.Arguments)
+			if err != nil {
+				return MCPResponse{
+					Error: &MCPError{
+						Code:    -1,
+						Message: err.Error(),
+					},
+				}
+			}
+			return MCPResponse{Result: result}
+		}
+
 		// Try proxied tools
 		if proxy != nil {
 			result, err := proxy.CallTool(call.Name, call.Arguments)
@@ -1197,6 +1516,192 @@ func callTool(params json.RawMessage) MCPResponse {
 				Message: fmt.Sprintf("Tool not found: %s", call.Name),
 			},
 		}
+	}
+}
+
+// --- Prompts ---
+
+func listPrompts() MCPResponse {
+	var prompts []map[string]interface{}
+
+	// Collect prompts from Google provider
+	if googleProvider != nil {
+		if pp, ok := interface{}(googleProvider).(tools.PromptProvider); ok {
+			for _, p := range pp.Prompts() {
+				prompt := map[string]interface{}{
+					"name":        p.Name,
+					"description": p.Description,
+				}
+				if len(p.Arguments) > 0 {
+					args := make([]map[string]interface{}, len(p.Arguments))
+					for i, arg := range p.Arguments {
+						args[i] = map[string]interface{}{
+							"name":        arg.Name,
+							"description": arg.Description,
+							"required":    arg.Required,
+						}
+					}
+					prompt["arguments"] = args
+				}
+				prompts = append(prompts, prompt)
+			}
+		}
+	}
+
+	return MCPResponse{
+		Result: map[string]interface{}{
+			"prompts": prompts,
+		},
+	}
+}
+
+func getPrompt(params json.RawMessage) MCPResponse {
+	var req struct {
+		Name      string            `json:"name"`
+		Arguments map[string]string `json:"arguments"`
+	}
+
+	if err := json.Unmarshal(params, &req); err != nil {
+		return MCPResponse{
+			Error: &MCPError{
+				Code:    -32602,
+				Message: fmt.Sprintf("Invalid params: %v", err),
+			},
+		}
+	}
+
+	// Try Google provider
+	if googleProvider != nil {
+		if pp, ok := interface{}(googleProvider).(tools.PromptProvider); ok {
+			messages, err := pp.GetPrompt(req.Name, req.Arguments)
+			if err == nil {
+				// Convert to response format
+				msgs := make([]map[string]interface{}, len(messages))
+				for i, m := range messages {
+					msgs[i] = map[string]interface{}{
+						"role": m.Role,
+						"content": map[string]interface{}{
+							"type": m.Content.Type,
+							"text": m.Content.Text,
+						},
+					}
+				}
+				return MCPResponse{
+					Result: map[string]interface{}{
+						"messages": msgs,
+					},
+				}
+			}
+		}
+	}
+
+	return MCPResponse{
+		Error: &MCPError{
+			Code:    -32601,
+			Message: fmt.Sprintf("Prompt not found: %s", req.Name),
+		},
+	}
+}
+
+// --- Resources ---
+
+func listResources() MCPResponse {
+	var resources []map[string]interface{}
+
+	// Collect resources from Google provider
+	if googleProvider != nil {
+		if rp, ok := interface{}(googleProvider).(tools.ResourceProvider); ok {
+			for _, r := range rp.Resources() {
+				resources = append(resources, map[string]interface{}{
+					"uri":         r.URI,
+					"name":        r.Name,
+					"description": r.Description,
+					"mimeType":    r.MimeType,
+				})
+			}
+		}
+	}
+
+	// Collect resources from Downloads provider
+	if downloadsProvider != nil {
+		if rp, ok := interface{}(downloadsProvider).(tools.ResourceProvider); ok {
+			for _, r := range rp.Resources() {
+				resources = append(resources, map[string]interface{}{
+					"uri":         r.URI,
+					"name":        r.Name,
+					"description": r.Description,
+					"mimeType":    r.MimeType,
+				})
+			}
+		}
+	}
+
+	return MCPResponse{
+		Result: map[string]interface{}{
+			"resources": resources,
+		},
+	}
+}
+
+func readResource(params json.RawMessage) MCPResponse {
+	var req struct {
+		URI string `json:"uri"`
+	}
+
+	if err := json.Unmarshal(params, &req); err != nil {
+		return MCPResponse{
+			Error: &MCPError{
+				Code:    -32602,
+				Message: fmt.Sprintf("Invalid params: %v", err),
+			},
+		}
+	}
+
+	// Try Google provider
+	if googleProvider != nil {
+		if rp, ok := interface{}(googleProvider).(tools.ResourceProvider); ok {
+			content, err := rp.ReadResource(req.URI)
+			if err == nil && content != nil {
+				return MCPResponse{
+					Result: map[string]interface{}{
+						"contents": []map[string]interface{}{
+							{
+								"uri":      content.URI,
+								"mimeType": content.MimeType,
+								"text":     content.Text,
+							},
+						},
+					},
+				}
+			}
+		}
+	}
+
+	// Try Downloads provider
+	if downloadsProvider != nil {
+		if rp, ok := interface{}(downloadsProvider).(tools.ResourceProvider); ok {
+			content, err := rp.ReadResource(req.URI)
+			if err == nil && content != nil {
+				return MCPResponse{
+					Result: map[string]interface{}{
+						"contents": []map[string]interface{}{
+							{
+								"uri":      content.URI,
+								"mimeType": content.MimeType,
+								"text":     content.Text,
+							},
+						},
+					},
+				}
+			}
+		}
+	}
+
+	return MCPResponse{
+		Error: &MCPError{
+			Code:    -32601,
+			Message: fmt.Sprintf("Resource not found: %s", req.URI),
+		},
 	}
 }
 
