@@ -2,15 +2,11 @@ package gmail
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
+	"github.com/diane-assistant/diane/mcp/tools/google/auth"
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
 )
@@ -19,14 +15,6 @@ import (
 type Client struct {
 	srv     *gmail.Service
 	account string
-}
-
-// tokenFile represents the OAuth token file format (compatible with gog)
-type tokenFile struct {
-	AccessToken  string `json:"access_token"`
-	TokenType    string `json:"token_type"`
-	RefreshToken string `json:"refresh_token"`
-	Expiry       string `json:"expiry"`
 }
 
 // NewClient creates a new Gmail API client
@@ -40,100 +28,23 @@ func NewClient(account string) (*Client, error) {
 
 	ctx := context.Background()
 
-	// Get OAuth config
-	config, err := getOAuthConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get OAuth config: %w", err)
-	}
-
-	// Load token
-	token, err := loadToken(account)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load token for account %s: %w", account, err)
-	}
-
-	// Create Gmail service
-	srv, err := gmail.NewService(ctx, option.WithTokenSource(config.TokenSource(ctx, token)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Gmail service: %w", err)
-	}
-
-	return &Client{srv: srv, account: account}, nil
-}
-
-// getOAuthConfig returns the OAuth2 config for Gmail
-func getOAuthConfig() (*oauth2.Config, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-
-	// Try to load client credentials from diane secrets
-	credPath := filepath.Join(home, ".diane", "secrets", "google", "credentials.json")
-	credData, err := os.ReadFile(credPath)
-	if err != nil {
-		// Try gog config location
-		credPath = filepath.Join(home, ".config", "gog", "credentials.json")
-		credData, err = os.ReadFile(credPath)
-		if err != nil {
-			// Use default Google OAuth client credentials (public, for CLI apps)
-			// These are the same ones gog uses
-			return &oauth2.Config{
-				ClientID:     "YOUR_CLIENT_ID", // Will be replaced with actual credentials
-				ClientSecret: "YOUR_CLIENT_SECRET",
-				Scopes: []string{
-					gmail.GmailReadonlyScope,
-					gmail.GmailModifyScope,
-					gmail.GmailLabelsScope,
-				},
-				Endpoint: google.Endpoint,
-			}, nil
-		}
-	}
-
-	config, err := google.ConfigFromJSON(credData,
+	// Get token source using shared auth package
+	tokenSource, err := auth.GetTokenSource(ctx, account,
 		gmail.GmailReadonlyScope,
 		gmail.GmailModifyScope,
 		gmail.GmailLabelsScope,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse credentials: %w", err)
+		return nil, fmt.Errorf("failed to get token source: %w", err)
 	}
 
-	return config, nil
-}
-
-// loadToken loads OAuth token for an account
-func loadToken(account string) (*oauth2.Token, error) {
-	home, err := os.UserHomeDir()
+	// Create Gmail service
+	srv, err := gmail.NewService(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create Gmail service: %w", err)
 	}
 
-	// Try diane secrets location first
-	tokenPath := filepath.Join(home, ".diane", "secrets", "google", fmt.Sprintf("token_%s.json", account))
-	tokenData, err := os.ReadFile(tokenPath)
-	if err != nil {
-		// Try gog tokens location (backward compatibility)
-		tokenPath = filepath.Join(home, ".config", "gog", "tokens", fmt.Sprintf("%s.json", account))
-		tokenData, err = os.ReadFile(tokenPath)
-		if err != nil {
-			return nil, fmt.Errorf("no token found for account %s. Run 'gog auth' first", account)
-		}
-	}
-
-	var tf tokenFile
-	if err := json.Unmarshal(tokenData, &tf); err != nil {
-		return nil, fmt.Errorf("failed to parse token file: %w", err)
-	}
-
-	token := &oauth2.Token{
-		AccessToken:  tf.AccessToken,
-		TokenType:    tf.TokenType,
-		RefreshToken: tf.RefreshToken,
-	}
-
-	return token, nil
+	return &Client{srv: srv, account: account}, nil
 }
 
 // ListMessages lists message IDs matching a query

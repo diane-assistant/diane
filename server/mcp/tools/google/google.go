@@ -2,38 +2,19 @@
 package google
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
+	"time"
 
+	"github.com/diane-assistant/diane/mcp/tools/google/calendar"
+	"github.com/diane-assistant/diane/mcp/tools/google/drive"
 	"github.com/diane-assistant/diane/mcp/tools/google/gmail"
+	"github.com/diane-assistant/diane/mcp/tools/google/sheets"
+	gcal "google.golang.org/api/calendar/v3"
 )
 
 // --- Helper Functions ---
-
-func runCommand(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		stderrStr := strings.TrimSpace(stderr.String())
-		if stderrStr != "" {
-			return "", fmt.Errorf("%s: %s", err, stderrStr)
-		}
-		return "", err
-	}
-
-	return strings.TrimSpace(stdout.String()), nil
-}
-
-func commandExists(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
-}
 
 func getString(args map[string]interface{}, key string) string {
 	if val, ok := args[key].(string); ok {
@@ -128,11 +109,10 @@ func (p *Provider) Name() string {
 	return "google"
 }
 
-// CheckDependencies verifies required binaries exist
+// CheckDependencies verifies required dependencies exist.
+// Since all Google services now use native SDK, no external dependencies are required.
 func (p *Provider) CheckDependencies() error {
-	if !commandExists("gog") {
-		return fmt.Errorf("gog CLI not found. Install it to use Google tools")
-	}
+	// No external dependencies - all services use native Google Go SDK
 	return nil
 }
 
@@ -1126,35 +1106,34 @@ func (p *Provider) searchFiles(args map[string]interface{}) (interface{}, error)
 	max := getInt(args, "max", 10)
 	account := getString(args, "account")
 
-	cmdArgs := []string{"drive", "search", query, fmt.Sprintf("--max=%d", max), "--json"}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	client, err := drive.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Drive client: %w", err)
 	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	files, err := client.SearchFiles(query, int64(max))
 	if err != nil {
 		return nil, fmt.Errorf("failed to search files: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(drive.ToJSON(files)), nil
 }
 
 func (p *Provider) listFiles(args map[string]interface{}) (interface{}, error) {
 	max := getInt(args, "max", 20)
 	account := getString(args, "account")
 
-	// List all files using a query that matches everything
-	cmdArgs := []string{"drive", "search", "name contains ''", fmt.Sprintf("--max=%d", max), "--json"}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	client, err := drive.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Drive client: %w", err)
 	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	files, err := client.ListRecentFiles(int64(max))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list files: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(drive.ToJSON(files)), nil
 }
 
 // --- Sheets Tools ---
@@ -1171,17 +1150,17 @@ func (p *Provider) getSheet(args map[string]interface{}) (interface{}, error) {
 
 	account := getString(args, "account")
 
-	cmdArgs := []string{"sheets", "get", sheetId, rangeArg, "--json"}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	client, err := sheets.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Sheets client: %w", err)
 	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	values, err := client.GetRange(sheetId, rangeArg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sheet: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(sheets.ToJSON(values)), nil
 }
 
 func (p *Provider) updateSheet(args map[string]interface{}) (interface{}, error) {
@@ -1193,24 +1172,30 @@ func (p *Provider) updateSheet(args map[string]interface{}) (interface{}, error)
 	if err != nil {
 		return nil, err
 	}
-	values, err := getStringRequired(args, "values")
+	valuesStr, err := getStringRequired(args, "values")
 	if err != nil {
 		return nil, err
 	}
 
 	account := getString(args, "account")
 
-	cmdArgs := []string{"sheets", "update", sheetId, rangeArg, fmt.Sprintf("--values-json=%s", values), "--input=USER_ENTERED"}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	// Parse JSON values
+	var values [][]interface{}
+	if err := json.Unmarshal([]byte(valuesStr), &values); err != nil {
+		return nil, fmt.Errorf("failed to parse values JSON: %w", err)
 	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	client, err := sheets.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Sheets client: %w", err)
+	}
+
+	result, err := client.UpdateRange(sheetId, rangeArg, values)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update sheet: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(sheets.ToJSON(result)), nil
 }
 
 func (p *Provider) appendSheet(args map[string]interface{}) (interface{}, error) {
@@ -1222,24 +1207,30 @@ func (p *Provider) appendSheet(args map[string]interface{}) (interface{}, error)
 	if err != nil {
 		return nil, err
 	}
-	values, err := getStringRequired(args, "values")
+	valuesStr, err := getStringRequired(args, "values")
 	if err != nil {
 		return nil, err
 	}
 
 	account := getString(args, "account")
 
-	cmdArgs := []string{"sheets", "append", sheetId, rangeArg, fmt.Sprintf("--values-json=%s", values), "--insert=INSERT_ROWS"}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	// Parse JSON values
+	var values [][]interface{}
+	if err := json.Unmarshal([]byte(valuesStr), &values); err != nil {
+		return nil, fmt.Errorf("failed to parse values JSON: %w", err)
 	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	client, err := sheets.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Sheets client: %w", err)
+	}
+
+	result, err := client.AppendRows(sheetId, rangeArg, values)
 	if err != nil {
 		return nil, fmt.Errorf("failed to append to sheet: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(sheets.ToJSON(result)), nil
 }
 
 func (p *Provider) clearSheet(args map[string]interface{}) (interface{}, error) {
@@ -1254,17 +1245,17 @@ func (p *Provider) clearSheet(args map[string]interface{}) (interface{}, error) 
 
 	account := getString(args, "account")
 
-	cmdArgs := []string{"sheets", "clear", sheetId, rangeArg}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	client, err := sheets.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Sheets client: %w", err)
 	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	result, err := client.ClearRange(sheetId, rangeArg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to clear sheet: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(sheets.ToJSON(result)), nil
 }
 
 func (p *Provider) getSheetMetadata(args map[string]interface{}) (interface{}, error) {
@@ -1275,17 +1266,17 @@ func (p *Provider) getSheetMetadata(args map[string]interface{}) (interface{}, e
 
 	account := getString(args, "account")
 
-	cmdArgs := []string{"sheets", "metadata", sheetId, "--json"}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	client, err := sheets.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Sheets client: %w", err)
 	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	metadata, err := client.GetMetadata(sheetId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sheet metadata: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(sheets.ToJSON(metadata)), nil
 }
 
 // --- Calendar Tools ---
@@ -1293,99 +1284,116 @@ func (p *Provider) getSheetMetadata(args map[string]interface{}) (interface{}, e
 func (p *Provider) listCalendars(args map[string]interface{}) (interface{}, error) {
 	account := getString(args, "account")
 
-	cmdArgs := []string{"calendar", "calendars", "--json"}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	client, err := calendar.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Calendar client: %w", err)
 	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	calendars, err := client.ListCalendars()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list calendars: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(calendar.ToJSON(calendars)), nil
 }
 
 func (p *Provider) listEvents(args map[string]interface{}) (interface{}, error) {
-	cmdArgs := []string{"calendar", "events"}
-
-	// Add calendar ID or --all flag
-	if getBool(args, "all") {
-		cmdArgs = append(cmdArgs, "--all")
-	} else {
-		calendarId := getString(args, "calendar_id")
-		if calendarId == "" {
-			calendarId = "primary"
-		}
-		cmdArgs = append(cmdArgs, calendarId)
+	account := getString(args, "account")
+	calendarID := getString(args, "calendar_id")
+	if calendarID == "" {
+		calendarID = "primary"
 	}
 
-	// Add optional flags
-	if account := getString(args, "account"); account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	client, err := calendar.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Calendar client: %w", err)
 	}
-	if from := getString(args, "from"); from != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--from=%s", from))
+
+	// Build options
+	opts := calendar.ListEventsOptions{
+		MaxResults: int64(getInt(args, "max", 10)),
+		Query:      getString(args, "query"),
 	}
-	if to := getString(args, "to"); to != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--to=%s", to))
-	}
+
+	now := time.Now()
+
+	// Handle time range options
 	if getBool(args, "today") {
-		cmdArgs = append(cmdArgs, "--today")
-	}
-	if getBool(args, "tomorrow") {
-		cmdArgs = append(cmdArgs, "--tomorrow")
-	}
-	if getBool(args, "week") {
-		cmdArgs = append(cmdArgs, "--week")
-	}
-	if days := getInt(args, "days", 0); days > 0 {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--days=%d", days))
-	}
-	if max := getInt(args, "max", 0); max > 0 {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--max=%d", max))
-	}
-	if query := getString(args, "query"); query != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--query=%s", query))
+		opts.TimeMin = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		opts.TimeMax = opts.TimeMin.Add(24 * time.Hour)
+	} else if getBool(args, "tomorrow") {
+		opts.TimeMin = time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+		opts.TimeMax = opts.TimeMin.Add(24 * time.Hour)
+	} else if getBool(args, "week") {
+		// Find Monday of current week
+		daysUntilMonday := int(now.Weekday()) - int(time.Monday)
+		if daysUntilMonday < 0 {
+			daysUntilMonday += 7
+		}
+		opts.TimeMin = time.Date(now.Year(), now.Month(), now.Day()-daysUntilMonday, 0, 0, 0, 0, now.Location())
+		opts.TimeMax = opts.TimeMin.Add(7 * 24 * time.Hour)
+	} else if days := getInt(args, "days", 0); days > 0 {
+		opts.TimeMin = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		opts.TimeMax = opts.TimeMin.Add(time.Duration(days) * 24 * time.Hour)
+	} else {
+		// Parse from/to if provided
+		if from := getString(args, "from"); from != "" {
+			t, err := calendar.ParseTimeArg(from, false)
+			if err != nil {
+				return nil, fmt.Errorf("invalid 'from' time: %w", err)
+			}
+			opts.TimeMin = t
+		}
+		if to := getString(args, "to"); to != "" {
+			t, err := calendar.ParseTimeArg(to, true)
+			if err != nil {
+				return nil, fmt.Errorf("invalid 'to' time: %w", err)
+			}
+			opts.TimeMax = t
+		}
 	}
 
-	cmdArgs = append(cmdArgs, "--json")
-
-	output, err := runCommand("gog", cmdArgs...)
+	// Handle --all flag to fetch from all calendars
+	var events []calendar.EventInfo
+	if getBool(args, "all") {
+		events, err = client.ListAllCalendarEvents(opts)
+	} else {
+		events, err = client.ListEvents(calendarID, opts)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to list events: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(calendar.ToJSON(events)), nil
 }
 
 func (p *Provider) getEvent(args map[string]interface{}) (interface{}, error) {
-	calendarId, err := getStringRequired(args, "calendar_id")
+	calendarID, err := getStringRequired(args, "calendar_id")
 	if err != nil {
 		return nil, err
 	}
-	eventId, err := getStringRequired(args, "event_id")
+	eventID, err := getStringRequired(args, "event_id")
 	if err != nil {
 		return nil, err
 	}
 
 	account := getString(args, "account")
 
-	cmdArgs := []string{"calendar", "event", calendarId, eventId, "--json"}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	client, err := calendar.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Calendar client: %w", err)
 	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	event, err := client.GetEvent(calendarID, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get event: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(calendar.ToJSON(event)), nil
 }
 
 func (p *Provider) createEvent(args map[string]interface{}) (interface{}, error) {
-	calendarId, err := getStringRequired(args, "calendar_id")
+	calendarID, err := getStringRequired(args, "calendar_id")
 	if err != nil {
 		return nil, err
 	}
@@ -1402,147 +1410,288 @@ func (p *Provider) createEvent(args map[string]interface{}) (interface{}, error)
 		return nil, err
 	}
 
-	cmdArgs := []string{"calendar", "create", calendarId,
-		fmt.Sprintf("--summary=%s", summary),
-		fmt.Sprintf("--from=%s", from),
-		fmt.Sprintf("--to=%s", to),
+	account := getString(args, "account")
+
+	client, err := calendar.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Calendar client: %w", err)
 	}
 
-	// Optional flags
-	if account := getString(args, "account"); account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	// Build the event
+	event := &gcal.Event{
+		Summary: summary,
 	}
+
+	// Handle all-day events vs timed events
+	allDay := getBool(args, "all_day")
+	if allDay {
+		event.Start = &gcal.EventDateTime{Date: from}
+		event.End = &gcal.EventDateTime{Date: to}
+	} else {
+		event.Start = &gcal.EventDateTime{DateTime: from}
+		event.End = &gcal.EventDateTime{DateTime: to}
+	}
+
+	// Optional fields
 	if description := getString(args, "description"); description != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--description=%s", description))
+		event.Description = description
 	}
 	if location := getString(args, "location"); location != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--location=%s", location))
-	}
-	if attendees := getString(args, "attendees"); attendees != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--attendees=%s", attendees))
-	}
-	if getBool(args, "all_day") {
-		cmdArgs = append(cmdArgs, "--all-day")
-	}
-	if reminder := getString(args, "reminder"); reminder != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--reminder=%s", reminder))
-	}
-	if getBool(args, "with_meet") {
-		cmdArgs = append(cmdArgs, "--with-meet")
+		event.Location = location
 	}
 	if visibility := getString(args, "visibility"); visibility != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--visibility=%s", visibility))
+		event.Visibility = visibility
 	}
 	if transparency := getString(args, "transparency"); transparency != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--transparency=%s", transparency))
+		// Map "busy"/"free" to "opaque"/"transparent"
+		switch transparency {
+		case "busy":
+			event.Transparency = "opaque"
+		case "free":
+			event.Transparency = "transparent"
+		default:
+			event.Transparency = transparency
+		}
 	}
 
-	cmdArgs = append(cmdArgs, "--json")
+	// Handle attendees
+	if attendeesStr := getString(args, "attendees"); attendeesStr != "" {
+		attendeeEmails := strings.Split(attendeesStr, ",")
+		event.Attendees = make([]*gcal.EventAttendee, len(attendeeEmails))
+		for i, email := range attendeeEmails {
+			event.Attendees[i] = &gcal.EventAttendee{Email: strings.TrimSpace(email)}
+		}
+	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	// Handle reminder
+	if reminder := getString(args, "reminder"); reminder != "" {
+		// Parse reminder format: method:duration (e.g., "popup:30m", "email:1d")
+		parts := strings.SplitN(reminder, ":", 2)
+		if len(parts) == 2 {
+			method := parts[0]
+			durationStr := parts[1]
+			minutes := parseReminderDuration(durationStr)
+			if minutes > 0 {
+				event.Reminders = &gcal.EventReminders{
+					UseDefault: false,
+					Overrides: []*gcal.EventReminder{
+						{Method: method, Minutes: minutes},
+					},
+				}
+			}
+		}
+	}
+
+	// Handle Google Meet
+	if getBool(args, "with_meet") {
+		event.ConferenceData = &gcal.ConferenceData{
+			CreateRequest: &gcal.CreateConferenceRequest{
+				RequestId: fmt.Sprintf("meet-%d", time.Now().UnixNano()),
+				ConferenceSolutionKey: &gcal.ConferenceSolutionKey{
+					Type: "hangoutsMeet",
+				},
+			},
+		}
+	}
+
+	created, err := client.CreateEvent(calendarID, event)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create event: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(calendar.ToJSON(created)), nil
 }
 
 func (p *Provider) updateEvent(args map[string]interface{}) (interface{}, error) {
-	calendarId, err := getStringRequired(args, "calendar_id")
+	calendarID, err := getStringRequired(args, "calendar_id")
 	if err != nil {
 		return nil, err
 	}
-	eventId, err := getStringRequired(args, "event_id")
+	eventID, err := getStringRequired(args, "event_id")
 	if err != nil {
 		return nil, err
 	}
 
-	cmdArgs := []string{"calendar", "update", calendarId, eventId}
+	account := getString(args, "account")
 
-	// Optional flags
-	if account := getString(args, "account"); account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	client, err := calendar.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Calendar client: %w", err)
 	}
+
+	// First get the existing event
+	existing, err := client.GetEvent(calendarID, eventID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get existing event: %w", err)
+	}
+
+	// Build the update event from existing
+	event := &gcal.Event{
+		Summary:     existing.Summary,
+		Description: existing.Description,
+		Location:    existing.Location,
+	}
+
+	// Handle times based on whether it's all-day
+	if existing.AllDay {
+		event.Start = &gcal.EventDateTime{Date: existing.Start}
+		event.End = &gcal.EventDateTime{Date: existing.End}
+	} else {
+		event.Start = &gcal.EventDateTime{DateTime: existing.Start}
+		event.End = &gcal.EventDateTime{DateTime: existing.End}
+	}
+
+	// Apply updates
 	if summary := getString(args, "summary"); summary != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--summary=%s", summary))
-	}
-	if from := getString(args, "from"); from != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--from=%s", from))
-	}
-	if to := getString(args, "to"); to != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--to=%s", to))
+		event.Summary = summary
 	}
 	if description := getString(args, "description"); description != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--description=%s", description))
+		event.Description = description
 	}
 	if location := getString(args, "location"); location != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--location=%s", location))
+		event.Location = location
+	}
+	if from := getString(args, "from"); from != "" {
+		if existing.AllDay {
+			event.Start = &gcal.EventDateTime{Date: from}
+		} else {
+			event.Start = &gcal.EventDateTime{DateTime: from}
+		}
+	}
+	if to := getString(args, "to"); to != "" {
+		if existing.AllDay {
+			event.End = &gcal.EventDateTime{Date: to}
+		} else {
+			event.End = &gcal.EventDateTime{DateTime: to}
+		}
 	}
 
-	cmdArgs = append(cmdArgs, "--json")
-
-	output, err := runCommand("gog", cmdArgs...)
+	updated, err := client.UpdateEvent(calendarID, eventID, event)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update event: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(calendar.ToJSON(updated)), nil
 }
 
 func (p *Provider) deleteEvent(args map[string]interface{}) (interface{}, error) {
-	calendarId, err := getStringRequired(args, "calendar_id")
+	calendarID, err := getStringRequired(args, "calendar_id")
 	if err != nil {
 		return nil, err
 	}
-	eventId, err := getStringRequired(args, "event_id")
+	eventID, err := getStringRequired(args, "event_id")
 	if err != nil {
 		return nil, err
 	}
 
 	account := getString(args, "account")
 
-	cmdArgs := []string{"calendar", "delete", calendarId, eventId, "--force", "--json"}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	client, err := calendar.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Calendar client: %w", err)
 	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	err = client.DeleteEvent(calendarID, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete event: %w", err)
 	}
 
-	return textContent(output), nil
+	result := map[string]string{
+		"status":      "deleted",
+		"calendar_id": calendarID,
+		"event_id":    eventID,
+	}
+	return textContent(calendar.ToJSON(result)), nil
 }
 
 func (p *Provider) checkFreebusy(args map[string]interface{}) (interface{}, error) {
-	calendarIds, err := getStringRequired(args, "calendar_ids")
+	calendarIDsStr, err := getStringRequired(args, "calendar_ids")
 	if err != nil {
 		return nil, err
 	}
-	from, err := getStringRequired(args, "from")
+	fromStr, err := getStringRequired(args, "from")
 	if err != nil {
 		return nil, err
 	}
-	to, err := getStringRequired(args, "to")
+	toStr, err := getStringRequired(args, "to")
 	if err != nil {
 		return nil, err
 	}
 
 	account := getString(args, "account")
 
-	cmdArgs := []string{"calendar", "freebusy", calendarIds,
-		fmt.Sprintf("--from=%s", from),
-		fmt.Sprintf("--to=%s", to),
-		"--json",
-	}
-	if account != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--account=%s", account))
+	client, err := calendar.NewClient(account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Calendar client: %w", err)
 	}
 
-	output, err := runCommand("gog", cmdArgs...)
+	// Parse calendar IDs
+	calendarIDs := strings.Split(calendarIDsStr, ",")
+	for i, id := range calendarIDs {
+		calendarIDs[i] = strings.TrimSpace(id)
+	}
+
+	// Parse times
+	timeMin, err := calendar.ParseTimeArg(fromStr, false)
+	if err != nil {
+		return nil, fmt.Errorf("invalid 'from' time: %w", err)
+	}
+	timeMax, err := calendar.ParseTimeArg(toStr, true)
+	if err != nil {
+		return nil, fmt.Errorf("invalid 'to' time: %w", err)
+	}
+
+	freeBusy, err := client.FreeBusy(calendarIDs, timeMin, timeMax)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check free/busy: %w", err)
 	}
 
-	return textContent(output), nil
+	return textContent(calendar.ToJSON(freeBusy)), nil
+}
+
+// parseReminderDuration parses duration strings like "30m", "1h", "1d" to minutes
+// Also accepts bare numbers (e.g., "15") which are treated as minutes
+func parseReminderDuration(s string) int64 {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if len(s) == 0 {
+		return 0
+	}
+
+	// Check if the string is all digits (bare number = minutes)
+	allDigits := true
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			allDigits = false
+			break
+		}
+	}
+	if allDigits {
+		var value int
+		fmt.Sscanf(s, "%d", &value)
+		return int64(value)
+	}
+
+	// Need at least 2 chars for value + unit
+	if len(s) < 2 {
+		return 0
+	}
+
+	unit := s[len(s)-1]
+	valueStr := s[:len(s)-1]
+
+	var value int
+	fmt.Sscanf(valueStr, "%d", &value)
+
+	switch unit {
+	case 'm':
+		return int64(value)
+	case 'h':
+		return int64(value * 60)
+	case 'd':
+		return int64(value * 60 * 24)
+	case 'w':
+		return int64(value * 60 * 24 * 7)
+	default:
+		return 0 // invalid unit
+	}
 }
