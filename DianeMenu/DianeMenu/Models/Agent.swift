@@ -1,7 +1,7 @@
 import Foundation
 
 /// Represents a configured ACP agent
-struct AgentConfig: Codable, Identifiable {
+struct AgentConfig: Codable, Identifiable, Equatable {
     var id: String { name }
     
     let name: String
@@ -12,9 +12,16 @@ struct AgentConfig: Codable, Identifiable {
     let env: [String: String]?
     let workdir: String?
     let port: Int?
+    let subAgent: String?
     let enabled: Bool
     let description: String?
     let tags: [String]?
+    
+    enum CodingKeys: String, CodingKey {
+        case name, url, type, command, args, env, workdir, port
+        case subAgent = "sub_agent"
+        case enabled, description, tags
+    }
     
     /// Display name (without workspace suffix)
     var displayName: String {
@@ -30,6 +37,10 @@ struct AgentConfig: Codable, Identifiable {
             return String(name[name.index(after: atIndex)...])
         }
         return nil
+    }
+    
+    static func == (lhs: AgentConfig, rhs: AgentConfig) -> Bool {
+        lhs.name == rhs.name && lhs.subAgent == rhs.subAgent && lhs.enabled == rhs.enabled
     }
 }
 
@@ -316,5 +327,33 @@ struct GalleryInstallResponse: Codable {
     enum CodingKeys: String, CodingKey {
         case status, agent
         case installCmd = "install_cmd"
+    }
+}
+
+/// Represents a remote sub-agent available from an ACP server
+struct RemoteAgentInfo: Codable, Identifiable {
+    var id: String { configId }
+    
+    let configId: String
+    let name: String
+    let description: String?
+    let options: [String]?
+    
+    enum CodingKeys: String, CodingKey {
+        case configId = "id"
+        case name, description, options
+    }
+}
+
+/// Request to update an agent's configuration
+struct AgentUpdateRequest: Codable {
+    let subAgent: String?
+    let enabled: Bool?
+    let description: String?
+    let workdir: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case subAgent = "sub_agent"
+        case enabled, description, workdir
     }
 }

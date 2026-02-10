@@ -38,6 +38,7 @@ class DianeClient {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         self.socketPath = homeDir.appendingPathComponent(".diane/diane.sock").path
         logger.info("DianeClient initialized with socket path: \(self.socketPath)")
+        FileLogger.shared.info("DianeClient initialized with socket path: \(self.socketPath)", category: "DianeClient")
         
         // Create a custom URLSession configuration for Unix socket
         let config = URLSessionConfiguration.default
@@ -51,6 +52,7 @@ class DianeClient {
     var socketExists: Bool {
         let exists = FileManager.default.fileExists(atPath: socketPath)
         logger.debug("Socket exists check: \(exists)")
+        FileLogger.shared.debug("Socket exists check: \(exists)", category: "DianeClient")
         return exists
     }
     
@@ -78,6 +80,7 @@ class DianeClient {
     /// Make a request to the Unix socket (non-blocking with timeout)
     private func request(_ path: String, method: String = "GET", timeout: Int = 3, body: Data? = nil) async throws -> Data {
         logger.info("Making \(method) request to \(path)")
+        FileLogger.shared.info("Making \(method) request to \(path)", category: "DianeClient")
         
         // Use curl to communicate with Unix socket (simplest approach for macOS)
         let process = Process()
@@ -116,20 +119,24 @@ class DianeClient {
                     
                     let exitCode = process.terminationStatus
                     logger.info("curl exit code: \(exitCode) for \(path)")
+                    FileLogger.shared.info("curl exit code: \(exitCode) for \(path)", category: "DianeClient")
                     
                     if exitCode != 0 {
                         let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
                         let errorStr = String(data: errorData, encoding: .utf8) ?? "unknown"
                         logger.error("curl failed with exit code \(exitCode): \(errorStr)")
+                        FileLogger.shared.error("curl failed with exit code \(exitCode): \(errorStr)", category: "DianeClient")
                         continuation.resume(throwing: DianeClientError.requestFailed(path: path, exitCode: exitCode, stderr: errorStr))
                         return
                     }
                     
                     let data = pipe.fileHandleForReading.readDataToEndOfFile()
                     logger.info("Request to \(path) succeeded, got \(data.count) bytes")
+                    FileLogger.shared.info("Request to \(path) succeeded, got \(data.count) bytes", category: "DianeClient")
                     continuation.resume(returning: data)
                 } catch {
                     logger.error("Failed to run curl: \(error.localizedDescription)")
+                    FileLogger.shared.error("Failed to run curl: \(error.localizedDescription)", category: "DianeClient")
                     continuation.resume(throwing: error)
                 }
             }
@@ -149,15 +156,18 @@ class DianeClient {
     /// Get full status
     func getStatus() async throws -> DianeStatus {
         logger.info("Getting status...")
+        FileLogger.shared.info("Getting status...", category: "DianeClient")
         let data = try await request("/status")
         
         do {
             let status = try makeGoCompatibleDecoder().decode(DianeStatus.self, from: data)
             logger.info("Status decoded successfully: running=\(status.running), version=\(status.version)")
+            FileLogger.shared.info("Status decoded successfully: running=\(status.running), version=\(status.version)", category: "DianeClient")
             return status
         } catch {
             let dataStr = String(data: data, encoding: .utf8) ?? "invalid utf8"
             logger.error("Failed to decode status: \(error.localizedDescription), data: \(dataStr)")
+            FileLogger.shared.error("Failed to decode status: \(error.localizedDescription), data: \(dataStr)", category: "DianeClient")
             throw error
         }
     }
@@ -182,6 +192,23 @@ class DianeClient {
     /// Restart an MCP server
     func restartMCPServer(name: String) async throws {
         _ = try await request("/mcp-servers/\(name)/restart", method: "POST")
+    }
+    
+    // MARK: - OAuth API
+    
+    /// Start OAuth login for an MCP server (device flow)
+    func startAuth(serverName: String) async throws -> DeviceCodeInfo {
+        let encodedName = serverName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? serverName
+        let data = try await request("/auth/\(encodedName)/login", method: "POST", timeout: 10)
+        return try JSONDecoder().decode(DeviceCodeInfo.self, from: data)
+    }
+    
+    /// Poll for OAuth token completion
+    func pollAuth(serverName: String, deviceCode: String, interval: Int) async throws {
+        let encodedName = serverName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? serverName
+        let body: [String: Any] = ["device_code": deviceCode, "interval": interval]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        _ = try await request("/auth/\(encodedName)/poll", method: "POST", timeout: 120, body: bodyData)
     }
     
     // MARK: - Scheduler API
@@ -320,6 +347,36 @@ class DianeClient {
     func removeAgent(name: String) async throws {
         let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
         _ = try await request("/agents/\(encodedName)", method: "DELETE")
+    }
+    
+    /// Get remote sub-agents/config options from an ACP agent
+    func getRemoteAgents(agentName: String) async throws -> [RemoteAgentInfo] {
+        let encodedName = agentName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentName
+        let data = try await request("/agents/\(encodedName)/remote-agents", method: "GET", timeout: 35)
+        return try JSONDecoder().decode([RemoteAgentInfo].self, from: data)
+    }
+    
+    /// Update an agent's configuration
+    func updateAgent(name: String, subAgent: String? = nil, enabled: Bool? = nil, description: String? = nil, workdir: String? = nil) async throws {
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        var body: [String: Any] = [:]
+        if let subAgent = subAgent {
+            body["sub_agent"] = subAgent
+        }
+        if let enabled = enabled {
+            body["enabled"] = enabled
+        }
+        if let description = description {
+            body["description"] = description
+        }
+        if let workdir = workdir {
+            body["workdir"] = workdir
+        }
+        
+        guard !body.isEmpty else { return }
+        
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        _ = try await request("/agents/\(encodedName)/update", method: "POST", body: bodyData)
     }
     
     // MARK: - Gallery API

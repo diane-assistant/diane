@@ -146,10 +146,34 @@ class StatusMonitor: ObservableObject {
         
         do {
             try await client.reloadConfig()
-            await refresh()
+            // Wait for reload to complete - server may be briefly unavailable
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            // Retry refresh a few times since the server might still be initializing
+            await refreshWithRetry(maxAttempts: 3, delayMs: 1000)
         } catch {
             lastError = error.localizedDescription
         }
+    }
+    
+    /// Refresh with retry logic for operations that may cause temporary unavailability
+    private func refreshWithRetry(maxAttempts: Int, delayMs: UInt64) async {
+        for attempt in 1...maxAttempts {
+            do {
+                let newStatus = try await client.getStatus()
+                status = newStatus
+                connectionState = .connected
+                lastError = nil
+                logger.info("Refresh successful on attempt \(attempt)")
+                return
+            } catch {
+                logger.info("Refresh attempt \(attempt)/\(maxAttempts) failed: \(error.localizedDescription)")
+                if attempt < maxAttempts {
+                    try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
+                }
+            }
+        }
+        // All attempts failed, do a normal refresh to set appropriate state
+        await refresh()
     }
     
     /// Restart an MCP server
@@ -159,9 +183,10 @@ class StatusMonitor: ObservableObject {
         
         do {
             try await client.restartMCPServer(name: name)
-            // Wait a bit for server to restart
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            await refresh()
+            // Wait for server to restart
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            // Retry refresh since the server might still be initializing
+            await refreshWithRetry(maxAttempts: 3, delayMs: 1000)
         } catch {
             lastError = error.localizedDescription
         }
@@ -218,5 +243,34 @@ class StatusMonitor: ObservableObject {
             return true
         }
         return client.isProcessRunning()
+    }
+    
+    /// Start OAuth authentication for an MCP server
+    func startAuth(serverName: String) async -> DeviceCodeInfo? {
+        isLoading = true
+        defer { isLoading = false }
+        
+        do {
+            let deviceInfo = try await client.startAuth(serverName: serverName)
+            return deviceInfo
+        } catch {
+            lastError = error.localizedDescription
+            logger.error("Failed to start auth for \(serverName): \(error.localizedDescription)")
+            return nil
+        }
+    }
+    
+    /// Poll for OAuth token and refresh status when complete
+    func pollAuthAndRefresh(serverName: String, deviceCode: String, interval: Int) async -> Bool {
+        do {
+            try await client.pollAuth(serverName: serverName, deviceCode: deviceCode, interval: interval)
+            // Auth successful, refresh to show updated status
+            await refreshWithRetry(maxAttempts: 3, delayMs: 1000)
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            logger.error("Auth polling failed for \(serverName): \(error.localizedDescription)")
+            return false
+        }
     }
 }

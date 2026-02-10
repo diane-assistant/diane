@@ -18,6 +18,8 @@ struct MCPServerStatus: Codable, Identifiable {
     let toolCount: Int
     let error: String?
     let builtin: Bool
+    let requiresAuth: Bool
+    let authenticated: Bool
     
     var id: String { name }
     
@@ -28,6 +30,8 @@ struct MCPServerStatus: Codable, Identifiable {
         case toolCount = "tool_count"
         case error
         case builtin
+        case requiresAuth = "requires_auth"
+        case authenticated
     }
     
     init(from decoder: Decoder) throws {
@@ -38,11 +42,21 @@ struct MCPServerStatus: Codable, Identifiable {
         toolCount = try container.decode(Int.self, forKey: .toolCount)
         error = try container.decodeIfPresent(String.self, forKey: .error)
         builtin = try container.decodeIfPresent(Bool.self, forKey: .builtin) ?? false
+        requiresAuth = try container.decodeIfPresent(Bool.self, forKey: .requiresAuth) ?? false
+        authenticated = try container.decodeIfPresent(Bool.self, forKey: .authenticated) ?? false
+    }
+    
+    /// Returns true if this server needs authentication but isn't authenticated yet
+    var needsAuthentication: Bool {
+        requiresAuth && !authenticated
     }
     
     var statusIcon: String {
         if !enabled {
             return "circle.slash"
+        }
+        if needsAuthentication {
+            return "person.badge.key"
         }
         if connected {
             return "circle.fill"
@@ -53,6 +67,9 @@ struct MCPServerStatus: Codable, Identifiable {
     var statusColor: String {
         if !enabled {
             return "secondary"
+        }
+        if needsAuthentication {
+            return "orange"
         }
         if connected {
             return "green"
@@ -93,6 +110,23 @@ struct DianeStatus: Codable {
         totalTools: 0,
         mcpServers: []
     )
+}
+
+/// Device code info for OAuth device flow
+struct DeviceCodeInfo: Codable {
+    let userCode: String
+    let verificationUri: String
+    let expiresIn: Int
+    let interval: Int
+    let deviceCode: String
+    
+    enum CodingKeys: String, CodingKey {
+        case userCode = "user_code"
+        case verificationUri = "verification_uri"
+        case expiresIn = "expires_in"
+        case interval
+        case deviceCode = "device_code"
+    }
 }
 
 /// Connection state for the UI

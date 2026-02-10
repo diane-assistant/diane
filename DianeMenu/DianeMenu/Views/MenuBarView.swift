@@ -6,6 +6,10 @@ struct MenuBarView: View {
     @EnvironmentObject var updateChecker: UpdateChecker
     @Environment(\.dismiss) private var dismiss
     @State private var isMCPServersExpanded = true
+    @State private var authInProgress: String? = nil  // Server name being authenticated
+    @State private var showingAuthAlert = false
+    @State private var authUserCode: String = ""
+    @State private var currentAuthServer: String? = nil
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -48,6 +52,12 @@ struct MenuBarView: View {
         }
         .padding(12)
         .frame(width: 280)
+        .alert("Enter this code", isPresented: $showingAuthAlert) {
+            Button("OK") { }
+        } message: {
+            Text("Code copied to clipboard:\n\n\(authUserCode)")
+                .font(.body.monospaced())
+        }
     }
     
     // MARK: - Update Banner
@@ -353,11 +363,17 @@ struct MenuBarView: View {
                         .padding(.leading, 14)
                 } else {
                     ForEach(statusMonitor.status.mcpServers) { server in
-                        MCPServerRow(server: server) {
-                            Task {
-                                await statusMonitor.restartMCPServer(name: server.name)
+                        MCPServerRow(
+                            server: server,
+                            onRestart: {
+                                Task {
+                                    await statusMonitor.restartMCPServer(name: server.name)
+                                }
+                            },
+                            onSignIn: {
+                                startAuthFlow(serverName: server.name)
                             }
-                        }
+                        )
                     }
                     .padding(.leading, 14)
                 }
@@ -397,6 +413,49 @@ struct MenuBarView: View {
         }
         .font(.subheadline)
     }
+    
+    // MARK: - Auth Flow
+    
+    private func startAuthFlow(serverName: String) {
+        Task {
+            authInProgress = serverName
+            if let deviceInfo = await statusMonitor.startAuth(serverName: serverName) {
+                currentAuthServer = serverName
+                authUserCode = deviceInfo.userCode
+                
+                // Copy the user code to clipboard for convenience
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(deviceInfo.userCode, forType: .string)
+                
+                // Show the alert with the code
+                showingAuthAlert = true
+                
+                // Open the verification URL in the browser
+                if let url = URL(string: deviceInfo.verificationUri) {
+                    NSWorkspace.shared.open(url)
+                }
+                
+                // Start polling for token in background
+                Task {
+                    let success = await statusMonitor.pollAuthAndRefresh(
+                        serverName: serverName,
+                        deviceCode: deviceInfo.deviceCode,
+                        interval: deviceInfo.interval
+                    )
+                    authInProgress = nil
+                    showingAuthAlert = false
+                    authUserCode = ""
+                    currentAuthServer = nil
+                    
+                    if !success {
+                        // Auth failed or timed out - status monitor already set lastError
+                    }
+                }
+            } else {
+                authInProgress = nil
+            }
+        }
+    }
 }
 
 // MARK: - MCP Server Row
@@ -404,55 +463,81 @@ struct MenuBarView: View {
 struct MCPServerRow: View {
     let server: MCPServerStatus
     let onRestart: () -> Void
+    let onSignIn: () -> Void
     
     var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(serverColor)
-                .frame(width: 6, height: 6)
-            
-            Text(server.name)
-                .font(.subheadline)
-            
-            if server.builtin {
-                Text("builtin")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(Color.secondary.opacity(0.15))
-                    .cornerRadius(3)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(serverColor)
+                    .frame(width: 6, height: 6)
+                
+                Text(server.name)
+                    .font(.subheadline)
+                
+                if server.builtin {
+                    Text("builtin")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.15))
+                        .cornerRadius(3)
+                }
+                
+                if server.connected {
+                    Text("\(server.toolCount)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                if !server.enabled {
+                    Text("off")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else if server.needsAuthentication {
+                    // Show Sign In button for servers that need auth
+                    Button {
+                        onSignIn()
+                    } label: {
+                        Text("Sign In")
+                            .font(.caption2)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.orange)
+                            .cornerRadius(3)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Sign in to \(server.name)")
+                } else if server.error != nil && !server.connected {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+                
+                // Only show restart button for non-builtin servers
+                if server.enabled && !server.builtin && !server.needsAuthentication {
+                    Button {
+                        onRestart()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Restart \(server.name)")
+                }
             }
             
-            if server.connected {
-                Text("\(server.toolCount)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            
-            Spacer()
-            
-            if !server.enabled {
-                Text("off")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else if let error = server.error, !server.connected {
-                Image(systemName: "exclamationmark.triangle.fill")
+            // Show error message below the server row (but not for auth errors)
+            if let error = server.error, !server.connected, server.enabled, !server.needsAuthentication {
+                Text(error)
                     .font(.caption2)
                     .foregroundStyle(.orange)
-                    .help(error)
-            }
-            
-            // Only show restart button for non-builtin servers
-            if server.enabled && !server.builtin {
-                Button {
-                    onRestart()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.caption2)
-                }
-                .buttonStyle(.plain)
-                .help("Restart \(server.name)")
+                    .lineLimit(2)
+                    .padding(.leading, 14)
             }
         }
         .padding(.vertical, 1)
@@ -461,6 +546,9 @@ struct MCPServerRow: View {
     private var serverColor: Color {
         if !server.enabled {
             return .secondary
+        }
+        if server.needsAuthentication {
+            return .orange
         }
         return server.connected ? .green : .red
     }

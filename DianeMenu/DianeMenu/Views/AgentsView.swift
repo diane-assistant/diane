@@ -12,6 +12,13 @@ struct AgentsView: View {
     @State private var isRunningPrompt = false
     @State private var promptResult: AgentRunResult?
     
+    // Remote agents state
+    @State private var remoteAgents: [RemoteAgentInfo] = []
+    @State private var isLoadingRemoteAgents = false
+    @State private var remoteAgentsError: String?
+    @State private var selectedSubAgent: String = ""
+    @State private var isSavingSubAgent = false
+    
     // Gallery state
     @State private var showAddAgent = false
     @State private var galleryEntries: [GalleryEntry] = []
@@ -245,9 +252,25 @@ struct AgentsView: View {
                         }
                         .foregroundStyle(.secondary)
                     }
+                    
+                    // Current sub-agent info
+                    if let subAgent = agent.subAgent, !subAgent.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "person.2.fill")
+                                .font(.caption)
+                            Text("Sub-agent: \(subAgent)")
+                                .font(.caption)
+                        }
+                        .foregroundStyle(.blue)
+                    }
                 }
                 .padding()
                 .background(Color(nsColor: .windowBackgroundColor))
+                
+                // Sub-agent configuration section (for ACP agents)
+                if agent.type == "acp" || agent.type == nil {
+                    subAgentConfigSection(agent: agent)
+                }
                 
                 // Connection error section
                 if let result = testResults[agent.name], let error = result.error {
@@ -301,6 +324,105 @@ struct AgentsView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+    
+    // MARK: - Sub-Agent Configuration Section
+    
+    private func subAgentConfigSection(agent: AgentConfig) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "person.2.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Sub-Agent Configuration")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                
+                Button {
+                    Task { await loadRemoteAgents(for: agent) }
+                } label: {
+                    if isLoadingRemoteAgents {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                    } else {
+                        Label("Discover", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.caption)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoadingRemoteAgents || !agent.enabled)
+            }
+            
+            if let error = remoteAgentsError {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            
+            if remoteAgents.isEmpty {
+                Text("Click 'Discover' to find available sub-agents from this ACP server")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                // Show config options as pickers
+                ForEach(remoteAgents) { remoteAgent in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(remoteAgent.name)
+                            .font(.caption.weight(.medium))
+                        
+                        if let desc = remoteAgent.description, !desc.isEmpty {
+                            Text(desc)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        if let options = remoteAgent.options, !options.isEmpty {
+                            HStack {
+                                Picker("", selection: $selectedSubAgent) {
+                                    Text("Default").tag("")
+                                    ForEach(options, id: \.self) { option in
+                                        Text(option).tag(option)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .frame(maxWidth: 200)
+                                .labelsHidden()
+                                
+                                if isSavingSubAgent {
+                                    ProgressView()
+                                        .scaleEffect(0.6)
+                                } else {
+                                    Button("Save") {
+                                        Task { await saveSubAgent(for: agent) }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(selectedSubAgent == (agent.subAgent ?? ""))
+                                }
+                            }
+                        }
+                    }
+                    .padding(8)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .cornerRadius(6)
+                }
+            }
+        }
+        .padding()
+        .background(Color.blue.opacity(0.03))
+        .onAppear {
+            selectedSubAgent = agent.subAgent ?? ""
+        }
+        .onChange(of: selectedAgent) { _ in
+            remoteAgents = []
+            remoteAgentsError = nil
+            if let agent = selectedAgent {
+                selectedSubAgent = agent.subAgent ?? ""
             }
         }
     }
@@ -509,6 +631,41 @@ struct AgentsView: View {
         } catch {
             // Show error somehow
         }
+    }
+    
+    private func loadRemoteAgents(for agent: AgentConfig) async {
+        isLoadingRemoteAgents = true
+        remoteAgentsError = nil
+        
+        do {
+            remoteAgents = try await client.getRemoteAgents(agentName: agent.name)
+            if remoteAgents.isEmpty {
+                remoteAgentsError = "No configurable sub-agents found"
+            }
+        } catch {
+            remoteAgentsError = error.localizedDescription
+            remoteAgents = []
+        }
+        
+        isLoadingRemoteAgents = false
+    }
+    
+    private func saveSubAgent(for agent: AgentConfig) async {
+        isSavingSubAgent = true
+        
+        do {
+            try await client.updateAgent(name: agent.name, subAgent: selectedSubAgent)
+            // Refresh agents list to get updated config
+            agents = try await client.getAgents()
+            // Update selected agent if it's the same one
+            if let updated = agents.first(where: { $0.name == agent.name }) {
+                selectedAgent = updated
+            }
+        } catch {
+            remoteAgentsError = "Failed to save: \(error.localizedDescription)"
+        }
+        
+        isSavingSubAgent = false
     }
     
     private func runPrompt(agent: AgentConfig) async {
