@@ -1,0 +1,564 @@
+package mcpproxy
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+// SSEClient represents a connection to an MCP server via SSE transport
+type SSEClient struct {
+	name            string
+	baseURL         string
+	headers         map[string]string
+	httpClient      *http.Client
+	sessionID       string
+	messageEndpoint string
+	mu              sync.Mutex
+	notifyChan      chan string
+	stopChan        chan struct{}
+	reconnectChan   chan struct{}
+	connected       atomic.Bool
+	closing         atomic.Bool
+	cachedToolCount int
+	toolCountValid  bool
+	refreshing      bool
+	lastError       string
+	nextID          int
+	pendingMu       sync.Mutex
+	pending         map[interface{}]chan MCPResponse
+}
+
+// NewSSEClient creates a new SSE MCP client
+func NewSSEClient(name string, url string, headers map[string]string) (*SSEClient, error) {
+	client := &SSEClient{
+		name:          name,
+		baseURL:       strings.TrimSuffix(url, "/"),
+		headers:       headers,
+		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		notifyChan:    make(chan string, 10),
+		stopChan:      make(chan struct{}),
+		reconnectChan: make(chan struct{}, 1),
+		nextID:        1,
+		pending:       make(map[interface{}]chan MCPResponse),
+	}
+
+	// Connect to SSE endpoint to get session ID
+	if err := client.connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect: %w", err)
+	}
+
+	// Initialize the MCP connection
+	if err := client.initialize(); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("failed to initialize: %w", err)
+	}
+
+	// Start reconnect loop
+	go client.reconnectLoop()
+
+	return client, nil
+}
+
+// connect establishes SSE connection and gets session info
+func (c *SSEClient) connect() error {
+	// Use the URL as-is - don't append /sse suffix
+	// The user should provide the complete SSE endpoint URL
+	sseURL := c.baseURL
+
+	req, err := http.NewRequest("GET", sseURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create SSE request: %w", err)
+	}
+
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Cache-Control", "no-cache")
+	for k, v := range c.headers {
+		req.Header.Set(k, v)
+	}
+
+	// Use a client without timeout for SSE
+	sseClient := &http.Client{}
+	resp, err := sseClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("SSE connection failed: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return fmt.Errorf("SSE connection failed with status %d", resp.StatusCode)
+	}
+
+	c.connected.Store(true)
+
+	// Start SSE event loop in background
+	go c.eventLoop(resp.Body)
+
+	// Wait briefly for the endpoint event
+	time.Sleep(100 * time.Millisecond)
+
+	if c.messageEndpoint == "" {
+		// No endpoint event received - this shouldn't happen with proper SSE servers
+		// Log a warning but don't try to guess the endpoint
+		slog.Warn("No endpoint event received from SSE server", "client", c.name)
+	}
+
+	slog.Info("SSE connected", "client", c.name, "endpoint", c.messageEndpoint)
+	return nil
+}
+
+// eventLoop reads SSE events
+func (c *SSEClient) eventLoop(body io.ReadCloser) {
+	defer body.Close()
+	defer func() {
+		c.connected.Store(false)
+		// Trigger reconnection if not closing
+		if !c.closing.Load() {
+			select {
+			case c.reconnectChan <- struct{}{}:
+			default:
+			}
+		}
+	}()
+
+	scanner := bufio.NewScanner(body)
+	var eventType, eventData string
+
+	for scanner.Scan() {
+		select {
+		case <-c.stopChan:
+			return
+		default:
+		}
+
+		line := scanner.Text()
+
+		if line == "" {
+			// Empty line = end of event
+			if eventType != "" || eventData != "" {
+				c.handleEvent(eventType, eventData)
+				eventType = ""
+				eventData = ""
+			}
+			continue
+		}
+
+		if strings.HasPrefix(line, "event:") {
+			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		} else if strings.HasPrefix(line, "data:") {
+			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if eventData != "" {
+				eventData += "\n"
+			}
+			eventData += data
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		slog.Warn("SSE connection error", "client", c.name, "error", err)
+		c.mu.Lock()
+		c.lastError = err.Error()
+		c.mu.Unlock()
+	} else {
+		slog.Warn("SSE connection closed", "client", c.name)
+		c.mu.Lock()
+		c.lastError = "connection closed by server"
+		c.mu.Unlock()
+	}
+}
+
+// reconnectLoop handles automatic reconnection with exponential backoff
+func (c *SSEClient) reconnectLoop() {
+	backoff := time.Second
+	maxBackoff := 30 * time.Second
+
+	for {
+		select {
+		case <-c.stopChan:
+			return
+		case <-c.reconnectChan:
+			// Wait before reconnecting
+			select {
+			case <-c.stopChan:
+				return
+			case <-time.After(backoff):
+			}
+
+			slog.Info("SSE reconnecting", "client", c.name, "backoff", backoff)
+
+			if err := c.reconnect(); err != nil {
+				slog.Warn("SSE reconnect failed", "client", c.name, "error", err)
+				c.mu.Lock()
+				c.lastError = err.Error()
+				c.mu.Unlock()
+
+				// Increase backoff for next attempt
+				backoff = backoff * 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+
+				// Trigger another reconnect attempt
+				select {
+				case c.reconnectChan <- struct{}{}:
+				default:
+				}
+			} else {
+				// Reset backoff on successful reconnection
+				backoff = time.Second
+				slog.Info("SSE reconnected successfully", "client", c.name)
+			}
+		}
+	}
+}
+
+// reconnect re-establishes the SSE connection
+func (c *SSEClient) reconnect() error {
+	sseURL := c.baseURL
+
+	req, err := http.NewRequest("GET", sseURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create SSE request: %w", err)
+	}
+
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Cache-Control", "no-cache")
+	for k, v := range c.headers {
+		req.Header.Set(k, v)
+	}
+
+	sseClient := &http.Client{}
+	resp, err := sseClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("SSE connection failed: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return fmt.Errorf("SSE connection failed with status %d", resp.StatusCode)
+	}
+
+	c.connected.Store(true)
+	c.mu.Lock()
+	c.lastError = ""
+	c.mu.Unlock()
+
+	// Start new event loop
+	go c.eventLoop(resp.Body)
+
+	// Wait briefly for the endpoint event
+	time.Sleep(100 * time.Millisecond)
+
+	return nil
+}
+
+// handleEvent processes an SSE event
+func (c *SSEClient) handleEvent(eventType, data string) {
+	slog.Debug("SSE event received", "client", c.name, "type", eventType)
+
+	switch eventType {
+	case "endpoint":
+		// Server sends the message endpoint URL (can be relative or absolute)
+		c.mu.Lock()
+		if strings.HasPrefix(data, "http://") || strings.HasPrefix(data, "https://") {
+			// Absolute URL - use as-is
+			c.messageEndpoint = data
+		} else {
+			// Relative URL - resolve against the base URL
+			baseURL, err := url.Parse(c.baseURL)
+			if err != nil {
+				slog.Warn("Failed to parse base URL", "client", c.name, "error", err)
+				c.messageEndpoint = data
+			} else {
+				refURL, err := url.Parse(data)
+				if err != nil {
+					slog.Warn("Failed to parse endpoint URL", "client", c.name, "error", err)
+					c.messageEndpoint = data
+				} else {
+					c.messageEndpoint = baseURL.ResolveReference(refURL).String()
+				}
+			}
+		}
+		slog.Debug("Message endpoint set", "client", c.name, "endpoint", c.messageEndpoint)
+		c.mu.Unlock()
+
+	case "message":
+		// Parse JSON-RPC message
+		var msg MCPMessage
+		if err := json.Unmarshal([]byte(data), &msg); err != nil {
+			slog.Warn("Failed to parse SSE message", "client", c.name, "error", err)
+			return
+		}
+
+		if msg.ID != nil {
+			// Response to a request
+			var reqID interface{} = msg.ID
+			if f, ok := msg.ID.(float64); ok {
+				reqID = int(f)
+			}
+			c.pendingMu.Lock()
+			if ch, ok := c.pending[reqID]; ok {
+				ch <- MCPResponse{
+					JSONRPC: msg.JSONRPC,
+					ID:      msg.ID,
+					Result:  msg.Result,
+					Error:   msg.Error,
+				}
+				delete(c.pending, reqID)
+			}
+			c.pendingMu.Unlock()
+		} else if msg.Method != "" {
+			// Notification
+			select {
+			case c.notifyChan <- msg.Method:
+			default:
+			}
+		}
+
+	default:
+		slog.Debug("Unknown SSE event type", "client", c.name, "type", eventType)
+	}
+}
+
+// sendRequest sends a JSON-RPC request via HTTP POST
+func (c *SSEClient) sendRequest(method string, params json.RawMessage) (json.RawMessage, error) {
+	return c.sendRequestWithTimeout(method, params, 30*time.Second)
+}
+
+func (c *SSEClient) sendRequestWithTimeout(method string, params json.RawMessage, timeout time.Duration) (json.RawMessage, error) {
+	c.mu.Lock()
+	c.nextID++
+	reqID := c.nextID
+	endpoint := c.messageEndpoint
+	c.mu.Unlock()
+
+	if endpoint == "" {
+		return nil, fmt.Errorf("no message endpoint available")
+	}
+
+	// Create response channel
+	respCh := make(chan MCPResponse, 1)
+	c.pendingMu.Lock()
+	c.pending[reqID] = respCh
+	c.pendingMu.Unlock()
+
+	req := MCPRequest{
+		JSONRPC: "2.0",
+		ID:      reqID,
+		Method:  method,
+		Params:  params,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		c.pendingMu.Lock()
+		delete(c.pending, reqID)
+		c.pendingMu.Unlock()
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		c.pendingMu.Lock()
+		delete(c.pending, reqID)
+		c.pendingMu.Unlock()
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	for k, v := range c.headers {
+		httpReq.Header.Set(k, v)
+	}
+
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		c.pendingMu.Lock()
+		delete(c.pending, reqID)
+		c.pendingMu.Unlock()
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		c.pendingMu.Lock()
+		delete(c.pending, reqID)
+		c.pendingMu.Unlock()
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Check if response is in body (synchronous) or via SSE (async)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.pendingMu.Lock()
+		delete(c.pending, reqID)
+		c.pendingMu.Unlock()
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if len(bodyBytes) > 0 {
+		// Synchronous response in body
+		var mcpResp MCPResponse
+		if err := json.Unmarshal(bodyBytes, &mcpResp); err == nil && mcpResp.ID != nil {
+			c.pendingMu.Lock()
+			delete(c.pending, reqID)
+			c.pendingMu.Unlock()
+			if mcpResp.Error != nil {
+				return nil, fmt.Errorf("%s error: %s", method, mcpResp.Error.Message)
+			}
+			return mcpResp.Result, nil
+		}
+	}
+
+	// Wait for async response via SSE
+	select {
+	case result, ok := <-respCh:
+		if !ok {
+			return nil, fmt.Errorf("connection closed")
+		}
+		if result.Error != nil {
+			return nil, fmt.Errorf("%s error: %s", method, result.Error.Message)
+		}
+		return result.Result, nil
+	case <-time.After(timeout):
+		c.pendingMu.Lock()
+		delete(c.pending, reqID)
+		c.pendingMu.Unlock()
+		return nil, fmt.Errorf("%s timed out", method)
+	}
+}
+
+// initialize sends the initialize request
+func (c *SSEClient) initialize() error {
+	params := json.RawMessage(`{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"diane","version":"1.0.0"}}`)
+	_, err := c.sendRequestWithTimeout("initialize", params, 10*time.Second)
+	return err
+}
+
+// GetName returns the client name
+func (c *SSEClient) GetName() string {
+	return c.name
+}
+
+// ListTools returns the list of available tools
+func (c *SSEClient) ListTools() ([]map[string]interface{}, error) {
+	return c.ListToolsWithTimeout(5 * time.Second)
+}
+
+// ListToolsWithTimeout returns the list of tools with a custom timeout
+func (c *SSEClient) ListToolsWithTimeout(timeout time.Duration) ([]map[string]interface{}, error) {
+	result, err := c.sendRequestWithTimeout("tools/list", nil, timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	var toolsResult struct {
+		Tools []map[string]interface{} `json:"tools"`
+	}
+	if err := json.Unmarshal(result, &toolsResult); err != nil {
+		return nil, fmt.Errorf("failed to parse tools: %w", err)
+	}
+
+	c.mu.Lock()
+	c.cachedToolCount = len(toolsResult.Tools)
+	c.toolCountValid = true
+	c.mu.Unlock()
+
+	return toolsResult.Tools, nil
+}
+
+// CallTool calls a tool on the MCP server
+func (c *SSEClient) CallTool(toolName string, arguments map[string]interface{}) (json.RawMessage, error) {
+	params, err := json.Marshal(map[string]interface{}{
+		"name":      toolName,
+		"arguments": arguments,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal params: %w", err)
+	}
+
+	return c.sendRequest("tools/call", params)
+}
+
+// IsConnected returns true if the client is connected
+func (c *SSEClient) IsConnected() bool {
+	return c.connected.Load()
+}
+
+// GetCachedToolCount returns the cached tool count
+func (c *SSEClient) GetCachedToolCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.toolCountValid {
+		return c.cachedToolCount
+	}
+	return -1
+}
+
+// InvalidateToolCache marks the tool cache as invalid
+func (c *SSEClient) InvalidateToolCache() {
+	c.mu.Lock()
+	c.toolCountValid = false
+	c.mu.Unlock()
+}
+
+// TriggerAsyncRefresh starts a background cache refresh
+func (c *SSEClient) TriggerAsyncRefresh(timeout time.Duration) bool {
+	c.mu.Lock()
+	if c.refreshing {
+		c.mu.Unlock()
+		return false
+	}
+	c.refreshing = true
+	c.mu.Unlock()
+
+	go func() {
+		_, _ = c.ListToolsWithTimeout(timeout)
+		c.mu.Lock()
+		c.refreshing = false
+		c.mu.Unlock()
+	}()
+	return true
+}
+
+// NotificationChan returns the channel for receiving notifications
+func (c *SSEClient) NotificationChan() <-chan string {
+	return c.notifyChan
+}
+
+// GetLastError returns the last error message
+func (c *SSEClient) GetLastError() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastError
+}
+
+// SetError sets the last error message
+func (c *SSEClient) SetError(err string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastError = err
+}
+
+// GetStderrOutput returns empty string (no stderr for SSE)
+func (c *SSEClient) GetStderrOutput() string {
+	return ""
+}
+
+// Close closes the SSE connection
+func (c *SSEClient) Close() error {
+	c.closing.Store(true)
+	close(c.stopChan)
+	c.connected.Store(false)
+	return nil
+}

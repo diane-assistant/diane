@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -121,7 +121,7 @@ func NewMCPClient(name string, command string, args []string, env map[string]str
 		var stderrLines []string
 		for scanner.Scan() {
 			line := scanner.Text()
-			log.Printf("[%s stderr] %s", name, line)
+			slog.Debug("MCP server stderr", "server", name, "line", line)
 			// Keep last few lines for error display
 			stderrLines = append(stderrLines, line)
 			if len(stderrLines) > 10 {
@@ -157,7 +157,7 @@ func (c *MCPClient) messageLoop() {
 		var msg MCPMessage
 		if err := c.decoder.Decode(&msg); err != nil {
 			if err != io.EOF {
-				log.Printf("[%s] Error reading message: %v", c.Name, err)
+				slog.Debug("Error reading message from MCP server", "server", c.Name, "error", err)
 			}
 			// Connection closed, cleanup pending requests
 			c.pendingMu.Lock()
@@ -187,16 +187,16 @@ func (c *MCPClient) messageLoop() {
 				}
 				delete(c.pending, reqID)
 			} else {
-				log.Printf("[%s] Received response for unknown request ID: %v", c.Name, msg.ID)
+				slog.Warn("Received response for unknown request ID", "server", c.Name, "id", msg.ID)
 			}
 			c.pendingMu.Unlock()
 		} else if msg.Method != "" {
 			// It's a notification - send to notification channel
-			log.Printf("[%s] Received notification: %s", c.Name, msg.Method)
+			slog.Debug("Received notification from MCP server", "server", c.Name, "method", msg.Method)
 			select {
 			case c.notifyChan <- msg.Method:
 			default:
-				log.Printf("[%s] Notification channel full, dropping: %s", c.Name, msg.Method)
+				slog.Warn("Notification channel full, dropping notification", "server", c.Name, "method", msg.Method)
 			}
 		}
 	}
@@ -374,6 +374,11 @@ func (c *MCPClient) NotificationChan() <-chan string {
 	return c.notifyChan
 }
 
+// GetName returns the client name
+func (c *MCPClient) GetName() string {
+	return c.Name
+}
+
 // IsConnected returns true if the MCP client process is still running
 func (c *MCPClient) IsConnected() bool {
 	if c.cmd == nil || c.cmd.Process == nil {
@@ -419,7 +424,7 @@ func (c *MCPClient) Close() error {
 	}
 	if c.cmd != nil && c.cmd.Process != nil {
 		if err := c.cmd.Process.Kill(); err != nil {
-			log.Printf("Failed to kill process for %s: %v", c.Name, err)
+			slog.Warn("Failed to kill process", "server", c.Name, "error", err)
 		}
 		c.cmd.Wait()
 	}

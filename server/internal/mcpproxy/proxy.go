@@ -3,21 +3,42 @@ package mcpproxy
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 )
 
+// OAuthConfig represents OAuth configuration for an MCP server
+type OAuthConfig struct {
+	// Provider is a well-known OAuth provider (e.g., "github-copilot")
+	// If set, other fields are auto-configured
+	Provider string `json:"provider,omitempty"`
+
+	// Manual OAuth configuration
+	ClientID     string   `json:"client_id,omitempty"`
+	ClientSecret string   `json:"client_secret,omitempty"`
+	Scopes       []string `json:"scopes,omitempty"`
+
+	// Device flow endpoints
+	DeviceAuthURL string `json:"device_auth_url,omitempty"`
+	TokenURL      string `json:"token_url,omitempty"`
+}
+
 // ServerConfig represents configuration for an MCP server
 type ServerConfig struct {
 	Name    string            `json:"name"`
 	Enabled bool              `json:"enabled"`
-	Type    string            `json:"type"` // stdio, http, etc.
+	Type    string            `json:"type"` // stdio, sse, http
 	Command string            `json:"command"`
 	Args    []string          `json:"args"`
 	Env     map[string]string `json:"env"`
+	// SSE/HTTP fields
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	// OAuth configuration
+	OAuth *OAuthConfig `json:"oauth,omitempty"`
 }
 
 // Config represents the MCP proxy configuration
@@ -27,7 +48,7 @@ type Config struct {
 
 // Proxy manages multiple MCP clients
 type Proxy struct {
-	clients    map[string]*MCPClient
+	clients    map[string]Client
 	config     *Config
 	configPath string // Store config path for reload
 	mu         sync.RWMutex
@@ -43,7 +64,7 @@ func NewProxy(configPath string) (*Proxy, error) {
 	}
 
 	proxy := &Proxy{
-		clients:    make(map[string]*MCPClient),
+		clients:    make(map[string]Client),
 		config:     config,
 		configPath: configPath,
 		notifyChan: make(chan string, 10), // Buffered channel for notifications
@@ -54,7 +75,7 @@ func NewProxy(configPath string) (*Proxy, error) {
 	for _, server := range config.Servers {
 		if server.Enabled {
 			if err := proxy.startClient(server); err != nil {
-				log.Printf("Failed to start MCP server %s: %v", server.Name, err)
+				slog.Warn("Failed to start MCP server", "server", server.Name, "error", err)
 				proxy.initErrors[server.Name] = err.Error()
 			}
 		}
@@ -66,9 +87,23 @@ func NewProxy(configPath string) (*Proxy, error) {
 	return proxy, nil
 }
 
-// startClient starts an MCP client
+// startClient starts an MCP client based on transport type
 func (p *Proxy) startClient(config ServerConfig) error {
-	client, err := NewMCPClient(config.Name, config.Command, config.Args, config.Env)
+	var client Client
+	var err error
+
+	switch config.Type {
+	case "sse":
+		client, err = NewSSEClient(config.Name, config.URL, config.Headers)
+	case "http":
+		client, err = NewHTTPClientWithOAuth(config.Name, config.URL, config.Headers, config.OAuth)
+	case "stdio", "":
+		// Default to stdio
+		client, err = NewMCPClient(config.Name, config.Command, config.Args, config.Env)
+	default:
+		return fmt.Errorf("unsupported transport type: %s", config.Type)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -77,7 +112,7 @@ func (p *Proxy) startClient(config ServerConfig) error {
 	p.clients[config.Name] = client
 	p.mu.Unlock()
 
-	log.Printf("Started MCP server: %s", config.Name)
+	slog.Info("Started MCP server", "server", config.Name, "type", config.Type)
 	return nil
 }
 
@@ -91,7 +126,7 @@ func (p *Proxy) ListAllTools() ([]map[string]interface{}, error) {
 	for serverName, client := range p.clients {
 		tools, err := client.ListTools()
 		if err != nil {
-			log.Printf("Failed to list tools from %s: %v", serverName, err)
+			slog.Warn("Failed to list tools from server", "server", serverName, "error", err)
 			continue
 		}
 
@@ -139,7 +174,7 @@ func (p *Proxy) CallTool(toolName string, arguments map[string]interface{}) (jso
 // monitorNotifications watches all client notification channels
 func (p *Proxy) monitorNotifications() {
 	p.mu.RLock()
-	clients := make([]*MCPClient, 0, len(p.clients))
+	clients := make([]Client, 0, len(p.clients))
 	for _, client := range p.clients {
 		clients = append(clients, client)
 	}
@@ -158,7 +193,7 @@ func (p *Proxy) NotificationChan() <-chan string {
 
 // Reload reloads the MCP configuration and starts/stops servers as needed
 func (p *Proxy) Reload() error {
-	log.Printf("Reloading MCP configuration from %s", p.configPath)
+	slog.Info("Reloading MCP configuration", "path", p.configPath)
 
 	newConfig, err := loadConfig(p.configPath)
 	if err != nil {
@@ -168,10 +203,10 @@ func (p *Proxy) Reload() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Build map of new enabled servers
+	// Build map of new enabled servers (all supported types)
 	newServers := make(map[string]ServerConfig)
 	for _, s := range newConfig.Servers {
-		if s.Enabled && s.Type == "stdio" {
+		if s.Enabled && (s.Type == "stdio" || s.Type == "sse" || s.Type == "http" || s.Type == "") {
 			newServers[s.Name] = s
 		}
 	}
@@ -179,7 +214,7 @@ func (p *Proxy) Reload() error {
 	// Stop removed servers
 	for name, client := range p.clients {
 		if _, exists := newServers[name]; !exists {
-			log.Printf("Stopping removed MCP server: %s", name)
+			slog.Info("Stopping removed MCP server", "server", name)
 			client.Close()
 			delete(p.clients, name)
 		}
@@ -188,9 +223,9 @@ func (p *Proxy) Reload() error {
 	// Start new servers
 	for name, serverConfig := range newServers {
 		if _, exists := p.clients[name]; !exists {
-			log.Printf("Starting new MCP server: %s", name)
+			slog.Info("Starting new MCP server", "server", name)
 			if err := p.startClientUnlocked(serverConfig); err != nil {
-				log.Printf("Failed to start %s: %v", name, err)
+				slog.Warn("Failed to start MCP server", "server", name, "error", err)
 			}
 		}
 	}
@@ -200,18 +235,31 @@ func (p *Proxy) Reload() error {
 	// Send notification that tools changed
 	select {
 	case p.notifyChan <- "config-reload":
-		log.Printf("Sent config-reload notification")
+		slog.Debug("Sent config-reload notification")
 	default:
-		log.Printf("Notification channel full, dropping config-reload notification")
+		slog.Warn("Notification channel full, dropping config-reload notification")
 	}
 
-	log.Printf("MCP configuration reload complete")
+	slog.Info("MCP configuration reload complete")
 	return nil
 }
 
 // startClientUnlocked starts a client (assumes lock is held by caller)
 func (p *Proxy) startClientUnlocked(config ServerConfig) error {
-	client, err := NewMCPClient(config.Name, config.Command, config.Args, config.Env)
+	var client Client
+	var err error
+
+	switch config.Type {
+	case "sse":
+		client, err = NewSSEClient(config.Name, config.URL, config.Headers)
+	case "http":
+		client, err = NewHTTPClientWithOAuth(config.Name, config.URL, config.Headers, config.OAuth)
+	case "stdio", "":
+		client, err = NewMCPClient(config.Name, config.Command, config.Args, config.Env)
+	default:
+		err = fmt.Errorf("unsupported transport type: %s", config.Type)
+	}
+
 	if err != nil {
 		p.initErrors[config.Name] = err.Error()
 		return err
@@ -225,19 +273,19 @@ func (p *Proxy) startClientUnlocked(config ServerConfig) error {
 	// Start monitoring this client's notifications
 	go p.monitorClient(client)
 
-	log.Printf("Started MCP server: %s", config.Name)
+	slog.Info("Started MCP server", "server", config.Name, "type", config.Type)
 	return nil
 }
 
 // monitorClient monitors a single client for notifications
-func (p *Proxy) monitorClient(client *MCPClient) {
+func (p *Proxy) monitorClient(client Client) {
 	for method := range client.NotificationChan() {
 		if method == "notifications/tools/list_changed" {
-			log.Printf("[%s] Tools changed, forwarding notification", client.Name)
+			slog.Debug("Tools changed, forwarding notification", "server", client.GetName())
 			select {
-			case p.notifyChan <- client.Name:
+			case p.notifyChan <- client.GetName():
 			default:
-				log.Printf("Proxy notification channel full, dropping notification from %s", client.Name)
+				slog.Warn("Proxy notification channel full, dropping notification", "server", client.GetName())
 			}
 		}
 	}
@@ -245,11 +293,13 @@ func (p *Proxy) monitorClient(client *MCPClient) {
 
 // ServerStatus represents the status of an MCP server
 type ServerStatus struct {
-	Name      string `json:"name"`
-	Enabled   bool   `json:"enabled"`
-	Connected bool   `json:"connected"`
-	ToolCount int    `json:"tool_count"`
-	Error     string `json:"error,omitempty"`
+	Name          string `json:"name"`
+	Enabled       bool   `json:"enabled"`
+	Connected     bool   `json:"connected"`
+	ToolCount     int    `json:"tool_count"`
+	Error         string `json:"error,omitempty"`
+	RequiresAuth  bool   `json:"requires_auth,omitempty"`
+	Authenticated bool   `json:"authenticated,omitempty"`
 }
 
 // GetServerStatuses returns the status of all configured MCP servers (non-blocking)
@@ -257,12 +307,21 @@ func (p *Proxy) GetServerStatuses() []ServerStatus {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	oauthMgr := GetOAuthManager()
 	var statuses []ServerStatus
 
 	for _, server := range p.config.Servers {
 		status := ServerStatus{
 			Name:    server.Name,
 			Enabled: server.Enabled,
+		}
+
+		// Check if this server requires OAuth authentication
+		if server.OAuth != nil {
+			status.RequiresAuth = true
+			if oauthMgr != nil {
+				status.Authenticated = oauthMgr.HasValidToken(server.Name)
+			}
 		}
 
 		if client, ok := p.clients[server.Name]; ok {
@@ -317,14 +376,14 @@ func (p *Proxy) RestartServer(name string) error {
 
 	// Close existing client if running
 	if client, ok := p.clients[name]; ok {
-		log.Printf("Stopping MCP server for restart: %s", name)
+		slog.Info("Stopping MCP server for restart", "server", name)
 		client.Close()
 		delete(p.clients, name)
 	}
 
 	// Start fresh
-	if serverConfig.Enabled && serverConfig.Type == "stdio" {
-		log.Printf("Restarting MCP server: %s", name)
+	if serverConfig.Enabled && (serverConfig.Type == "stdio" || serverConfig.Type == "sse" || serverConfig.Type == "http" || serverConfig.Type == "") {
+		slog.Info("Restarting MCP server", "server", name)
 		if err := p.startClientUnlocked(*serverConfig); err != nil {
 			return fmt.Errorf("failed to restart %s: %w", name, err)
 		}
@@ -359,14 +418,41 @@ func (p *Proxy) Close() error {
 	defer p.mu.Unlock()
 
 	for name, client := range p.clients {
-		log.Printf("Shutting down MCP server: %s", name)
+		slog.Info("Shutting down MCP server", "server", name)
 		if err := client.Close(); err != nil {
-			log.Printf("Error closing %s: %v", name, err)
+			slog.Warn("Error closing MCP server", "server", name, "error", err)
 		}
 	}
 
-	p.clients = make(map[string]*MCPClient)
+	p.clients = make(map[string]Client)
 	return nil
+}
+
+// GetServerConfig returns the configuration for a specific server
+func (p *Proxy) GetServerConfig(name string) *ServerConfig {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	for _, s := range p.config.Servers {
+		if s.Name == name {
+			return &s
+		}
+	}
+	return nil
+}
+
+// GetServersWithOAuth returns all servers that have OAuth configured
+func (p *Proxy) GetServersWithOAuth() []ServerConfig {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var result []ServerConfig
+	for _, s := range p.config.Servers {
+		if s.OAuth != nil {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // loadConfig loads the MCP proxy configuration
