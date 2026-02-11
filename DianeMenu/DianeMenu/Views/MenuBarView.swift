@@ -318,6 +318,90 @@ struct MenuBarView: View {
             .buttonStyle(.plain)
             .help("Manage ACP agents")
             
+            // Contexts row
+            Button {
+                NSApp.keyWindow?.close()
+                WindowManager.shared.openContexts()
+            } label: {
+                HStack(spacing: 16) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.stack.3d.up")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Contexts")
+                            .font(.subheadline)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 6)
+                .background(Color.primary.opacity(0.05))
+                .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .help("Manage MCP server contexts")
+            
+            // Providers row
+            Button {
+                NSApp.keyWindow?.close()
+                WindowManager.shared.openProviders()
+            } label: {
+                HStack(spacing: 16) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "cpu")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Providers")
+                            .font(.subheadline)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 6)
+                .background(Color.primary.opacity(0.05))
+                .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .help("Manage embedding and LLM providers")
+            
+            // Usage row
+            Button {
+                NSApp.keyWindow?.close()
+                WindowManager.shared.openUsage()
+            } label: {
+                HStack(spacing: 16) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chart.bar.doc.horizontal")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Usage")
+                            .font(.subheadline)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 6)
+                .background(Color.primary.opacity(0.05))
+                .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .help("View usage and costs")
+            
             HStack {
                 Spacer()
                 

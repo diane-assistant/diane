@@ -111,7 +111,7 @@ func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
 
 	if notificationsProvider != nil {
 		servers = append(servers, api.MCPServerStatus{
-			Name:      "notifications",
+			Name:      "discord",
 			Enabled:   true,
 			Connected: true,
 			ToolCount: len(notificationsProvider.Tools()),
@@ -521,7 +521,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 		tools = append(tools, api.ToolInfo{
 			Name:        t.name,
 			Description: t.desc,
-			Server:      "diane",
+			Server:      "jobs",
 			Builtin:     true,
 		})
 	}
@@ -568,7 +568,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 			tools = append(tools, api.ToolInfo{
 				Name:        tool.Name,
 				Description: tool.Description,
-				Server:      "notifications",
+				Server:      "discord",
 				Builtin:     true,
 			})
 		}
@@ -651,6 +651,212 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 			}
 		}
 	}
+
+	return tools
+}
+
+// GetToolsForContext returns tools filtered by context settings
+func (d *DianeStatusProvider) GetToolsForContext(contextName string) []api.ToolInfo {
+	// If no context specified, return all tools
+	if contextName == "" {
+		return d.GetAllTools()
+	}
+
+	// Get context filter from database
+	database, err := getDB()
+	if err != nil {
+		slog.Warn("Failed to get database for context filtering", "error", err)
+		return d.GetAllTools() // Fail open
+	}
+	defer database.Close()
+
+	contextFilter := db.NewContextFilterAdapter(database)
+
+	var tools []api.ToolInfo
+
+	// Built-in job tools - check if "jobs" server is enabled in context
+	builtinTools := []struct{ name, desc string }{
+		{"job_list", "List all cron jobs with their schedules and enabled status"},
+		{"job_add", "Add a new cron job with schedule and command"},
+		{"job_enable", "Enable a previously disabled job"},
+		{"job_disable", "Disable a job without deleting it"},
+		{"job_delete", "Delete a job permanently"},
+		{"job_pause", "Pause all job execution temporarily"},
+		{"job_resume", "Resume paused job execution"},
+		{"job_logs", "View recent execution logs for a job"},
+		{"server_status", "Get Diane server status and statistics"},
+	}
+	for _, t := range builtinTools {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "jobs", t.name); enabled {
+			tools = append(tools, api.ToolInfo{
+				Name:        t.name,
+				Description: t.desc,
+				Server:      "jobs",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// Helper function to check and add provider tools
+	addProviderTools := func(providerTools []struct{ Name, Description string }, serverName string) {
+		for _, tool := range providerTools {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, serverName, tool.Name); enabled {
+				tools = append(tools, api.ToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Server:      serverName,
+					Builtin:     true,
+				})
+			}
+		}
+	}
+
+	// Apple tools
+	if appleProvider != nil {
+		for _, tool := range appleProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "apple", tool.Name); enabled {
+				tools = append(tools, api.ToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Server:      "apple",
+					Builtin:     true,
+				})
+			}
+		}
+	}
+
+	// Google tools
+	if googleProvider != nil {
+		for _, tool := range googleProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "google", tool.Name); enabled {
+				tools = append(tools, api.ToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Server:      "google",
+					Builtin:     true,
+				})
+			}
+		}
+	}
+
+	// Infrastructure tools
+	if infrastructureProvider != nil {
+		for _, tool := range infrastructureProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "infrastructure", tool.Name); enabled {
+				tools = append(tools, api.ToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Server:      "infrastructure",
+					Builtin:     true,
+				})
+			}
+		}
+	}
+
+	// Notifications tools
+	if notificationsProvider != nil {
+		for _, tool := range notificationsProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "discord", tool.Name); enabled {
+				tools = append(tools, api.ToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Server:      "discord",
+					Builtin:     true,
+				})
+			}
+		}
+	}
+
+	// Finance tools
+	if financeProvider != nil {
+		for _, tool := range financeProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "finance", tool.Name); enabled {
+				tools = append(tools, api.ToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Server:      "finance",
+					Builtin:     true,
+				})
+			}
+		}
+	}
+
+	// Places tools
+	if placesProvider != nil {
+		for _, tool := range placesProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "places", tool.Name); enabled {
+				tools = append(tools, api.ToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Server:      "places",
+					Builtin:     true,
+				})
+			}
+		}
+	}
+
+	// Weather tools
+	if weatherProvider != nil {
+		for _, tool := range weatherProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "weather", tool.Name); enabled {
+				tools = append(tools, api.ToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Server:      "weather",
+					Builtin:     true,
+				})
+			}
+		}
+	}
+
+	// GitHub tools
+	if githubProvider != nil {
+		for _, tool := range githubProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "github-bot", tool.Name); enabled {
+				tools = append(tools, api.ToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Server:      "github-bot",
+					Builtin:     true,
+				})
+			}
+		}
+	}
+
+	// Downloads tools
+	if downloadsProvider != nil {
+		for _, tool := range downloadsProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "downloads", tool.Name); enabled {
+				tools = append(tools, api.ToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Server:      "downloads",
+					Builtin:     true,
+				})
+			}
+		}
+	}
+
+	// External MCP server tools (from proxy) with context filtering
+	if proxy != nil {
+		proxiedTools, err := proxy.ListToolsForContext(contextName, contextFilter)
+		if err == nil {
+			for _, t := range proxiedTools {
+				name, _ := t["name"].(string)
+				desc, _ := t["description"].(string)
+				server, _ := t["_server"].(string)
+				tools = append(tools, api.ToolInfo{
+					Name:        name,
+					Description: desc,
+					Server:      server,
+					Builtin:     false,
+				})
+			}
+		}
+	}
+
+	// Suppress unused variable warning
+	_ = addProviderTools
 
 	return tools
 }
@@ -752,6 +958,46 @@ func (h *MCPHandlerAdapter) HandleRequest(req api.MCPRequest) api.MCPResponse {
 // GetTools implements api.MCPHandler
 func (h *MCPHandlerAdapter) GetTools() ([]api.ToolInfo, error) {
 	return h.statusProvider.GetAllTools(), nil
+}
+
+// HandleRequestWithContext implements api.MCPHandler for context-aware requests
+func (h *MCPHandlerAdapter) HandleRequestWithContext(req api.MCPRequest, contextName string) api.MCPResponse {
+	// Convert api.MCPRequest to local MCPRequest
+	localReq := MCPRequest{
+		JSONRPC: req.JSONRPC,
+		ID:      req.ID,
+		Method:  req.Method,
+		Params:  req.Params,
+	}
+
+	// Call the context-aware handleRequest function
+	localResp := handleRequestWithContext(localReq, contextName)
+
+	// Convert local MCPResponse to api.MCPResponse
+	var result json.RawMessage
+	if localResp.Result != nil {
+		result, _ = json.Marshal(localResp.Result)
+	}
+
+	var apiErr *api.MCPError
+	if localResp.Error != nil {
+		apiErr = &api.MCPError{
+			Code:    localResp.Error.Code,
+			Message: localResp.Error.Message,
+		}
+	}
+
+	return api.MCPResponse{
+		JSONRPC: localResp.JSONRPC,
+		ID:      localResp.ID,
+		Result:  result,
+		Error:   apiErr,
+	}
+}
+
+// GetToolsForContext implements api.MCPHandler for context-aware tool listing
+func (h *MCPHandlerAdapter) GetToolsForContext(contextName string) ([]api.ToolInfo, error) {
+	return h.statusProvider.GetToolsForContext(contextName), nil
 }
 
 type MCPRequest struct {
@@ -1035,6 +1281,33 @@ func handleRequest(req MCPRequest) MCPResponse {
 		return listTools()
 	case "tools/call":
 		return callTool(req.Params)
+	case "prompts/list":
+		return listPrompts()
+	case "prompts/get":
+		return getPrompt(req.Params)
+	case "resources/list":
+		return listResources()
+	case "resources/read":
+		return readResource(req.Params)
+	default:
+		return MCPResponse{
+			Error: &MCPError{
+				Code:    -32601,
+				Message: fmt.Sprintf("Method not found: %s", req.Method),
+			},
+		}
+	}
+}
+
+// handleRequestWithContext handles MCP requests with context-aware filtering
+func handleRequestWithContext(req MCPRequest, contextName string) MCPResponse {
+	switch req.Method {
+	case "initialize":
+		return initialize()
+	case "tools/list":
+		return listToolsForContext(contextName)
+	case "tools/call":
+		return callToolForContext(req.Params, contextName)
 	case "prompts/list":
 		return listPrompts()
 	case "prompts/get":
@@ -1519,33 +1792,569 @@ func callTool(params json.RawMessage) MCPResponse {
 	}
 }
 
+// listToolsForContext returns tools filtered by context
+func listToolsForContext(contextName string) MCPResponse {
+	// Get context filter from database
+	database, err := getDB()
+	if err != nil {
+		slog.Warn("Failed to get database for context filtering", "error", err)
+		return listTools() // Fail open - return all tools
+	}
+	defer database.Close()
+
+	contextFilter := db.NewContextFilterAdapter(database)
+
+	var tools []map[string]interface{}
+
+	// Built-in job tools - check context
+	builtinTools := []struct {
+		name, desc string
+		schema     map[string]interface{}
+	}{
+		{"job_list", "List all cron jobs with their schedules and enabled status", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"enabled_only": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Filter to show only enabled jobs",
+				},
+			},
+		}},
+		{"job_add", "Add a new cron job with schedule and command", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name":     map[string]interface{}{"type": "string", "description": "Unique name for the job"},
+				"schedule": map[string]interface{}{"type": "string", "description": "Cron schedule expression"},
+				"command":  map[string]interface{}{"type": "string", "description": "Shell command to execute"},
+			},
+			"required": []string{"name", "schedule", "command"},
+		}},
+		{"job_enable", "Enable a cron job by name or ID", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"job": map[string]interface{}{"type": "string", "description": "Job name or ID"},
+			},
+			"required": []string{"job"},
+		}},
+		{"job_disable", "Disable a cron job by name or ID", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"job": map[string]interface{}{"type": "string", "description": "Job name or ID"},
+			},
+			"required": []string{"job"},
+		}},
+		{"job_delete", "Delete a cron job by name or ID", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"job": map[string]interface{}{"type": "string", "description": "Job name or ID"},
+			},
+			"required": []string{"job"},
+		}},
+		{"job_pause", "Pause all job execution temporarily", map[string]interface{}{"type": "object"}},
+		{"job_resume", "Resume paused job execution", map[string]interface{}{"type": "object"}},
+		{"job_logs", "View recent execution logs for a job", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"job":   map[string]interface{}{"type": "string", "description": "Job name or ID"},
+				"limit": map[string]interface{}{"type": "integer", "description": "Maximum number of logs to return"},
+			},
+		}},
+		{"server_status", "Get Diane server status and statistics", map[string]interface{}{"type": "object"}},
+	}
+
+	for _, t := range builtinTools {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "jobs", t.name); enabled {
+			tools = append(tools, map[string]interface{}{
+				"name":        t.name,
+				"description": t.desc,
+				"inputSchema": t.schema,
+			})
+		}
+	}
+
+	// Helper to add provider tools with context check
+	addProviderToolsWithContext := func(providerTools []struct {
+		Name        string
+		Description string
+		InputSchema map[string]interface{}
+	}, serverName string) {
+		for _, tool := range providerTools {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, serverName, tool.Name); enabled {
+				tools = append(tools, map[string]interface{}{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"inputSchema": tool.InputSchema,
+				})
+			}
+		}
+	}
+	_ = addProviderToolsWithContext // suppress unused warning
+
+	// Apple tools
+	if appleProvider != nil {
+		for _, tool := range appleProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "apple", tool.Name); enabled {
+				tools = append(tools, map[string]interface{}{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"inputSchema": tool.InputSchema,
+				})
+			}
+		}
+	}
+
+	// Google tools
+	if googleProvider != nil {
+		for _, tool := range googleProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "google", tool.Name); enabled {
+				tools = append(tools, map[string]interface{}{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"inputSchema": tool.InputSchema,
+				})
+			}
+		}
+	}
+
+	// Infrastructure tools
+	if infrastructureProvider != nil {
+		for _, tool := range infrastructureProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "infrastructure", tool.Name); enabled {
+				tools = append(tools, map[string]interface{}{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"inputSchema": tool.InputSchema,
+				})
+			}
+		}
+	}
+
+	// Notifications tools
+	if notificationsProvider != nil {
+		for _, tool := range notificationsProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "discord", tool.Name); enabled {
+				tools = append(tools, map[string]interface{}{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"inputSchema": tool.InputSchema,
+				})
+			}
+		}
+	}
+
+	// Finance tools
+	if financeProvider != nil {
+		for _, tool := range financeProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "finance", tool.Name); enabled {
+				tools = append(tools, map[string]interface{}{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"inputSchema": tool.InputSchema,
+				})
+			}
+		}
+	}
+
+	// Places tools
+	if placesProvider != nil {
+		for _, tool := range placesProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "places", tool.Name); enabled {
+				tools = append(tools, map[string]interface{}{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"inputSchema": tool.InputSchema,
+				})
+			}
+		}
+	}
+
+	// Weather tools
+	if weatherProvider != nil {
+		for _, tool := range weatherProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "weather", tool.Name); enabled {
+				tools = append(tools, map[string]interface{}{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"inputSchema": tool.InputSchema,
+				})
+			}
+		}
+	}
+
+	// GitHub tools
+	if githubProvider != nil {
+		for _, tool := range githubProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "github-bot", tool.Name); enabled {
+				tools = append(tools, map[string]interface{}{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"inputSchema": tool.InputSchema,
+				})
+			}
+		}
+	}
+
+	// Downloads tools
+	if downloadsProvider != nil {
+		for _, tool := range downloadsProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "downloads", tool.Name); enabled {
+				tools = append(tools, map[string]interface{}{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"inputSchema": tool.InputSchema,
+				})
+			}
+		}
+	}
+
+	// Add proxied tools with context filtering
+	if proxy != nil {
+		proxiedTools, err := proxy.ListToolsForContext(contextName, contextFilter)
+		if err != nil {
+			slog.Warn("Failed to list proxied tools for context", "context", contextName, "error", err)
+		} else {
+			tools = append(tools, proxiedTools...)
+		}
+	}
+
+	return MCPResponse{
+		Result: map[string]interface{}{
+			"tools": tools,
+		},
+	}
+}
+
+// callToolForContext calls a tool with context validation
+func callToolForContext(params json.RawMessage, contextName string) MCPResponse {
+	var call struct {
+		Name      string                 `json:"name"`
+		Arguments map[string]interface{} `json:"arguments"`
+	}
+
+	if err := json.Unmarshal(params, &call); err != nil {
+		return MCPResponse{
+			Error: &MCPError{
+				Code:    -32602,
+				Message: fmt.Sprintf("Invalid params: %v", err),
+			},
+		}
+	}
+
+	// Get context filter from database
+	database, err := getDB()
+	if err != nil {
+		slog.Warn("Failed to get database for context validation", "error", err)
+		return callTool(params) // Fail open
+	}
+	defer database.Close()
+
+	contextFilter := db.NewContextFilterAdapter(database)
+
+	// Check if tool is enabled in context for built-in tools
+	isBuiltinTool := map[string]string{
+		"job_list":      "jobs",
+		"job_add":       "jobs",
+		"job_enable":    "jobs",
+		"job_disable":   "jobs",
+		"job_delete":    "jobs",
+		"job_pause":     "jobs",
+		"job_resume":    "jobs",
+		"job_logs":      "jobs",
+		"server_status": "jobs",
+	}
+
+	if serverName, isBuiltin := isBuiltinTool[call.Name]; isBuiltin {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, serverName, call.Name); !enabled {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Tool %s is not enabled in context %s", call.Name, contextName),
+				},
+			}
+		}
+		// Call the tool as normal
+		switch call.Name {
+		case "job_list":
+			return jobList(call.Arguments)
+		case "job_add":
+			return jobAdd(call.Arguments)
+		case "job_enable":
+			return jobEnable(call.Arguments)
+		case "job_disable":
+			return jobDisable(call.Arguments)
+		case "job_delete":
+			return jobDelete(call.Arguments)
+		case "job_pause":
+			return pauseAll()
+		case "job_resume":
+			return resumeAll()
+		case "job_logs":
+			return getLogs(call.Arguments)
+		case "server_status":
+			return getStatus()
+		}
+	}
+
+	// Check Apple tools
+	if appleProvider != nil && appleProvider.HasTool(call.Name) {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "apple", call.Name); !enabled {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Tool %s is not enabled in context %s", call.Name, contextName),
+				},
+			}
+		}
+		result, err := appleProvider.Call(call.Name, call.Arguments)
+		if err != nil {
+			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+		}
+		return MCPResponse{Result: result}
+	}
+
+	// Check Google tools
+	if googleProvider != nil && googleProvider.HasTool(call.Name) {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "google", call.Name); !enabled {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Tool %s is not enabled in context %s", call.Name, contextName),
+				},
+			}
+		}
+		result, err := googleProvider.Call(call.Name, call.Arguments)
+		if err != nil {
+			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+		}
+		return MCPResponse{Result: result}
+	}
+
+	// Check Infrastructure tools
+	if infrastructureProvider != nil && infrastructureProvider.HasTool(call.Name) {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "infrastructure", call.Name); !enabled {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Tool %s is not enabled in context %s", call.Name, contextName),
+				},
+			}
+		}
+		result, err := infrastructureProvider.Call(call.Name, call.Arguments)
+		if err != nil {
+			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+		}
+		return MCPResponse{Result: result}
+	}
+
+	// Check Notifications tools
+	if notificationsProvider != nil && notificationsProvider.HasTool(call.Name) {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "discord", call.Name); !enabled {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Tool %s is not enabled in context %s", call.Name, contextName),
+				},
+			}
+		}
+		result, err := notificationsProvider.Call(call.Name, call.Arguments)
+		if err != nil {
+			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+		}
+		return MCPResponse{Result: result}
+	}
+
+	// Check Finance tools
+	if financeProvider != nil && financeProvider.HasTool(call.Name) {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "finance", call.Name); !enabled {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Tool %s is not enabled in context %s", call.Name, contextName),
+				},
+			}
+		}
+		result, err := financeProvider.Call(call.Name, call.Arguments)
+		if err != nil {
+			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+		}
+		return MCPResponse{Result: result}
+	}
+
+	// Check Places tools
+	if placesProvider != nil && placesProvider.HasTool(call.Name) {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "places", call.Name); !enabled {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Tool %s is not enabled in context %s", call.Name, contextName),
+				},
+			}
+		}
+		result, err := placesProvider.Call(call.Name, call.Arguments)
+		if err != nil {
+			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+		}
+		return MCPResponse{Result: result}
+	}
+
+	// Check Weather tools
+	if weatherProvider != nil && weatherProvider.HasTool(call.Name) {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "weather", call.Name); !enabled {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Tool %s is not enabled in context %s", call.Name, contextName),
+				},
+			}
+		}
+		result, err := weatherProvider.Call(call.Name, call.Arguments)
+		if err != nil {
+			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+		}
+		return MCPResponse{Result: result}
+	}
+
+	// Check GitHub tools
+	if githubProvider != nil && githubProvider.HasTool(call.Name) {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "github-bot", call.Name); !enabled {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Tool %s is not enabled in context %s", call.Name, contextName),
+				},
+			}
+		}
+		result, err := githubProvider.Call(call.Name, call.Arguments)
+		if err != nil {
+			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+		}
+		return MCPResponse{Result: result}
+	}
+
+	// Check Downloads tools
+	if downloadsProvider != nil && downloadsProvider.HasTool(call.Name) {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "downloads", call.Name); !enabled {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Tool %s is not enabled in context %s", call.Name, contextName),
+				},
+			}
+		}
+		result, err := downloadsProvider.Call(call.Name, call.Arguments)
+		if err != nil {
+			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+		}
+		return MCPResponse{Result: result}
+	}
+
+	// Try proxied tools with context validation
+	if proxy != nil {
+		result, err := proxy.CallToolForContext(contextName, call.Name, call.Arguments, contextFilter)
+		if err == nil {
+			return MCPResponse{Result: result}
+		}
+		// Check if it's a context access error
+		if err.Error() != fmt.Sprintf("unknown tool: %s", call.Name) {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: err.Error(),
+				},
+			}
+		}
+	}
+
+	return MCPResponse{
+		Error: &MCPError{
+			Code:    -32601,
+			Message: fmt.Sprintf("Tool not found: %s", call.Name),
+		},
+	}
+}
+
 // --- Prompts ---
 
 func listPrompts() MCPResponse {
 	var prompts []map[string]interface{}
 
+	// Helper to add prompts from a PromptProvider
+	addPrompts := func(pp tools.PromptProvider) {
+		for _, p := range pp.Prompts() {
+			prompt := map[string]interface{}{
+				"name":        p.Name,
+				"description": p.Description,
+			}
+			if len(p.Arguments) > 0 {
+				args := make([]map[string]interface{}, len(p.Arguments))
+				for i, arg := range p.Arguments {
+					args[i] = map[string]interface{}{
+						"name":        arg.Name,
+						"description": arg.Description,
+						"required":    arg.Required,
+					}
+				}
+				prompt["arguments"] = args
+			}
+			prompts = append(prompts, prompt)
+		}
+	}
+
 	// Collect prompts from Google provider
 	if googleProvider != nil {
 		if pp, ok := interface{}(googleProvider).(tools.PromptProvider); ok {
-			for _, p := range pp.Prompts() {
-				prompt := map[string]interface{}{
-					"name":        p.Name,
-					"description": p.Description,
-				}
-				if len(p.Arguments) > 0 {
-					args := make([]map[string]interface{}, len(p.Arguments))
-					for i, arg := range p.Arguments {
-						args[i] = map[string]interface{}{
-							"name":        arg.Name,
-							"description": arg.Description,
-							"required":    arg.Required,
-						}
-					}
-					prompt["arguments"] = args
-				}
-				prompts = append(prompts, prompt)
-			}
+			addPrompts(pp)
 		}
+	}
+
+	// Collect prompts from Discord/notifications provider
+	if notificationsProvider != nil {
+		if pp, ok := interface{}(notificationsProvider).(tools.PromptProvider); ok {
+			addPrompts(pp)
+		}
+	}
+
+	// Built-in jobs prompts
+	jobsPrompts := []tools.Prompt{
+		{
+			Name:        "jobs_create_scheduled_task",
+			Description: "Create a new scheduled job with the appropriate cron expression for the desired frequency",
+			Arguments: []tools.PromptArgument{
+				{Name: "task_description", Description: "What the job should do", Required: true},
+				{Name: "frequency", Description: "How often to run (e.g., 'every hour', 'daily at 9am', 'every monday')", Required: true},
+				{Name: "command", Description: "The shell command to execute", Required: true},
+			},
+		},
+		{
+			Name:        "jobs_review_schedules",
+			Description: "Review all configured jobs and suggest optimizations for scheduling conflicts or improvements",
+		},
+		{
+			Name:        "jobs_troubleshoot_failures",
+			Description: "Analyze recent job execution logs to identify and diagnose failures",
+			Arguments: []tools.PromptArgument{
+				{Name: "job_name", Description: "Specific job to troubleshoot (optional, defaults to all)", Required: false},
+				{Name: "limit", Description: "Number of recent logs to analyze", Required: false},
+			},
+		},
+	}
+	for _, p := range jobsPrompts {
+		prompt := map[string]interface{}{
+			"name":        p.Name,
+			"description": p.Description,
+		}
+		if len(p.Arguments) > 0 {
+			args := make([]map[string]interface{}, len(p.Arguments))
+			for i, arg := range p.Arguments {
+				args[i] = map[string]interface{}{
+					"name":        arg.Name,
+					"description": arg.Description,
+					"required":    arg.Required,
+				}
+			}
+			prompt["arguments"] = args
+		}
+		prompts = append(prompts, prompt)
 	}
 
 	return MCPResponse{
@@ -1570,29 +2379,48 @@ func getPrompt(params json.RawMessage) MCPResponse {
 		}
 	}
 
+	// Helper to convert messages to response format
+	convertMessages := func(messages []tools.PromptMessage) MCPResponse {
+		msgs := make([]map[string]interface{}, len(messages))
+		for i, m := range messages {
+			msgs[i] = map[string]interface{}{
+				"role": m.Role,
+				"content": map[string]interface{}{
+					"type": m.Content.Type,
+					"text": m.Content.Text,
+				},
+			}
+		}
+		return MCPResponse{
+			Result: map[string]interface{}{
+				"messages": msgs,
+			},
+		}
+	}
+
 	// Try Google provider
 	if googleProvider != nil {
 		if pp, ok := interface{}(googleProvider).(tools.PromptProvider); ok {
 			messages, err := pp.GetPrompt(req.Name, req.Arguments)
 			if err == nil {
-				// Convert to response format
-				msgs := make([]map[string]interface{}, len(messages))
-				for i, m := range messages {
-					msgs[i] = map[string]interface{}{
-						"role": m.Role,
-						"content": map[string]interface{}{
-							"type": m.Content.Type,
-							"text": m.Content.Text,
-						},
-					}
-				}
-				return MCPResponse{
-					Result: map[string]interface{}{
-						"messages": msgs,
-					},
-				}
+				return convertMessages(messages)
 			}
 		}
+	}
+
+	// Try Discord/notifications provider
+	if notificationsProvider != nil {
+		if pp, ok := interface{}(notificationsProvider).(tools.PromptProvider); ok {
+			messages, err := pp.GetPrompt(req.Name, req.Arguments)
+			if err == nil {
+				return convertMessages(messages)
+			}
+		}
+	}
+
+	// Try built-in jobs prompts
+	if messages := getJobsPrompt(req.Name, req.Arguments); messages != nil {
+		return convertMessages(messages)
 	}
 
 	return MCPResponse{
@@ -1601,6 +2429,125 @@ func getPrompt(params json.RawMessage) MCPResponse {
 			Message: fmt.Sprintf("Prompt not found: %s", req.Name),
 		},
 	}
+}
+
+// getJobsPrompt handles the built-in jobs prompts
+func getJobsPrompt(name string, args map[string]string) []tools.PromptMessage {
+	getArg := func(key, defaultVal string) string {
+		if val, ok := args[key]; ok && val != "" {
+			return val
+		}
+		return defaultVal
+	}
+
+	switch name {
+	case "jobs_create_scheduled_task":
+		taskDesc := getArg("task_description", "a scheduled task")
+		frequency := getArg("frequency", "every hour")
+		command := getArg("command", "echo 'hello'")
+
+		return []tools.PromptMessage{
+			{
+				Role: "user",
+				Content: tools.PromptContent{
+					Type: "text",
+					Text: fmt.Sprintf(`Create a scheduled job for the following task:
+
+**Task Description:** %s
+**Desired Frequency:** %s
+**Command:** %s
+
+**Instructions:**
+1. Convert the frequency description to a proper cron expression:
+   - "every minute" = "* * * * *"
+   - "every hour" = "0 * * * *"
+   - "every day at midnight" = "0 0 * * *"
+   - "every monday at 9am" = "0 9 * * 1"
+   - "every 5 minutes" = "*/5 * * * *"
+   
+2. Generate a meaningful job name from the task description (lowercase, hyphens, no spaces)
+
+3. Use job_add to create the job with:
+   - name: the generated name
+   - schedule: the cron expression
+   - command: the provided command
+
+4. After creating, use job_list to verify the job was created correctly
+
+5. Explain when the job will next run`, taskDesc, frequency, command),
+				},
+			},
+		}
+
+	case "jobs_review_schedules":
+		return []tools.PromptMessage{
+			{
+				Role: "user",
+				Content: tools.PromptContent{
+					Type: "text",
+					Text: `Review all scheduled jobs and provide optimization suggestions.
+
+**Instructions:**
+1. Use job_list to get all configured jobs
+
+2. Analyze the schedules for:
+   - **Conflicts**: Jobs scheduled at the same time that might compete for resources
+   - **Clustering**: Many jobs running at :00 minutes (suggest staggering)
+   - **Resource-intensive times**: Jobs that should run during off-peak hours
+   - **Disabled jobs**: Jobs that are disabled and might be forgotten
+
+3. For each issue found, provide:
+   - The job name(s) affected
+   - The current schedule
+   - A recommended new schedule (if applicable)
+   - Reasoning for the suggestion
+
+4. Summarize with a health score (good/needs attention/critical) and action items`,
+				},
+			},
+		}
+
+	case "jobs_troubleshoot_failures":
+		jobName := getArg("job_name", "")
+		limit := getArg("limit", "20")
+
+		jobFilter := ""
+		logFilter := ""
+		if jobName != "" {
+			jobFilter = fmt.Sprintf(" for job '%s'", jobName)
+			logFilter = fmt.Sprintf(" and job_name='%s'", jobName)
+		}
+
+		return []tools.PromptMessage{
+			{
+				Role: "user",
+				Content: tools.PromptContent{
+					Type: "text",
+					Text: fmt.Sprintf(`Troubleshoot recent job execution failures%s.
+
+**Instructions:**
+1. Use job_logs with limit=%s%s to get recent execution history
+
+2. Identify failed executions (exit_code != 0 or error output)
+
+3. For each failure, analyze:
+   - **Error pattern**: Common error types (permission, missing file, network, timeout)
+   - **Frequency**: Is this a recurring issue or one-time?
+   - **Timing**: Does it fail at specific times?
+   - **Output**: What does the error message indicate?
+
+4. Provide diagnosis and remediation steps:
+   - Root cause analysis
+   - Specific fixes to try
+   - Commands to verify the fix
+
+5. If there are no failures, confirm the jobs are healthy and report success rate`, jobFilter, limit, logFilter),
+				},
+			},
+		}
+	}
+
+	return nil
 }
 
 // --- Resources ---

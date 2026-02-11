@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/diane-assistant/diane/internal/acp"
+	"github.com/diane-assistant/diane/internal/db"
+	"github.com/diane-assistant/diane/internal/models"
 )
 
 // MCPServerStatus represents the status of an MCP server
@@ -132,6 +134,8 @@ type Server struct {
 	statusProvider StatusProvider
 	acpManager     *acp.Manager
 	gallery        *acp.Gallery
+	contextsAPI    *ContextsAPI
+	providersAPI   *ProvidersAPI
 }
 
 // NewServer creates a new API server
@@ -160,11 +164,49 @@ func NewServer(statusProvider StatusProvider) (*Server, error) {
 		slog.Warn("Failed to initialize ACP gallery", "error", err)
 	}
 
+	// Initialize Contexts API with database
+	var contextsAPI *ContextsAPI
+	dbPath := filepath.Join(home, ".diane", "cron.db")
+	database, err := db.New(dbPath)
+	if err != nil {
+		slog.Warn("Failed to initialize database for contexts API", "error", err)
+	} else {
+		// Perform first-run migration from mcp-servers.json to database
+		jsonPath := filepath.Join(home, ".diane", "mcp-servers.json")
+		imported, err := database.MigrateFromJSON(jsonPath)
+		if err != nil {
+			slog.Warn("Failed to migrate MCP servers from JSON", "error", err)
+		} else if imported > 0 {
+			slog.Info("Migrated MCP servers from JSON to database", "count", imported)
+		}
+
+		contextsAPI = NewContextsAPI(database)
+		contextsAPI.SetToolProvider(statusProvider)
+	}
+
+	// Initialize Providers API with models registry (uses same database)
+	var providersAPI *ProvidersAPI
+	if database != nil {
+		// Initialize models registry
+		modelsRegistry := models.NewRegistry(filepath.Join(home, ".diane"))
+		// Load registry in background (don't block startup)
+		go func() {
+			if err := modelsRegistry.Load(); err != nil {
+				slog.Warn("Failed to load models registry", "error", err)
+			} else {
+				slog.Info("Models registry loaded successfully")
+			}
+		}()
+		providersAPI = NewProvidersAPI(database, modelsRegistry)
+	}
+
 	return &Server{
 		socketPath:     socketPath,
 		statusProvider: statusProvider,
 		acpManager:     acpManager,
 		gallery:        gallery,
+		contextsAPI:    contextsAPI,
+		providersAPI:   providersAPI,
 	}, nil
 }
 
@@ -198,6 +240,16 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/gallery/", s.handleGalleryAction)
 	mux.HandleFunc("/auth", s.handleAuth)
 	mux.HandleFunc("/auth/", s.handleAuthAction)
+
+	// Register Contexts API routes
+	if s.contextsAPI != nil {
+		s.contextsAPI.RegisterRoutes(mux)
+	}
+
+	// Register Providers API routes
+	if s.providersAPI != nil {
+		s.providersAPI.RegisterRoutes(mux)
+	}
 
 	s.server = &http.Server{Handler: mux}
 

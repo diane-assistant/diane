@@ -9,6 +9,7 @@ BUILD_DIR := dist
 SERVER_DIR := server/mcp
 CTL_DIR := server/cmd/diane-ctl
 ACP_DIR := server/cmd/acp-server
+SCRIPTS_DIR := scripts
 
 # Build flags
 LDFLAGS := -s -w -X main.Version=$(VERSION)
@@ -17,7 +18,7 @@ CGO_ENABLED := 1
 # Platforms
 PLATFORMS := darwin-arm64 darwin-amd64 linux-amd64 linux-arm64
 
-.PHONY: all build build-ctl build-acp clean install test release help
+.PHONY: all build build-ctl build-acp clean install test release help app install-app
 
 ## Default target
 all: build build-ctl build-acp
@@ -95,10 +96,21 @@ test:
 run: build
 	./$(BUILD_DIR)/$(BINARY_NAME)
 
+## Build DianeMenu.app with embedded diane binary (macOS only)
+app:
+	@echo "Building DianeMenu.app with embedded diane binary..."
+	VERSION=$(VERSION) $(SCRIPTS_DIR)/build-app.sh
+
+## Build and install everything (macOS only)
+install-app:
+	@echo "Building and installing DianeMenu.app..."
+	VERSION=$(VERSION) $(SCRIPTS_DIR)/install.sh
+
 ## Clean build artifacts
 clean:
 	@echo "Cleaning..."
 	@rm -rf $(BUILD_DIR)
+	@rm -rf DianeMenu/build
 	@echo "Done"
 
 ## Show version
@@ -116,8 +128,10 @@ help:
 	@echo "  build-ctl   Build diane-ctl for current platform"
 	@echo "  build-acp   Build acp-server for current platform"
 	@echo "  build-all   Build for all platforms (darwin/linux, arm64/amd64)"
+	@echo "  app         Build DianeMenu.app with embedded diane binary (macOS)"
+	@echo "  install-app Build and install DianeMenu.app + CLI tools (macOS)"
 	@echo "  release     Build all platforms and create release archives"
-	@echo "  install     Install to ~/.diane/bin/"
+	@echo "  install     Install CLI binaries to ~/.diane/bin/"
 	@echo "  test        Run tests"
 	@echo "  run         Build and run locally"
 	@echo "  clean       Remove build artifacts"
@@ -126,5 +140,7 @@ help:
 	@echo ""
 	@echo "Examples:"
 	@echo "  make                    # Build diane, diane-ctl, and acp-server"
-	@echo "  make install            # Build and install locally"
+	@echo "  make app                # Build DianeMenu.app bundle"
+	@echo "  make install-app        # Build and install everything (macOS)"
+	@echo "  make install            # Install CLI binaries only"
 	@echo "  make VERSION=v1.0.0 release  # Create versioned release"

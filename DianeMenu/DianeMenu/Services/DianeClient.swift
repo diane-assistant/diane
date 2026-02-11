@@ -34,6 +34,28 @@ class DianeClient {
     private let socketPath: String
     private let session: URLSession
     
+    /// Path to the bundled diane binary in the app bundle
+    static var bundledBinaryPath: String? {
+        Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("diane").path
+    }
+    
+    /// Path to the symlink location (~/.diane/bin/diane)
+    static var symlinkPath: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".diane/bin/diane").path
+    }
+    
+    /// Get the best available binary path (bundled preferred, then symlink/installed)
+    static var binaryPath: String {
+        // First check if bundled binary exists
+        if let bundled = bundledBinaryPath,
+           FileManager.default.fileExists(atPath: bundled) {
+            return bundled
+        }
+        // Fall back to ~/.diane/bin/diane
+        return symlinkPath
+    }
+    
     init() {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         self.socketPath = homeDir.appendingPathComponent(".diane/diane.sock").path
@@ -46,6 +68,67 @@ class DianeClient {
         config.timeoutIntervalForResource = 10
         
         self.session = URLSession(configuration: config)
+        
+        // Ensure symlink to bundled binary exists
+        Self.ensureSymlink()
+    }
+    
+    /// Ensures ~/.diane/bin/diane is a symlink to the bundled binary
+    static func ensureSymlink() {
+        guard let bundledPath = bundledBinaryPath,
+              FileManager.default.fileExists(atPath: bundledPath) else {
+            logger.info("No bundled binary found, skipping symlink setup")
+            return
+        }
+        
+        let fm = FileManager.default
+        let binDir = fm.homeDirectoryForCurrentUser.appendingPathComponent(".diane/bin")
+        let symlinkURL = URL(fileURLWithPath: symlinkPath)
+        
+        // Create ~/.diane/bin if it doesn't exist
+        if !fm.fileExists(atPath: binDir.path) {
+            do {
+                try fm.createDirectory(at: binDir, withIntermediateDirectories: true)
+                logger.info("Created directory: \(binDir.path)")
+            } catch {
+                logger.error("Failed to create bin directory: \(error.localizedDescription)")
+                return
+            }
+        }
+        
+        // Check current state of symlink path
+        var isDirectory: ObjCBool = false
+        let exists = fm.fileExists(atPath: symlinkPath, isDirectory: &isDirectory)
+        
+        if exists {
+            // Check if it's already the correct symlink
+            do {
+                let attrs = try fm.attributesOfItem(atPath: symlinkPath)
+                if let type = attrs[.type] as? FileAttributeType, type == .typeSymbolicLink {
+                    let destination = try fm.destinationOfSymbolicLink(atPath: symlinkPath)
+                    if destination == bundledPath {
+                        logger.debug("Symlink already points to bundled binary")
+                        return
+                    }
+                }
+                // Remove existing file/symlink to replace it
+                try fm.removeItem(atPath: symlinkPath)
+                logger.info("Removed existing file at symlink path")
+            } catch {
+                logger.error("Failed to check/remove existing symlink: \(error.localizedDescription)")
+                return
+            }
+        }
+        
+        // Create symlink
+        do {
+            try fm.createSymbolicLink(atPath: symlinkPath, withDestinationPath: bundledPath)
+            logger.info("Created symlink: \(symlinkPath) -> \(bundledPath)")
+            FileLogger.shared.info("Created symlink: \(symlinkPath) -> \(bundledPath)", category: "DianeClient")
+        } catch {
+            logger.error("Failed to create symlink: \(error.localizedDescription)")
+            FileLogger.shared.error("Failed to create symlink: \(error.localizedDescription)", category: "DianeClient")
+        }
     }
     
     /// Check if the socket file exists
@@ -238,8 +321,8 @@ class DianeClient {
     
     /// Start Diane (launches the process)
     func startDiane() throws {
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        let binaryPath = homeDir.appendingPathComponent(".diane/bin/diane").path
+        // Use bundled binary if available, otherwise fall back to ~/.diane/bin/diane
+        let binaryPath = Self.binaryPath
         
         guard FileManager.default.fileExists(atPath: binaryPath) else {
             throw DianeClientError.binaryNotFound
@@ -254,6 +337,7 @@ class DianeClient {
         process.standardError = FileHandle.nullDevice
         
         try process.run()
+        logger.info("Started diane from: \(binaryPath)")
     }
     
     /// Stop Diane (sends SIGTERM)
@@ -406,6 +490,405 @@ class DianeClient {
         let data = try await request("/gallery/\(id)/install", method: "POST", body: bodyData)
         return try JSONDecoder().decode(GalleryInstallResponse.self, from: data)
     }
+    
+    // MARK: - Contexts API
+    
+    /// Get all contexts
+    func getContexts() async throws -> [Context] {
+        let data = try await request("/contexts")
+        return try JSONDecoder().decode([Context].self, from: data)
+    }
+    
+    /// Get context details including servers and tools
+    func getContextDetail(name: String) async throws -> ContextDetail {
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let data = try await request("/contexts/\(encodedName)")
+        return try JSONDecoder().decode(ContextDetail.self, from: data)
+    }
+    
+    /// Create a new context
+    func createContext(name: String, description: String? = nil) async throws -> Context {
+        var body: [String: String] = ["name": name]
+        if let description = description {
+            body["description"] = description
+        }
+        let bodyData = try JSONEncoder().encode(body)
+        let data = try await request("/contexts", method: "POST", body: bodyData)
+        return try JSONDecoder().decode(Context.self, from: data)
+    }
+    
+    /// Update a context's description
+    func updateContext(name: String, description: String) async throws {
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let body = ["description": description]
+        let bodyData = try JSONEncoder().encode(body)
+        _ = try await request("/contexts/\(encodedName)", method: "PUT", body: bodyData)
+    }
+    
+    /// Delete a context
+    func deleteContext(name: String) async throws {
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        _ = try await request("/contexts/\(encodedName)", method: "DELETE")
+    }
+    
+    /// Set a context as the default
+    func setDefaultContext(name: String) async throws {
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        _ = try await request("/contexts/\(encodedName)/default", method: "POST")
+    }
+    
+    /// Get connection info for a context
+    func getContextConnectInfo(name: String) async throws -> ContextConnectInfo {
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let data = try await request("/contexts/\(encodedName)/connect")
+        return try JSONDecoder().decode(ContextConnectInfo.self, from: data)
+    }
+    
+    /// Get servers in a context
+    func getContextServers(contextName: String) async throws -> [ContextServer] {
+        let encodedName = contextName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? contextName
+        let data = try await request("/contexts/\(encodedName)/servers")
+        return try JSONDecoder().decode([ContextServer].self, from: data)
+    }
+    
+    /// Enable/disable a server in a context
+    func setServerEnabledInContext(contextName: String, serverName: String, enabled: Bool) async throws {
+        let encodedContext = contextName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? contextName
+        let encodedServer = serverName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? serverName
+        let body = ["enabled": enabled]
+        let bodyData = try JSONEncoder().encode(body)
+        _ = try await request("/contexts/\(encodedContext)/servers/\(encodedServer)", method: "PUT", body: bodyData)
+    }
+    
+    /// Remove a server from a context
+    func removeServerFromContext(contextName: String, serverName: String) async throws {
+        let encodedContext = contextName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? contextName
+        let encodedServer = serverName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? serverName
+        _ = try await request("/contexts/\(encodedContext)/servers/\(encodedServer)", method: "DELETE")
+    }
+    
+    /// Get tools for a server in a context
+    func getContextServerTools(contextName: String, serverName: String) async throws -> [ContextTool] {
+        let encodedContext = contextName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? contextName
+        let encodedServer = serverName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? serverName
+        let data = try await request("/contexts/\(encodedContext)/servers/\(encodedServer)/tools")
+        return try JSONDecoder().decode([ContextTool].self, from: data)
+    }
+    
+    /// Enable/disable a specific tool in a context
+    func setToolEnabledInContext(contextName: String, serverName: String, toolName: String, enabled: Bool) async throws {
+        let encodedContext = contextName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? contextName
+        let encodedServer = serverName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? serverName
+        let encodedTool = toolName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? toolName
+        let body = ["enabled": enabled]
+        let bodyData = try JSONEncoder().encode(body)
+        _ = try await request("/contexts/\(encodedContext)/servers/\(encodedServer)/tools/\(encodedTool)", method: "PUT", body: bodyData)
+    }
+    
+    /// Bulk update tool enabled states
+    func bulkSetToolsEnabled(contextName: String, serverName: String, tools: [String: Bool]) async throws {
+        let encodedContext = contextName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? contextName
+        let encodedServer = serverName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? serverName
+        let bodyData = try JSONEncoder().encode(tools)
+        _ = try await request("/contexts/\(encodedContext)/servers/\(encodedServer)/tools", method: "PUT", body: bodyData)
+    }
+    
+    /// Sync tools from running MCP servers to a context
+    func syncContextTools(contextName: String) async throws -> Int {
+        let encodedContext = contextName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? contextName
+        let data = try await request("/contexts/\(encodedContext)/sync", method: "POST")
+        let decoder = makeGoCompatibleDecoder()
+        let result = try decoder.decode(SyncResult.self, from: data)
+        return result.toolsSynced
+    }
+    
+    /// Get available servers that can be added to a context
+    func getAvailableServers(contextName: String) async throws -> [AvailableServer] {
+        let encodedContext = contextName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? contextName
+        let data = try await request("/contexts/\(encodedContext)/available-servers")
+        let decoder = makeGoCompatibleDecoder()
+        return try decoder.decode([AvailableServer].self, from: data)
+    }
+    
+    /// Add a server to a context
+    func addServerToContext(contextName: String, serverName: String, enabled: Bool = true) async throws {
+        let encodedContext = contextName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? contextName
+        let body: [String: Any] = ["server_name": serverName, "enabled": enabled]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        _ = try await request("/contexts/\(encodedContext)/servers", method: "POST", body: bodyData)
+    }
+    
+    // MARK: - Providers API
+    
+    /// Get all providers, optionally filtered by type
+    func getProviders(type: ProviderType? = nil) async throws -> [Provider] {
+        var path = "/providers"
+        if let type = type {
+            path += "?type=\(type.rawValue)"
+        }
+        let data = try await request(path)
+        return try makeGoCompatibleDecoder().decode([Provider].self, from: data)
+    }
+    
+    /// Get provider templates
+    func getProviderTemplates() async throws -> [ProviderTemplate] {
+        let data = try await request("/providers/templates")
+        return try JSONDecoder().decode([ProviderTemplate].self, from: data)
+    }
+    
+    /// Get a specific provider by ID
+    func getProvider(id: Int64) async throws -> Provider {
+        let data = try await request("/providers/\(id)")
+        return try makeGoCompatibleDecoder().decode(Provider.self, from: data)
+    }
+    
+    /// Create a new provider
+    func createProvider(name: String, service: String, config: [String: Any], authConfig: [String: Any]? = nil) async throws -> Provider {
+        var body: [String: Any] = [
+            "name": name,
+            "service": service,
+            "config": config
+        ]
+        if let authConfig = authConfig {
+            body["auth_config"] = authConfig
+        }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let data = try await request("/providers", method: "POST", body: bodyData)
+        return try makeGoCompatibleDecoder().decode(Provider.self, from: data)
+    }
+    
+    /// Update a provider
+    func updateProvider(id: Int64, name: String? = nil, config: [String: Any]? = nil, authConfig: [String: Any]? = nil) async throws -> Provider {
+        var body: [String: Any] = [:]
+        if let name = name {
+            body["name"] = name
+        }
+        if let config = config {
+            body["config"] = config
+        }
+        if let authConfig = authConfig {
+            body["auth_config"] = authConfig
+        }
+        
+        guard !body.isEmpty else {
+            // Nothing to update, just return current state
+            return try await getProvider(id: id)
+        }
+        
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let data = try await request("/providers/\(id)", method: "PUT", body: bodyData)
+        return try makeGoCompatibleDecoder().decode(Provider.self, from: data)
+    }
+    
+    /// Delete a provider
+    func deleteProvider(id: Int64) async throws {
+        _ = try await request("/providers/\(id)", method: "DELETE")
+    }
+    
+    /// Enable a provider
+    func enableProvider(id: Int64) async throws -> Provider {
+        let data = try await request("/providers/\(id)/enable", method: "POST")
+        return try makeGoCompatibleDecoder().decode(Provider.self, from: data)
+    }
+    
+    /// Disable a provider
+    func disableProvider(id: Int64) async throws -> Provider {
+        let data = try await request("/providers/\(id)/disable", method: "POST")
+        return try makeGoCompatibleDecoder().decode(Provider.self, from: data)
+    }
+    
+    /// Set a provider as the default for its type
+    func setDefaultProvider(id: Int64) async throws -> Provider {
+        let data = try await request("/providers/\(id)/set-default", method: "POST")
+        return try makeGoCompatibleDecoder().decode(Provider.self, from: data)
+    }
+    
+    /// Test a provider's connectivity
+    func testProvider(id: Int64) async throws -> ProviderTestResult {
+        let data = try await request("/providers/\(id)/test", method: "POST", timeout: 35)
+        return try makeGoCompatibleDecoder().decode(ProviderTestResult.self, from: data)
+    }
+    
+    /// List available models for a service
+    func listModels(service: String, projectID: String? = nil) async throws -> [AvailableModel] {
+        var requestBody: [String: Any] = ["service": service]
+        if let projectID = projectID {
+            requestBody["project_id"] = projectID
+        }
+        let bodyData = try JSONSerialization.data(withJSONObject: requestBody)
+        let data = try await request("/providers/models", method: "POST", timeout: 35, body: bodyData)
+        let response = try makeGoCompatibleDecoder().decode(ListModelsResponse.self, from: data)
+        return response.models
+    }
+    
+    /// Get model info by provider and model ID (e.g., "google-vertex", "gemini-2.0-flash")
+    func getModelInfo(provider: String, modelID: String) async throws -> AvailableModel {
+        let data = try await request("/models/\(provider)/\(modelID)")
+        return try makeGoCompatibleDecoder().decode(AvailableModel.self, from: data)
+    }
+    
+    // MARK: - Usage API
+    
+    /// Get usage records with optional filtering
+    func getUsage(from: Date? = nil, to: Date? = nil, limit: Int = 100, service: String? = nil, providerID: Int64? = nil) async throws -> UsageResponse {
+        var path = "/usage?limit=\(limit)"
+        
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        
+        if let from = from {
+            path += "&from=\(formatter.string(from: from))"
+        }
+        if let to = to {
+            path += "&to=\(formatter.string(from: to))"
+        }
+        if let service = service {
+            path += "&service=\(service)"
+        }
+        if let providerID = providerID {
+            path += "&provider_id=\(providerID)"
+        }
+        
+        let data = try await request(path)
+        return try makeGoCompatibleDecoder().decode(UsageResponse.self, from: data)
+    }
+    
+    /// Get usage summary (aggregated by provider/model)
+    func getUsageSummary(from: Date? = nil, to: Date? = nil) async throws -> UsageSummaryResponse {
+        var path = "/usage/summary"
+        var queryParams: [String] = []
+        
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        
+        if let from = from {
+            queryParams.append("from=\(formatter.string(from: from))")
+        }
+        if let to = to {
+            queryParams.append("to=\(formatter.string(from: to))")
+        }
+        
+        if !queryParams.isEmpty {
+            path += "?" + queryParams.joined(separator: "&")
+        }
+        
+        let data = try await request(path)
+        return try makeGoCompatibleDecoder().decode(UsageSummaryResponse.self, from: data)
+    }
+    
+    // MARK: - Google OAuth API
+    
+    /// Get Google authentication status
+    func getGoogleAuthStatus(account: String = "default") async throws -> GoogleAuthStatus {
+        let data = try await request("/google/auth?account=\(account)")
+        return try JSONDecoder().decode(GoogleAuthStatus.self, from: data)
+    }
+    
+    /// Start Google OAuth device flow
+    func startGoogleAuth(account: String? = nil, scopes: [String]? = nil) async throws -> GoogleDeviceCodeResponse {
+        var body: [String: Any] = [:]
+        if let account = account {
+            body["account"] = account
+        }
+        if let scopes = scopes {
+            body["scopes"] = scopes
+        }
+        
+        let bodyData = body.isEmpty ? nil : try JSONSerialization.data(withJSONObject: body)
+        let data = try await request("/google/auth/start", method: "POST", timeout: 10, body: bodyData)
+        return try JSONDecoder().decode(GoogleDeviceCodeResponse.self, from: data)
+    }
+    
+    /// Poll for Google OAuth token
+    /// Returns the poll response. Check isPending, isSuccess, etc. to determine status.
+    func pollGoogleAuth(account: String = "default", deviceCode: String, interval: Int) async throws -> GoogleAuthPollResponse {
+        let body: [String: Any] = [
+            "account": account,
+            "device_code": deviceCode,
+            "interval": interval
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        
+        // This endpoint may return 202 (pending), 429 (slow down), 410 (expired), 403 (denied), or 200 (success)
+        // We need to handle non-200 status codes specially
+        let data = try await requestWithStatus("/google/auth/poll", method: "POST", timeout: 30, body: bodyData)
+        return try makeGoCompatibleDecoder().decode(GoogleAuthPollResponse.self, from: data)
+    }
+    
+    /// Delete Google OAuth token
+    func deleteGoogleAuth(account: String = "default") async throws {
+        _ = try await request("/google/auth?account=\(account)", method: "DELETE")
+    }
+    
+    /// Make a request that accepts non-200 status codes (for polling)
+    private func requestWithStatus(_ path: String, method: String = "GET", timeout: Int = 3, body: Data? = nil) async throws -> Data {
+        logger.info("Making \(method) request to \(path) (with status)")
+        FileLogger.shared.info("Making \(method) request to \(path) (with status)", category: "DianeClient")
+        
+        // Use curl to communicate with Unix socket - don't fail on non-200
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+        
+        var args = [
+            "--unix-socket", socketPath,
+            "-s", // silent
+            // Note: no -f flag, so we get the body even on non-200
+            "--max-time", "\(timeout)",
+            "--connect-timeout", "2",
+            "http://localhost\(path)"
+        ]
+        
+        if method != "GET" {
+            args.insert(contentsOf: ["-X", method], at: 0)
+            if let body = body {
+                args.insert(contentsOf: ["-H", "Content-Type: application/json"], at: 0)
+                args.insert(contentsOf: ["-d", String(data: body, encoding: .utf8) ?? "{}"], at: 0)
+            }
+        }
+        
+        process.arguments = args
+        
+        let pipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = errorPipe
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    
+                    let exitCode = process.terminationStatus
+                    logger.info("curl exit code: \(exitCode) for \(path)")
+                    
+                    // For this method, we only fail on curl errors, not HTTP errors
+                    if exitCode != 0 && exitCode != 22 { // 22 is HTTP error, but we still get the body
+                        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                        let errorStr = String(data: errorData, encoding: .utf8) ?? "unknown"
+                        continuation.resume(throwing: DianeClientError.requestFailed(path: path, exitCode: exitCode, stderr: errorStr))
+                        return
+                    }
+                    
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    continuation.resume(returning: data)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+}
+
+/// Result of syncing tools
+struct SyncResult: Codable {
+    let status: String
+    let toolsSynced: Int
+    
+    enum CodingKeys: String, CodingKey {
+        case status
+        case toolsSynced = "tools_synced"
+    }
 }
 
 enum DianeClientError: LocalizedError {
@@ -424,7 +907,7 @@ enum DianeClientError: LocalizedError {
                 return "Request to \(path) failed: \(stderr)"
             }
         case .binaryNotFound:
-            return "Diane binary not found at ~/.diane/bin/diane"
+            return "Diane binary not found. Expected at bundled location or ~/.diane/bin/diane"
         case .notRunning:
             return "Diane is not running"
         case .stopFailed:

@@ -265,7 +265,7 @@ func runActualCLI(command string, args ...string) (interface{}, error) {
 	// Check for error in result
 	if m, ok := result.(map[string]interface{}); ok {
 		if errMsg, hasErr := m["error"].(string); hasErr {
-			return nil, fmt.Errorf(errMsg)
+			return nil, fmt.Errorf("%s", errMsg)
 		}
 	}
 

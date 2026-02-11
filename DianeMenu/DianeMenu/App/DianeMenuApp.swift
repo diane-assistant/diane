@@ -17,25 +17,33 @@ struct DianeMenuApp: App {
         }
     }
     
+    init() {
+        // Schedule startup after app is fully initialized
+        // This runs on the main queue after the app has launched
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            Task { @MainActor in
+                // Access the shared instances and start them
+                // Note: We can't access @StateObject here, so we use a different approach
+            }
+        }
+    }
+    
     var body: some Scene {
         MenuBarExtra {
             MenuBarView()
                 .environmentObject(statusMonitor)
                 .environmentObject(updateChecker)
                 .task {
-                    // Start services once, with a small delay to let UI settle
-                    guard !hasStarted else { return }
-                    hasStarted = true
-                    
-                    // Wire up the status monitor reference for pausing during updates
-                    updateChecker.statusMonitor = statusMonitor
-                    
-                    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-                    await statusMonitor.start()
-                    await updateChecker.start()
+                    // Start services once. This runs when the view appears for the first time,
+                    // but we also trigger it on app launch via onChange below
+                    await startServicesIfNeeded()
                 }
         } label: {
             Image(systemName: iconName)
+                .task {
+                    // This task runs when the label appears (at app launch, not menu open)
+                    await startServicesIfNeeded()
+                }
         }
         .menuBarExtraStyle(.window)
         
@@ -43,6 +51,19 @@ struct DianeMenuApp: App {
             SettingsView()
                 .environmentObject(statusMonitor)
         }
+    }
+    
+    @MainActor
+    private func startServicesIfNeeded() async {
+        guard !hasStarted else { return }
+        hasStarted = true
+        
+        // Wire up the status monitor reference for pausing during updates
+        updateChecker.statusMonitor = statusMonitor
+        
+        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        await statusMonitor.start()
+        await updateChecker.start()
     }
 }
 

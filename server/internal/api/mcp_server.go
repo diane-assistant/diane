@@ -25,12 +25,15 @@ type MCPHTTPServer struct {
 // MCPHandler interface for handling MCP requests
 type MCPHandler interface {
 	HandleRequest(req MCPRequest) MCPResponse
+	HandleRequestWithContext(req MCPRequest, context string) MCPResponse
 	GetTools() ([]ToolInfo, error)
+	GetToolsForContext(context string) ([]ToolInfo, error)
 }
 
 // mcpSession represents an active MCP session
 type mcpSession struct {
 	id          string
+	context     string // Context name for filtering tools (from ?context= query param)
 	initialized bool
 	createdAt   time.Time
 	eventChan   chan []byte
@@ -142,6 +145,9 @@ func (s *MCPHTTPServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse context from query parameter
+	contextName := r.URL.Query().Get("context")
+
 	// Parse request
 	var req MCPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -156,7 +162,7 @@ func (s *MCPHTTPServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 	// Handle initialize specially
 	if req.Method == "initialize" {
 		if session == nil {
-			session = s.createSession()
+			session = s.createSessionWithContext(contextName)
 		}
 		session.initialized = true
 		w.Header().Set("MCP-Session-Id", session.id)
@@ -167,8 +173,13 @@ func (s *MCPHTTPServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle the request
-	resp := s.mcpHandler.HandleRequest(req)
+	// Handle the request with context
+	var resp MCPResponse
+	if session.context != "" {
+		resp = s.mcpHandler.HandleRequestWithContext(req, session.context)
+	} else {
+		resp = s.mcpHandler.HandleRequest(req)
+	}
 	resp.JSONRPC = "2.0"
 	resp.ID = req.ID
 
@@ -183,16 +194,22 @@ func (s *MCPHTTPServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse context from query parameter
+	contextName := r.URL.Query().Get("context")
+
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	// Create session
-	session := s.createSession()
+	// Create session with context
+	session := s.createSessionWithContext(contextName)
 
-	// Send endpoint event
+	// Send endpoint event (include context in URL if present)
 	messageURL := fmt.Sprintf("/mcp/message?session=%s", session.id)
+	if contextName != "" {
+		messageURL += fmt.Sprintf("&context=%s", contextName)
+	}
 	fmt.Fprintf(w, "event: endpoint\ndata: %s\n\n", messageURL)
 
 	flusher, ok := w.(http.Flusher)
@@ -251,8 +268,13 @@ func (s *MCPHTTPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle the request
-	resp := s.mcpHandler.HandleRequest(req)
+	// Handle the request with context
+	var resp MCPResponse
+	if session.context != "" {
+		resp = s.mcpHandler.HandleRequestWithContext(req, session.context)
+	} else {
+		resp = s.mcpHandler.HandleRequest(req)
+	}
 	resp.JSONRPC = "2.0"
 	resp.ID = req.ID
 
@@ -284,8 +306,14 @@ func (s *MCPHTTPServer) writeError(w http.ResponseWriter, code int, message stri
 
 // createSession creates a new session
 func (s *MCPHTTPServer) createSession() *mcpSession {
+	return s.createSessionWithContext("")
+}
+
+// createSessionWithContext creates a new session with an optional context
+func (s *MCPHTTPServer) createSessionWithContext(contextName string) *mcpSession {
 	session := &mcpSession{
 		id:        uuid.New().String(),
+		context:   contextName,
 		createdAt: time.Now(),
 		eventChan: make(chan []byte, 100),
 		closeChan: make(chan struct{}),

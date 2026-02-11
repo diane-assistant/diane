@@ -48,12 +48,14 @@ type Config struct {
 
 // Proxy manages multiple MCP clients
 type Proxy struct {
-	clients    map[string]Client
-	config     *Config
-	configPath string // Store config path for reload
-	mu         sync.RWMutex
-	notifyChan chan string       // Aggregated notifications channel
-	initErrors map[string]string // Store initialization errors per server
+	clients      map[string]Client
+	config       *Config
+	configPath   string // Store config path for reload
+	mu           sync.RWMutex
+	notifyChan   chan string       // Aggregated notifications channel
+	initErrors   map[string]string // Store initialization errors per server
+	initializing map[string]bool   // Track servers currently initializing
+	initWg       sync.WaitGroup    // Wait group for initial startup
 }
 
 // NewProxy creates a new MCP proxy
@@ -64,20 +66,34 @@ func NewProxy(configPath string) (*Proxy, error) {
 	}
 
 	proxy := &Proxy{
-		clients:    make(map[string]Client),
-		config:     config,
-		configPath: configPath,
-		notifyChan: make(chan string, 10), // Buffered channel for notifications
-		initErrors: make(map[string]string),
+		clients:      make(map[string]Client),
+		config:       config,
+		configPath:   configPath,
+		notifyChan:   make(chan string, 10), // Buffered channel for notifications
+		initErrors:   make(map[string]string),
+		initializing: make(map[string]bool),
 	}
 
-	// Start enabled MCP servers
+	// Start enabled MCP servers concurrently in background
 	for _, server := range config.Servers {
 		if server.Enabled {
-			if err := proxy.startClient(server); err != nil {
-				slog.Warn("Failed to start MCP server", "server", server.Name, "error", err)
-				proxy.initErrors[server.Name] = err.Error()
-			}
+			proxy.initWg.Add(1)
+			proxy.mu.Lock()
+			proxy.initializing[server.Name] = true
+			proxy.mu.Unlock()
+
+			go func(srv ServerConfig) {
+				defer proxy.initWg.Done()
+				if err := proxy.startClient(srv); err != nil {
+					slog.Warn("Failed to start MCP server", "server", srv.Name, "error", err)
+					proxy.mu.Lock()
+					proxy.initErrors[srv.Name] = err.Error()
+					proxy.mu.Unlock()
+				}
+				proxy.mu.Lock()
+				delete(proxy.initializing, srv.Name)
+				proxy.mu.Unlock()
+			}(server)
 		}
 	}
 
@@ -85,6 +101,29 @@ func NewProxy(configPath string) (*Proxy, error) {
 	go proxy.monitorNotifications()
 
 	return proxy, nil
+}
+
+// WaitForInit waits for all initial servers to finish starting (optional)
+func (p *Proxy) WaitForInit() {
+	p.initWg.Wait()
+}
+
+// IsInitializing returns true if any servers are still initializing
+func (p *Proxy) IsInitializing() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return len(p.initializing) > 0
+}
+
+// GetInitializingServers returns the names of servers still initializing
+func (p *Proxy) GetInitializingServers() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	servers := make([]string, 0, len(p.initializing))
+	for name := range p.initializing {
+		servers = append(servers, name)
+	}
+	return servers
 }
 
 // startClient starts an MCP client based on transport type
@@ -474,4 +513,99 @@ func loadConfig(configPath string) (*Config, error) {
 func GetDefaultConfigPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".diane", "mcp-servers.json")
+}
+
+// ContextFilter provides methods to filter tools by context
+// This interface is implemented by the db package
+type ContextFilter interface {
+	// IsToolEnabledInContext checks if a tool is enabled for a server in a context
+	IsToolEnabledInContext(contextName, serverName, toolName string) (bool, error)
+	// GetEnabledServersForContext returns servers that are enabled in a context
+	GetEnabledServersForContext(contextName string) ([]string, error)
+	// GetDefaultContext returns the default context name
+	GetDefaultContext() (string, error)
+}
+
+// ListToolsForContext returns tools filtered by context settings
+// If contextFilter is nil or contextName is empty, returns all tools (no filtering)
+func (p *Proxy) ListToolsForContext(contextName string, contextFilter ContextFilter) ([]map[string]interface{}, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var allTools []map[string]interface{}
+
+	for serverName, client := range p.clients {
+		tools, err := client.ListTools()
+		if err != nil {
+			slog.Warn("Failed to list tools from server", "server", serverName, "error", err)
+			continue
+		}
+
+		for _, tool := range tools {
+			name, ok := tool["name"].(string)
+			if !ok {
+				continue
+			}
+
+			// If context filtering is enabled, check if tool is enabled
+			if contextFilter != nil && contextName != "" {
+				enabled, err := contextFilter.IsToolEnabledInContext(contextName, serverName, name)
+				if err != nil {
+					slog.Warn("Failed to check tool context", "context", contextName, "server", serverName, "tool", name, "error", err)
+					// On error, include the tool (fail open)
+					enabled = true
+				}
+				if !enabled {
+					continue
+				}
+			}
+
+			// Prefix tool names with server name to avoid conflicts
+			tool["name"] = serverName + "_" + name
+			tool["_server"] = serverName
+			allTools = append(allTools, tool)
+		}
+	}
+
+	return allTools, nil
+}
+
+// CallToolForContext routes a tool call to the appropriate MCP client after validating context access
+// If contextFilter is nil or contextName is empty, no context validation is performed
+func (p *Proxy) CallToolForContext(contextName, toolName string, arguments map[string]interface{}, contextFilter ContextFilter) (json.RawMessage, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	// Parse server name from tool name (format: server_toolname)
+	var serverName, actualToolName string
+	for sName := range p.clients {
+		prefix := sName + "_"
+		if len(toolName) > len(prefix) && toolName[:len(prefix)] == prefix {
+			serverName = sName
+			actualToolName = toolName[len(prefix):]
+			break
+		}
+	}
+
+	if serverName == "" {
+		return nil, fmt.Errorf("unknown tool: %s", toolName)
+	}
+
+	// Validate context access if filtering is enabled
+	if contextFilter != nil && contextName != "" {
+		enabled, err := contextFilter.IsToolEnabledInContext(contextName, serverName, actualToolName)
+		if err != nil {
+			slog.Warn("Failed to check tool context access", "context", contextName, "server", serverName, "tool", actualToolName, "error", err)
+			// On error, allow the call (fail open)
+		} else if !enabled {
+			return nil, fmt.Errorf("tool %s is not enabled in context %s", toolName, contextName)
+		}
+	}
+
+	client, ok := p.clients[serverName]
+	if !ok {
+		return nil, fmt.Errorf("server not found: %s", serverName)
+	}
+
+	return client.CallTool(actualToolName, arguments)
 }

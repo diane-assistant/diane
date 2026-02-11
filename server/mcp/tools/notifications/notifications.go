@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/diane-assistant/diane/mcp/tools"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -865,4 +866,175 @@ func haAPICall(config *homeAssistantConfig, payload interface{}) error {
 	}
 
 	return nil
+}
+
+// --- Prompts ---
+
+// Prompts returns all prompts provided by the Discord/notifications provider
+func (p *Provider) Prompts() []tools.Prompt {
+	var prompts []tools.Prompt
+
+	if p.discordAvailable {
+		prompts = append(prompts, []tools.Prompt{
+			{
+				Name:        "discord_notify_job_result",
+				Description: "Send a formatted job execution result to Discord with appropriate styling based on success/failure",
+				Arguments: []tools.PromptArgument{
+					{Name: "job_name", Description: "Name of the job that ran", Required: true},
+					{Name: "success", Description: "Whether the job succeeded (true/false)", Required: true},
+					{Name: "output", Description: "Job output or error message", Required: false},
+					{Name: "channel", Description: "Discord channel name (default: diane)", Required: false},
+				},
+			},
+			{
+				Name:        "discord_daily_summary",
+				Description: "Send a daily summary notification to Discord with key metrics and status",
+				Arguments: []tools.PromptArgument{
+					{Name: "title", Description: "Summary title (e.g., 'Daily Report')", Required: true},
+					{Name: "metrics", Description: "JSON object with key metrics to display", Required: false},
+				},
+			},
+			{
+				Name:        "discord_ask_confirmation",
+				Description: "Send an interactive message with Yes/No buttons for user confirmation",
+				Arguments: []tools.PromptArgument{
+					{Name: "question", Description: "The question to ask", Required: true},
+					{Name: "context", Description: "Additional context for the question", Required: false},
+				},
+			},
+		}...)
+	}
+
+	return prompts
+}
+
+// GetPrompt returns a prompt with arguments substituted
+func (p *Provider) GetPrompt(name string, args map[string]string) ([]tools.PromptMessage, error) {
+	switch name {
+	case "discord_notify_job_result":
+		return p.promptNotifyJobResult(args), nil
+	case "discord_daily_summary":
+		return p.promptDailySummary(args), nil
+	case "discord_ask_confirmation":
+		return p.promptAskConfirmation(args), nil
+	default:
+		return nil, fmt.Errorf("prompt not found: %s", name)
+	}
+}
+
+func getArgOrDefault(args map[string]string, key, defaultVal string) string {
+	if val, ok := args[key]; ok && val != "" {
+		return val
+	}
+	return defaultVal
+}
+
+func (p *Provider) promptNotifyJobResult(args map[string]string) []tools.PromptMessage {
+	jobName := getArgOrDefault(args, "job_name", "unknown")
+	success := getArgOrDefault(args, "success", "true")
+	output := getArgOrDefault(args, "output", "")
+	channel := getArgOrDefault(args, "channel", "diane")
+
+	color := "success"
+	statusEmoji := "checkmark"
+	statusText := "Success"
+	if success != "true" {
+		color = "error"
+		statusEmoji = "x"
+		statusText = "Failed"
+	}
+
+	outputSection := ""
+	if output != "" {
+		outputSection = fmt.Sprintf(`
+4. If there is output, add it as a field:
+   - name: "Output"
+   - value: %q (truncate to 1000 chars if longer)`, output)
+	}
+
+	return []tools.PromptMessage{
+		{
+			Role: "user",
+			Content: tools.PromptContent{
+				Type: "text",
+				Text: fmt.Sprintf(`Send a Discord notification about job execution result.
+
+**Job Details:**
+- Job Name: %s
+- Status: %s
+- Channel: %s
+
+**Instructions:**
+1. Use discord_send_embed to send a formatted notification
+2. Set color to "%s"
+3. Title should be: "Job: %s - %s"
+%s
+5. Add a footer with the current timestamp
+
+This notification should be clear and scannable at a glance.`, jobName, statusText, channel, color, jobName, statusEmoji, outputSection),
+			},
+		},
+	}
+}
+
+func (p *Provider) promptDailySummary(args map[string]string) []tools.PromptMessage {
+	title := getArgOrDefault(args, "title", "Daily Summary")
+	metrics := getArgOrDefault(args, "metrics", "{}")
+
+	return []tools.PromptMessage{
+		{
+			Role: "user",
+			Content: tools.PromptContent{
+				Type: "text",
+				Text: fmt.Sprintf(`Send a daily summary notification to Discord.
+
+**Summary Details:**
+- Title: %s
+- Metrics: %s
+
+**Instructions:**
+1. Use discord_send_embed to create a rich summary
+2. Set color to "info" (blue)
+3. Parse the metrics JSON and create fields for each key-value pair
+4. Make numeric values stand out
+5. Add a footer with "Generated at [current time]"
+
+The summary should be visually organized and easy to scan.`, title, metrics),
+			},
+		},
+	}
+}
+
+func (p *Provider) promptAskConfirmation(args map[string]string) []tools.PromptMessage {
+	question := getArgOrDefault(args, "question", "Do you want to proceed?")
+	context := getArgOrDefault(args, "context", "")
+
+	contextSection := ""
+	if context != "" {
+		contextSection = fmt.Sprintf("\n- Context: %s", context)
+	}
+
+	return []tools.PromptMessage{
+		{
+			Role: "user",
+			Content: tools.PromptContent{
+				Type: "text",
+				Text: fmt.Sprintf(`Send an interactive confirmation request to Discord.
+
+**Question Details:**
+- Question: %s%s
+
+**Instructions:**
+1. Use discord_send_message_with_buttons
+2. Set embed_title to the question
+3. If context is provided, set embed_description to the context
+4. Set embed_color to "warning" (yellow) to draw attention
+5. Add two buttons:
+   - label: "Yes", custom_id: "confirm_yes", style: 3 (green)
+   - label: "No", custom_id: "confirm_no", style: 4 (red)
+
+The message should clearly present the choice to the user.`, question, contextSection),
+			},
+		},
+	}
 }

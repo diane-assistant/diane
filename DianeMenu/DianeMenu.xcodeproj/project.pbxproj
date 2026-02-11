@@ -22,6 +22,11 @@
 		013 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114 /* Agent.swift */; };
 		014 /* AgentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115 /* AgentsView.swift */; };
 		015 /* FileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 116 /* FileLogger.swift */; };
+		016 /* Context.swift in Sources */ = {isa = PBXBuildFile; fileRef = 117 /* Context.swift */; };
+		017 /* ContextsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118 /* ContextsView.swift */; };
+		018 /* Provider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 119 /* Provider.swift */; };
+		019 /* ProvidersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120 /* ProvidersView.swift */; };
+		020 /* UsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121 /* UsageView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +47,11 @@
 		114 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
 		115 /* AgentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsView.swift; sourceTree = "<group>"; };
 		116 /* FileLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLogger.swift; sourceTree = "<group>"; };
+		117 /* Context.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Context.swift; sourceTree = "<group>"; };
+		118 /* ContextsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextsView.swift; sourceTree = "<group>"; };
+		119 /* Provider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Provider.swift; sourceTree = "<group>"; };
+		120 /* ProvidersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersView.swift; sourceTree = "<group>"; };
+		121 /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -100,6 +110,9 @@
 				110 /* ToolsBrowserView.swift */,
 				113 /* SchedulerView.swift */,
 				115 /* AgentsView.swift */,
+				118 /* ContextsView.swift */,
+				120 /* ProvidersView.swift */,
+				121 /* UsageView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -122,6 +135,8 @@
 				106 /* DianeStatus.swift */,
 				112 /* Job.swift */,
 				114 /* Agent.swift */,
+				117 /* Context.swift */,
+				119 /* Provider.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -217,6 +232,11 @@
 				013 /* Agent.swift in Sources */,
 				014 /* AgentsView.swift in Sources */,
 				015 /* FileLogger.swift in Sources */,
+				016 /* Context.swift in Sources */,
+				017 /* ContextsView.swift in Sources */,
+				018 /* Provider.swift in Sources */,
+				019 /* ProvidersView.swift in Sources */,
+				020 /* UsageView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -146,8 +146,122 @@ func (db *DB) migrate() error {
 
 	CREATE INDEX IF NOT EXISTS idx_agent_logs_agent_name ON agent_logs(agent_name);
 	CREATE INDEX IF NOT EXISTS idx_agent_logs_created_at ON agent_logs(created_at);
+
+	-- MCP Servers (source of truth for available servers)
+	CREATE TABLE IF NOT EXISTS mcp_servers (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		type TEXT NOT NULL,
+		command TEXT,
+		args TEXT,
+		env TEXT,
+		url TEXT,
+		headers TEXT,
+		oauth TEXT,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	-- Contexts for grouping MCP servers
+	CREATE TABLE IF NOT EXISTS contexts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		description TEXT,
+		is_default INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	-- Context-Server relationship (which servers are in which context)
+	CREATE TABLE IF NOT EXISTS context_servers (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		context_id INTEGER NOT NULL,
+		server_id INTEGER NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (context_id) REFERENCES contexts(id) ON DELETE CASCADE,
+		FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE,
+		UNIQUE(context_id, server_id)
+	);
+
+	-- Tool overrides per context-server
+	CREATE TABLE IF NOT EXISTS context_server_tools (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		context_server_id INTEGER NOT NULL,
+		tool_name TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (context_server_id) REFERENCES context_servers(id) ON DELETE CASCADE,
+		UNIQUE(context_server_id, tool_name)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_context_servers_context ON context_servers(context_id);
+	CREATE INDEX IF NOT EXISTS idx_context_servers_server ON context_servers(server_id);
+	CREATE INDEX IF NOT EXISTS idx_context_server_tools_cs ON context_server_tools(context_server_id);
+
+	-- AI/Service Providers (embedding, LLM, storage providers)
+	CREATE TABLE IF NOT EXISTS providers (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		type TEXT NOT NULL,
+		service TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		is_default INTEGER NOT NULL DEFAULT 0,
+		auth_type TEXT NOT NULL DEFAULT 'none',
+		auth_config TEXT,
+		config TEXT,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_providers_type ON providers(type);
+	CREATE INDEX IF NOT EXISTS idx_providers_service ON providers(service);
+	CREATE INDEX IF NOT EXISTS idx_providers_enabled ON providers(enabled);
+
+	-- Usage tracking for AI providers
+	CREATE TABLE IF NOT EXISTS usage (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		provider_id INTEGER,
+		service TEXT NOT NULL,
+		model TEXT NOT NULL,
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		cached_tokens INTEGER NOT NULL DEFAULT 0,
+		cost REAL NOT NULL DEFAULT 0,
+		metadata TEXT,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE SET NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage(provider_id);
+	CREATE INDEX IF NOT EXISTS idx_usage_service ON usage(service);
+	CREATE INDEX IF NOT EXISTS idx_usage_model ON usage(model);
+	CREATE INDEX IF NOT EXISTS idx_usage_created_at ON usage(created_at);
 	`
 
 	_, err := db.conn.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Ensure default context exists
+	return db.ensureDefaultContext()
+}
+
+// ensureDefaultContext creates the default "personal" context if no contexts exist
+func (db *DB) ensureDefaultContext() error {
+	var count int
+	err := db.conn.QueryRow("SELECT COUNT(*) FROM contexts").Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		_, err = db.conn.Exec(`
+			INSERT INTO contexts (name, description, is_default) 
+			VALUES ('personal', 'Personal productivity tools', 1)
+		`)
+		return err
+	}
+	return nil
 }
