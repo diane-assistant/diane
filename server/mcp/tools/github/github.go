@@ -117,7 +117,7 @@ type Tool struct {
 func (p *Provider) Tools() []Tool {
 	return []Tool{
 		{
-			Name:        "github-bot_comment_as_bot",
+			Name:        "github_bot_comment_as_bot",
 			Description: "Post comment on GitHub issue as Diane bot (separate identity from user). Use this to respond to issues so Diane has her own GitHub identity.",
 			InputSchema: map[string]interface{}{
 				"type":     "object",
@@ -135,7 +135,7 @@ func (p *Provider) Tools() []Tool {
 			},
 		},
 		{
-			Name:        "github-bot_react_as_bot",
+			Name:        "github_bot_react_as_bot",
 			Description: "Add emoji reaction to comment as Diane bot. Use to acknowledge reading comments with separate bot identity.",
 			InputSchema: map[string]interface{}{
 				"type":     "object",
@@ -153,7 +153,7 @@ func (p *Provider) Tools() []Tool {
 			},
 		},
 		{
-			Name:        "github-bot_manage_labels",
+			Name:        "github_bot_manage_labels",
 			Description: "Add or remove labels to organize and tidy up GitHub issues. Use to ensure correct categorization (purchase, finance, urgent, etc.) and remove incorrect labels.",
 			InputSchema: map[string]interface{}{
 				"type":     "object",
@@ -180,7 +180,7 @@ func (p *Provider) Tools() []Tool {
 // HasTool checks if a tool name belongs to this provider
 func (p *Provider) HasTool(name string) bool {
 	switch name {
-	case "github-bot_comment_as_bot", "github-bot_react_as_bot", "github-bot_manage_labels":
+	case "github_bot_comment_as_bot", "github_bot_react_as_bot", "github_bot_manage_labels":
 		return true
 	}
 	return false
@@ -189,11 +189,11 @@ func (p *Provider) HasTool(name string) bool {
 // Call executes a GitHub bot tool
 func (p *Provider) Call(name string, args map[string]interface{}) (interface{}, error) {
 	switch name {
-	case "github-bot_comment_as_bot":
+	case "github_bot_comment_as_bot":
 		return p.commentAsBot(args)
-	case "github-bot_react_as_bot":
+	case "github_bot_react_as_bot":
 		return p.reactAsBot(args)
-	case "github-bot_manage_labels":
+	case "github_bot_manage_labels":
 		return p.manageLabels(args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)

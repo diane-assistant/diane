@@ -2,24 +2,10 @@ import SwiftUI
 import AppKit
 
 struct SchedulerView: View {
-    @State private var jobs: [Job] = []
-    @State private var executions: [JobExecution] = []
-    @State private var isLoading = true
-    @State private var error: String?
-    @State private var searchText = ""
-    @State private var selectedJob: Job?
-    @State private var showLogsForJob: String?
+    @State private var viewModel: SchedulerViewModel
     
-    private let client = DianeClient()
-    
-    private var filteredJobs: [Job] {
-        if searchText.isEmpty {
-            return jobs
-        }
-        return jobs.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText) ||
-            $0.command.localizedCaseInsensitiveContains(searchText)
-        }
+    init(viewModel: SchedulerViewModel = SchedulerViewModel()) {
+        _viewModel = State(initialValue: viewModel)
     }
     
     var body: some View {
@@ -28,11 +14,11 @@ struct SchedulerView: View {
             
             Divider()
             
-            if isLoading {
+            if viewModel.isLoading {
                 loadingView
-            } else if let error = error {
+            } else if let error = viewModel.error {
                 errorView(error)
-            } else if jobs.isEmpty {
+            } else if viewModel.jobs.isEmpty {
                 emptyView
             } else {
                 HSplitView {
@@ -47,7 +33,7 @@ struct SchedulerView: View {
         .frame(minWidth: 700, idealWidth: 900, maxWidth: .infinity,
                minHeight: 400, idealHeight: 600, maxHeight: .infinity)
         .task {
-            await loadData()
+            await viewModel.loadData()
         }
     }
     
@@ -55,15 +41,23 @@ struct SchedulerView: View {
     
     private var headerView: some View {
         HStack(spacing: 12) {
+            Image(systemName: "clock")
+                .foregroundStyle(.secondary)
+            
+            Text("Scheduler")
+                .font(.headline)
+            
+            Spacer()
+            
             // Search field
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("Search jobs...", text: $searchText)
+                TextField("Search jobs...", text: $viewModel.searchText)
                     .textFieldStyle(.plain)
-                if !searchText.isEmpty {
+                if !viewModel.searchText.isEmpty {
                     Button {
-                        searchText = ""
+                        viewModel.searchText = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
@@ -77,14 +71,14 @@ struct SchedulerView: View {
             
             // Refresh button
             Button {
-                Task { await loadData() }
+                Task { await viewModel.loadData() }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .disabled(isLoading)
+            .disabled(viewModel.isLoading)
             
             // Stats
-            Text("\(jobs.count) jobs")
+            Text("\(viewModel.jobs.count) jobs")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -116,7 +110,7 @@ struct SchedulerView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("Retry") {
-                Task { await loadData() }
+                Task { await viewModel.loadData() }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -125,17 +119,11 @@ struct SchedulerView: View {
     // MARK: - Empty View
     
     private var emptyView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("No scheduled jobs")
-                .font(.headline)
-            Text("Jobs can be created using the job_add tool")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "calendar.badge.clock",
+            title: "No scheduled jobs",
+            description: "Jobs can be created using the job_add tool"
+        )
     }
     
     // MARK: - Jobs List
@@ -159,18 +147,17 @@ struct SchedulerView: View {
             
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(filteredJobs) { job in
+                    ForEach(viewModel.filteredJobs) { job in
                         JobRow(
                             job: job,
-                            lastExecution: executions.first { $0.jobID == job.id },
-                            isSelected: selectedJob?.id == job.id,
+                            lastExecution: viewModel.executions.first { $0.jobID == job.id },
+                            isSelected: viewModel.selectedJob?.id == job.id,
                             onToggle: { enabled in
-                                Task { await toggleJob(job, enabled: enabled) }
+                                Task { await viewModel.toggleJob(job, enabled: enabled) }
                             },
                             onSelect: {
-                                selectedJob = job
-                                showLogsForJob = job.name
-                                Task { await loadLogs(forJob: job.name) }
+                                viewModel.selectJob(job)
+                                Task { await viewModel.loadLogs(forJob: job.name) }
                             }
                         )
                         Divider()
@@ -190,7 +177,7 @@ struct SchedulerView: View {
                 Image(systemName: "doc.text")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if let jobName = showLogsForJob {
+                if let jobName = viewModel.showLogsForJob {
                     Text("Logs: \(jobName)")
                         .font(.subheadline.weight(.semibold))
                 } else {
@@ -199,11 +186,10 @@ struct SchedulerView: View {
                 }
                 Spacer()
                 
-                if showLogsForJob != nil {
+                if viewModel.showLogsForJob != nil {
                     Button {
-                        showLogsForJob = nil
-                        selectedJob = nil
-                        Task { await loadLogs(forJob: nil) }
+                        viewModel.showAllLogs()
+                        Task { await viewModel.loadLogs(forJob: nil) }
                     } label: {
                         Text("Show All")
                             .font(.caption)
@@ -217,7 +203,7 @@ struct SchedulerView: View {
             
             Divider()
             
-            if filteredExecutions.isEmpty {
+            if viewModel.filteredExecutions.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.title)
@@ -230,7 +216,7 @@ struct SchedulerView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(filteredExecutions) { execution in
+                        ForEach(viewModel.filteredExecutions) { execution in
                             ExecutionRow(execution: execution)
                             Divider()
                                 .padding(.leading, 16)
@@ -238,51 +224,6 @@ struct SchedulerView: View {
                     }
                 }
             }
-        }
-    }
-    
-    private var filteredExecutions: [JobExecution] {
-        if let jobName = showLogsForJob {
-            return executions.filter { $0.jobName == jobName }
-        }
-        return executions
-    }
-    
-    // MARK: - Actions
-    
-    private func loadData() async {
-        isLoading = true
-        error = nil
-        
-        do {
-            async let jobsTask = client.getJobs()
-            async let logsTask = client.getJobLogs(limit: 100)
-            
-            let (loadedJobs, loadedLogs) = try await (jobsTask, logsTask)
-            jobs = loadedJobs
-            executions = loadedLogs
-        } catch {
-            self.error = error.localizedDescription
-        }
-        
-        isLoading = false
-    }
-    
-    private func loadLogs(forJob jobName: String?) async {
-        do {
-            executions = try await client.getJobLogs(jobName: jobName, limit: 100)
-        } catch {
-            // Silently fail for log refresh
-        }
-    }
-    
-    private func toggleJob(_ job: Job, enabled: Bool) async {
-        do {
-            try await client.toggleJob(name: job.name, enabled: enabled)
-            // Refresh job list
-            jobs = try await client.getJobs()
-        } catch {
-            // Show error somehow
         }
     }
 }

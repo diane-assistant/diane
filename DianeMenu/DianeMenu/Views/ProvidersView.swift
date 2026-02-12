@@ -2,49 +2,11 @@ import SwiftUI
 import AppKit
 
 struct ProvidersView: View {
-    @State private var providers: [Provider] = []
-    @State private var selectedProvider: Provider?
-    @State private var templates: [ProviderTemplate] = []
-    @State private var isLoading = true
-    @State private var error: String?
+    @State private var viewModel: ProvidersViewModel
     
-    // Create provider state
-    @State private var showCreateProvider = false
-    @State private var selectedTemplate: ProviderTemplate?
-    @State private var newProviderName = ""
-    @State private var configValues: [String: String] = [:]
-    @State private var authValues: [String: String] = [:]
-    @State private var isCreating = false
-    @State private var createError: String?
-    
-    // Dynamic model discovery
-    @State private var availableModels: [AvailableModel] = []
-    @State private var isLoadingModels = false
-    @State private var modelsError: String?
-    
-    // Edit provider state
-    @State private var editingProvider: Provider?  // Used for sheet(item:) pattern
-    @State private var editConfigValues: [String: String] = [:]
-    @State private var editAuthValues: [String: String] = [:]
-    @State private var isEditing = false
-    @State private var editError: String?
-    
-    // Delete confirmation
-    @State private var showDeleteConfirm = false
-    @State private var providerToDelete: Provider?
-    
-    // Filter
-    @State private var typeFilter: ProviderType?
-    
-    // Google OAuth state
-    @State private var showGoogleAuth = false
-    @State private var googleAuthStatus: GoogleAuthStatus?
-    @State private var isCheckingGoogleAuth = false
-    @State private var deviceCodeResponse: GoogleDeviceCodeResponse?
-    @State private var isPollingForToken = false
-    @State private var googleAuthError: String?
-    
-    private let client = DianeClient()
+    init(viewModel: ProvidersViewModel = ProvidersViewModel()) {
+        _viewModel = State(initialValue: viewModel)
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -52,46 +14,44 @@ struct ProvidersView: View {
             
             Divider()
             
-            if isLoading {
+            if viewModel.isLoading {
                 loadingView
-            } else if let error = error {
+            } else if let error = viewModel.error {
                 errorView(error)
-            } else if providers.isEmpty {
+            } else if viewModel.providers.isEmpty {
                 emptyView
             } else {
-                HSplitView {
+                MasterDetailView {
                     providersListView
-                        .frame(minWidth: 200, idealWidth: 250, maxWidth: 350)
-                    
+                } detail: {
                     detailView
-                        .frame(minWidth: 400, idealWidth: 550)
                 }
             }
         }
         .frame(minWidth: 700, idealWidth: 800, maxWidth: .infinity,
                minHeight: 400, idealHeight: 500, maxHeight: .infinity)
         .task {
-            await loadData()
+            await viewModel.loadData()
         }
-        .sheet(isPresented: $showCreateProvider) {
+        .sheet(isPresented: $viewModel.showCreateProvider) {
             createProviderSheet
         }
-        .sheet(item: $editingProvider) { provider in
+        .sheet(item: $viewModel.editingProvider) { provider in
             editProviderSheet(for: provider)
         }
-        .alert("Delete Provider", isPresented: $showDeleteConfirm) {
+        .alert("Delete Provider", isPresented: $viewModel.showDeleteConfirm) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
-                if let provider = providerToDelete {
-                    Task { await deleteProvider(provider) }
+                if let provider = viewModel.providerToDelete {
+                    Task { await viewModel.deleteProvider(provider) }
                 }
             }
         } message: {
-            if let provider = providerToDelete {
+            if let provider = viewModel.providerToDelete {
                 Text("Are you sure you want to delete '\(provider.name)'? This cannot be undone.")
             }
         }
-        .sheet(isPresented: $showGoogleAuth) {
+        .sheet(isPresented: $viewModel.showGoogleAuth) {
             googleAuthSheet
         }
     }
@@ -109,7 +69,7 @@ struct ProvidersView: View {
             Spacer()
             
             // Type filter
-            Picker("", selection: $typeFilter) {
+            Picker("", selection: $viewModel.typeFilter) {
                 Text("All").tag(nil as ProviderType?)
                 ForEach(ProviderType.allCases, id: \.self) { type in
                     Label(type.displayName, systemImage: type.icon).tag(type as ProviderType?)
@@ -120,18 +80,18 @@ struct ProvidersView: View {
             
             // Create provider button
             Button {
-                showCreateProvider = true
+                viewModel.showCreateProvider = true
             } label: {
                 Label("Add Provider", systemImage: "plus")
             }
             
             // Refresh button
             Button {
-                Task { await loadData() }
+                Task { await viewModel.loadData() }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .disabled(isLoading)
+            .disabled(viewModel.isLoading)
         }
         .padding()
     }
@@ -161,7 +121,7 @@ struct ProvidersView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("Retry") {
-                Task { await loadData() }
+                Task { await viewModel.loadData() }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -170,74 +130,42 @@ struct ProvidersView: View {
     // MARK: - Empty View
     
     private var emptyView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "cpu")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            Text("No providers configured")
-                .font(.headline)
-            Text("Add a provider to enable features like embeddings, LLM, or storage")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 300)
-            Button {
-                showCreateProvider = true
-            } label: {
-                Label("Add Provider", systemImage: "plus")
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "cpu",
+            title: "No providers configured",
+            description: "Add a provider to enable features like embeddings, LLM, or storage",
+            actionLabel: "Add Provider",
+            action: { viewModel.showCreateProvider = true }
+        )
     }
     
     // MARK: - Providers List
     
-    private var filteredProviders: [Provider] {
-        if let typeFilter = typeFilter {
-            return providers.filter { $0.type == typeFilter }
-        }
-        return providers
-    }
-    
     private var providersListView: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Section header
-            HStack {
-                Image(systemName: "list.bullet")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Configured Providers")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text("\(filteredProviders.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(Color(nsColor: .windowBackgroundColor))
+            MasterListHeader(icon: "list.bullet", title: "Configured Providers")
             
             Divider()
             
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(filteredProviders) { provider in
+                    ForEach(viewModel.filteredProviders) { provider in
                         ProviderRow(
                             provider: provider,
-                            isSelected: selectedProvider?.id == provider.id,
+                            isSelected: viewModel.selectedProvider?.id == provider.id,
                             onSelect: {
-                                selectedProvider = provider
+                                viewModel.selectedProvider = provider
                             },
                             onToggle: { enabled in
-                                Task { await toggleProvider(provider, enabled: enabled) }
+                                Task { await viewModel.toggleProvider(provider, enabled: enabled) }
                             },
                             onSetDefault: {
-                                Task { await setDefault(provider) }
+                                Task { await viewModel.setDefault(provider) }
                             },
                             onDelete: {
-                                providerToDelete = provider
-                                showDeleteConfirm = true
+                                viewModel.providerToDelete = provider
+                                viewModel.showDeleteConfirm = true
                             }
                         )
                         Divider()
@@ -252,26 +180,26 @@ struct ProvidersView: View {
     
     private var detailView: some View {
         Group {
-            if let provider = selectedProvider {
+            if let provider = viewModel.selectedProvider {
                 ProviderDetailView(
                     provider: provider,
-                    template: templates.first { $0.service == provider.service },
+                    template: viewModel.templates.first { $0.service == provider.service },
                     onEdit: {
-                        editingProvider = provider
+                        viewModel.editingProvider = provider
                     },
                     onToggle: { enabled in
-                        Task { await toggleProvider(provider, enabled: enabled) }
+                        Task { await viewModel.toggleProvider(provider, enabled: enabled) }
                     },
                     onSetDefault: {
-                        Task { await setDefault(provider) }
+                        Task { await viewModel.setDefault(provider) }
                     },
                     onDelete: {
-                        providerToDelete = provider
-                        showDeleteConfirm = true
+                        viewModel.providerToDelete = provider
+                        viewModel.showDeleteConfirm = true
                     },
                     onAuthenticate: {
-                        showGoogleAuth = true
-                        Task { await startGoogleAuth() }
+                        viewModel.showGoogleAuth = true
+                        Task { await viewModel.startGoogleAuth() }
                     }
                 )
             } else {
@@ -299,8 +227,8 @@ struct ProvidersView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    showCreateProvider = false
-                    resetCreateForm()
+                    viewModel.showCreateProvider = false
+                    viewModel.resetCreateForm()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -315,13 +243,13 @@ struct ProvidersView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     // Template selection
-                    if selectedTemplate == nil {
+                    if viewModel.selectedTemplate == nil {
                         templateSelectionView
                     } else {
                         // Back button
                         Button {
-                            selectedTemplate = nil
-                            resetCreateForm()
+                            viewModel.selectedTemplate = nil
+                            viewModel.resetCreateForm()
                         } label: {
                             Label("Back to templates", systemImage: "chevron.left")
                         }
@@ -329,13 +257,13 @@ struct ProvidersView: View {
                         .foregroundStyle(.secondary)
                         
                         // Provider configuration
-                        if let template = selectedTemplate {
+                        if let template = viewModel.selectedTemplate {
                             providerConfigForm(template: template)
                         }
                     }
                     
                     // Error message
-                    if let error = createError {
+                    if let error = viewModel.createError {
                         HStack {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.orange)
@@ -353,17 +281,17 @@ struct ProvidersView: View {
             // Footer
             HStack {
                 Button("Cancel") {
-                    showCreateProvider = false
-                    resetCreateForm()
+                    viewModel.showCreateProvider = false
+                    viewModel.resetCreateForm()
                 }
                 
                 Spacer()
                 
-                if selectedTemplate != nil {
+                if viewModel.selectedTemplate != nil {
                     Button {
-                        Task { await createProvider() }
+                        Task { await viewModel.createProvider() }
                     } label: {
-                        if isCreating {
+                        if viewModel.isCreating {
                             ProgressView()
                                 .scaleEffect(0.7)
                         } else {
@@ -371,7 +299,7 @@ struct ProvidersView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isCreating || newProviderName.isEmpty || !isConfigValid())
+                    .disabled(viewModel.isCreating || viewModel.newProviderName.isEmpty || !viewModel.isConfigValid())
                 }
             }
             .padding()
@@ -384,16 +312,16 @@ struct ProvidersView: View {
             Text("Choose a provider type")
                 .font(.subheadline.weight(.medium))
             
-            ForEach(templates) { template in
+            ForEach(viewModel.templates) { template in
                 Button {
-                    selectedTemplate = template
+                    viewModel.selectedTemplate = template
                     // Set default values
                     for field in template.configSchema {
-                        configValues[field.key] = field.defaultString
+                        viewModel.configValues[field.key] = field.defaultString
                     }
                     // Fetch available models for LLM providers
                     if template.service == "vertex_ai_llm" {
-                        Task { await fetchModels(service: template.service) }
+                        Task { await viewModel.fetchModels(service: template.service) }
                     }
                 } label: {
                     HStack(spacing: 12) {
@@ -454,7 +382,7 @@ struct ProvidersView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Provider Name")
                     .font(.subheadline.weight(.medium))
-                TextField("e.g., my-embeddings", text: $newProviderName)
+                TextField("e.g., my-embeddings", text: $viewModel.newProviderName)
                     .textFieldStyle(.roundedBorder)
                 Text("A unique name to identify this provider")
                     .font(.caption2)
@@ -467,8 +395,8 @@ struct ProvidersView: View {
                     Text("API Key")
                         .font(.subheadline.weight(.medium))
                     SecureField("Enter your API key", text: Binding(
-                        get: { authValues["api_key"] ?? "" },
-                        set: { authValues["api_key"] = $0 }
+                        get: { viewModel.authValues["api_key"] ?? "" },
+                        set: { viewModel.authValues["api_key"] = $0 }
                     ))
                     .textFieldStyle(.roundedBorder)
                 }
@@ -478,13 +406,13 @@ struct ProvidersView: View {
             if template.authType == .oauth {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        if isCheckingGoogleAuth {
+                        if viewModel.isCheckingGoogleAuth {
                             ProgressView()
                                 .scaleEffect(0.7)
                             Text("Checking authentication...")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                        } else if let status = googleAuthStatus {
+                        } else if let status = viewModel.googleAuthStatus {
                             if status.authenticated {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(.green)
@@ -521,8 +449,8 @@ struct ProvidersView: View {
                                     .foregroundStyle(.secondary)
                                 
                                 Button("Authenticate") {
-                                    showGoogleAuth = true
-                                    Task { await startGoogleAuth() }
+                                    viewModel.showGoogleAuth = true
+                                    Task { await viewModel.startGoogleAuth() }
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
@@ -535,7 +463,7 @@ struct ProvidersView: View {
                                 .foregroundStyle(.secondary)
                             
                             Button("Check Status") {
-                                Task { await checkGoogleAuthStatus() }
+                                Task { await viewModel.checkGoogleAuthStatus() }
                             }
                             .controlSize(.small)
                         }
@@ -543,13 +471,13 @@ struct ProvidersView: View {
                 }
                 .padding(.vertical, 4)
                 .task {
-                    await checkGoogleAuthStatus()
+                    await viewModel.checkGoogleAuthStatus()
                 }
             }
             
             // Config fields
             ForEach(template.configSchema) { field in
-                configFieldView(field: field, values: $configValues)
+                configFieldView(field: field, values: $viewModel.configValues)
             }
         }
     }
@@ -565,20 +493,20 @@ struct ProvidersView: View {
                 }
                 
                 // Show loading indicator for model field when fetching
-                if field.key == "model" && isLoadingModels {
+                if field.key == "model" && viewModel.isLoadingModels {
                     ProgressView()
                         .scaleEffect(0.6)
                 }
             }
             
             // Use dynamic models for the model field if available
-            if field.key == "model" && !availableModels.isEmpty {
+            if field.key == "model" && !viewModel.availableModels.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Picker("", selection: Binding(
                         get: { values.wrappedValue[field.key] ?? field.defaultString },
                         set: { values.wrappedValue[field.key] = $0 }
                     )) {
-                        ForEach(availableModels) { model in
+                        ForEach(viewModel.availableModels) { model in
                             HStack {
                                 Text(model.id)
                                 if let stage = model.launchStage, stage != "GA" {
@@ -594,7 +522,7 @@ struct ProvidersView: View {
                     
                     // Show pricing for selected model
                     if let selectedModelID = values.wrappedValue[field.key],
-                       let selectedModel = availableModels.first(where: { $0.id == selectedModelID }) {
+                       let selectedModel = viewModel.availableModels.first(where: { $0.id == selectedModelID }) {
                         HStack(spacing: 12) {
                             if let pricing = selectedModel.pricingInfo {
                                 HStack(spacing: 4) {
@@ -677,7 +605,7 @@ struct ProvidersView: View {
             }
             
             // Show models error if any
-            if field.key == "model", let error = modelsError {
+            if field.key == "model", let error = viewModel.modelsError {
                 Text(error)
                     .font(.caption2)
                     .foregroundStyle(.red)
@@ -696,7 +624,7 @@ struct ProvidersView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    editingProvider = nil
+                    viewModel.editingProvider = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -708,7 +636,7 @@ struct ProvidersView: View {
             Divider()
             
             // Content
-            if let template = templates.first(where: { $0.service == provider.service }) {
+            if let template = viewModel.templates.first(where: { $0.service == provider.service }) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         // Provider info
@@ -734,8 +662,8 @@ struct ProvidersView: View {
                                 Text("API Key")
                                     .font(.subheadline.weight(.medium))
                                 SecureField("Enter new API key (leave empty to keep current)", text: Binding(
-                                    get: { editAuthValues["api_key"] ?? "" },
-                                    set: { editAuthValues["api_key"] = $0 }
+                                    get: { viewModel.editAuthValues["api_key"] ?? "" },
+                                    set: { viewModel.editAuthValues["api_key"] = $0 }
                                 ))
                                 .textFieldStyle(.roundedBorder)
                                 Text("Current key is masked. Enter a new key to update.")
@@ -746,11 +674,11 @@ struct ProvidersView: View {
                         
                         // Config fields
                         ForEach(template.configSchema) { field in
-                            configFieldView(field: field, values: $editConfigValues)
+                            configFieldView(field: field, values: $viewModel.editConfigValues)
                         }
                         
                         // Error message
-                        if let error = editError {
+                        if let error = viewModel.editError {
                             HStack {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .foregroundStyle(.orange)
@@ -769,15 +697,15 @@ struct ProvidersView: View {
             // Footer
             HStack {
                 Button("Cancel") {
-                    editingProvider = nil
+                    viewModel.editingProvider = nil
                 }
                 
                 Spacer()
                 
                 Button {
-                    Task { await updateProvider() }
+                    Task { await viewModel.updateProvider() }
                 } label: {
-                    if isEditing {
+                    if viewModel.isEditing {
                         ProgressView()
                             .scaleEffect(0.7)
                     } else {
@@ -785,252 +713,15 @@ struct ProvidersView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isEditing)
+                .disabled(viewModel.isEditing)
             }
             .padding()
         }
         .frame(width: 450, height: 450)
         .onAppear {
             // Initialize edit values when sheet appears
-            prepareEdit(provider)
+            viewModel.prepareEdit(provider)
         }
-    }
-    
-    // MARK: - Data Operations
-    
-    private func loadData() async {
-        isLoading = true
-        error = nil
-        
-        do {
-            async let providersTask = client.getProviders(type: typeFilter)
-            async let templatesTask = client.getProviderTemplates()
-            
-            let (loadedProviders, loadedTemplates) = try await (providersTask, templatesTask)
-            
-            providers = loadedProviders
-            templates = loadedTemplates
-            
-            // Update selected provider if it still exists
-            if let selected = selectedProvider {
-                selectedProvider = providers.first { $0.id == selected.id }
-            }
-        } catch {
-            self.error = error.localizedDescription
-        }
-        
-        isLoading = false
-    }
-    
-    private func createProvider() async {
-        guard let template = selectedTemplate else { return }
-        
-        isCreating = true
-        createError = nil
-        
-        do {
-            // Build config
-            var config: [String: Any] = [:]
-            for field in template.configSchema {
-                if let value = configValues[field.key], !value.isEmpty {
-                    if field.type == "int", let intValue = Int(value) {
-                        config[field.key] = intValue
-                    } else if field.type == "bool" {
-                        config[field.key] = value == "true"
-                    } else {
-                        config[field.key] = value
-                    }
-                }
-            }
-            
-            // Build auth config
-            var authConfig: [String: Any]?
-            if template.authType == .apiKey, let apiKey = authValues["api_key"], !apiKey.isEmpty {
-                authConfig = ["api_key": apiKey]
-            } else if template.authType == .oauth {
-                // Use default OAuth account
-                authConfig = ["oauth_account": "default"]
-            }
-            
-            let newProvider = try await client.createProvider(
-                name: newProviderName,
-                service: template.service,
-                config: config,
-                authConfig: authConfig
-            )
-            
-            providers.append(newProvider)
-            selectedProvider = newProvider
-            showCreateProvider = false
-            resetCreateForm()
-            
-        } catch {
-            createError = error.localizedDescription
-        }
-        
-        isCreating = false
-    }
-    
-    private func updateProvider() async {
-        guard let provider = editingProvider,
-              let template = templates.first(where: { $0.service == provider.service }) else { return }
-        
-        isEditing = true
-        editError = nil
-        
-        do {
-            // Build config
-            var config: [String: Any] = [:]
-            for field in template.configSchema {
-                if let value = editConfigValues[field.key], !value.isEmpty {
-                    if field.type == "int", let intValue = Int(value) {
-                        config[field.key] = intValue
-                    } else if field.type == "bool" {
-                        config[field.key] = value == "true"
-                    } else {
-                        config[field.key] = value
-                    }
-                }
-            }
-            
-            // Build auth config (only if new key provided)
-            var authConfig: [String: Any]?
-            if template.authType == .apiKey, let apiKey = editAuthValues["api_key"], !apiKey.isEmpty {
-                authConfig = ["api_key": apiKey]
-            }
-            
-            let updated = try await client.updateProvider(
-                id: provider.id,
-                config: config.isEmpty ? nil : config,
-                authConfig: authConfig
-            )
-            
-            // Update local state
-            if let index = providers.firstIndex(where: { $0.id == provider.id }) {
-                providers[index] = updated
-            }
-            selectedProvider = updated
-            editingProvider = nil
-            
-        } catch {
-            editError = error.localizedDescription
-        }
-        
-        isEditing = false
-    }
-    
-    private func toggleProvider(_ provider: Provider, enabled: Bool) async {
-        do {
-            let updated: Provider
-            if enabled {
-                updated = try await client.enableProvider(id: provider.id)
-            } else {
-                updated = try await client.disableProvider(id: provider.id)
-            }
-            
-            if let index = providers.firstIndex(where: { $0.id == provider.id }) {
-                providers[index] = updated
-            }
-            if selectedProvider?.id == provider.id {
-                selectedProvider = updated
-            }
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-    
-    private func setDefault(_ provider: Provider) async {
-        do {
-            let updated = try await client.setDefaultProvider(id: provider.id)
-            
-            // Refresh all providers to update isDefault flags
-            await loadData()
-            
-            selectedProvider = updated
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-    
-    private func deleteProvider(_ provider: Provider) async {
-        do {
-            try await client.deleteProvider(id: provider.id)
-            providers.removeAll { $0.id == provider.id }
-            if selectedProvider?.id == provider.id {
-                selectedProvider = nil
-            }
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-    
-    private func prepareEdit(_ provider: Provider) {
-        editConfigValues = [:]
-        editAuthValues = [:]
-        editError = nil
-        
-        // Pre-populate config values
-        for (key, value) in provider.config {
-            if let str = value.value as? String {
-                editConfigValues[key] = str
-            } else if let num = value.value as? Int {
-                editConfigValues[key] = String(num)
-            } else if let bool = value.value as? Bool {
-                editConfigValues[key] = bool ? "true" : "false"
-            }
-        }
-    }
-    
-    private func resetCreateForm() {
-        selectedTemplate = nil
-        newProviderName = ""
-        configValues = [:]
-        authValues = [:]
-        createError = nil
-        availableModels = []
-        modelsError = nil
-    }
-    
-    private func fetchModels(service: String) async {
-        isLoadingModels = true
-        modelsError = nil
-        
-        do {
-            // Get project_id from config values if available
-            let projectID = configValues["project_id"]
-            availableModels = try await client.listModels(service: service, projectID: projectID)
-            
-            // If we got models and there's a model field, set default to first available
-            if let firstModel = availableModels.first, configValues["model"]?.isEmpty ?? true {
-                configValues["model"] = firstModel.id
-            }
-        } catch {
-            modelsError = "Failed to fetch models: \(error.localizedDescription)"
-            // Keep static options as fallback
-        }
-        
-        isLoadingModels = false
-    }
-    
-    private func isConfigValid() -> Bool {
-        guard let template = selectedTemplate else { return false }
-        
-        for field in template.configSchema where field.required {
-            if let value = configValues[field.key], !value.isEmpty {
-                continue
-            }
-            return false
-        }
-        
-        // Check API key if required
-        if template.authType == .apiKey {
-            if let apiKey = authValues["api_key"], !apiKey.isEmpty {
-                return true
-            }
-            return false
-        }
-        
-        return true
     }
     
     // MARK: - Google OAuth Sheet
@@ -1045,8 +736,8 @@ struct ProvidersView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    showGoogleAuth = false
-                    resetGoogleAuth()
+                    viewModel.showGoogleAuth = false
+                    viewModel.resetGoogleAuth()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -1059,7 +750,7 @@ struct ProvidersView: View {
             
             // Content
             VStack(spacing: 20) {
-                if let error = googleAuthError {
+                if let error = viewModel.googleAuthError {
                     // Error state
                     VStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -1073,12 +764,12 @@ struct ProvidersView: View {
                             .multilineTextAlignment(.center)
                         
                         Button("Try Again") {
-                            googleAuthError = nil
-                            Task { await startGoogleAuth() }
+                            viewModel.googleAuthError = nil
+                            Task { await viewModel.startGoogleAuth() }
                         }
                         .buttonStyle(.borderedProminent)
                     }
-                } else if let dcr = deviceCodeResponse {
+                } else if let dcr = viewModel.deviceCodeResponse {
                     // Show device code
                     VStack(spacing: 16) {
                         Text("Sign in to your Google account")
@@ -1140,7 +831,7 @@ struct ProvidersView: View {
                         .background(Color(nsColor: .controlBackgroundColor))
                         .cornerRadius(8)
                         
-                        if isPollingForToken {
+                        if viewModel.isPollingForToken {
                             HStack(spacing: 8) {
                                 ProgressView()
                                     .scaleEffect(0.8)
@@ -1172,101 +863,14 @@ struct ProvidersView: View {
             // Footer
             HStack {
                 Button("Cancel") {
-                    showGoogleAuth = false
-                    resetGoogleAuth()
+                    viewModel.showGoogleAuth = false
+                    viewModel.resetGoogleAuth()
                 }
                 Spacer()
             }
             .padding()
         }
         .frame(width: 450, height: 350)
-    }
-    
-    // MARK: - Google OAuth Functions
-    
-    private func checkGoogleAuthStatus() async {
-        isCheckingGoogleAuth = true
-        
-        do {
-            googleAuthStatus = try await client.getGoogleAuthStatus()
-        } catch {
-            // Status check failed, leave as nil
-            googleAuthStatus = nil
-        }
-        
-        isCheckingGoogleAuth = false
-    }
-    
-    private func startGoogleAuth() async {
-        deviceCodeResponse = nil
-        googleAuthError = nil
-        
-        do {
-            // Start device flow
-            deviceCodeResponse = try await client.startGoogleAuth()
-            
-            // Start polling for token
-            if let dcr = deviceCodeResponse {
-                isPollingForToken = true
-                await pollForToken(deviceCode: dcr.deviceCode, interval: dcr.interval)
-            }
-        } catch {
-            googleAuthError = error.localizedDescription
-        }
-    }
-    
-    private func pollForToken(deviceCode: String, interval: Int) async {
-        let pollInterval = max(interval, 5) // At least 5 seconds
-        
-        while isPollingForToken && showGoogleAuth {
-            // Wait before polling
-            try? await Task.sleep(nanoseconds: UInt64(pollInterval) * 1_000_000_000)
-            
-            guard showGoogleAuth else { break }
-            
-            do {
-                let response = try await client.pollGoogleAuth(deviceCode: deviceCode, interval: pollInterval)
-                
-                if response.isSuccess {
-                    // Success! Close the sheet and refresh status
-                    isPollingForToken = false
-                    showGoogleAuth = false
-                    await checkGoogleAuthStatus()
-                    resetGoogleAuth()
-                    return
-                } else if response.isPending {
-                    // Keep polling
-                    continue
-                } else if response.shouldSlowDown {
-                    // Slow down - wait extra time
-                    try? await Task.sleep(nanoseconds: 5_000_000_000)
-                    continue
-                } else if response.isExpired {
-                    googleAuthError = "Authorization code expired. Please try again."
-                    isPollingForToken = false
-                    return
-                } else if response.isDenied {
-                    googleAuthError = "Authorization was denied."
-                    isPollingForToken = false
-                    return
-                } else {
-                    // Unknown status
-                    googleAuthError = response.message
-                    isPollingForToken = false
-                    return
-                }
-            } catch {
-                // On error, check if it's a pending response (202) which throws
-                // Continue polling on network errors
-                continue
-            }
-        }
-    }
-    
-    private func resetGoogleAuth() {
-        deviceCodeResponse = nil
-        isPollingForToken = false
-        googleAuthError = nil
     }
 }
 

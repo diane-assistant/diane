@@ -1,13 +1,90 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Tech stack: Swift, SwiftUI, macOS native app (DianeMenu)
+  Domain: Developer tool — MCP server management, AI agent orchestration
+
+  ## SwiftUI Component Guidelines
+
+  Design tokens are defined in DianeMenu/DianeMenu/Components/DesignTokens.swift.
+  All components and views MUST use these tokens instead of magic numbers.
+
+  ### Core Principles
+
+  1. RESPONSIVE BY DEFAULT — Components take available space using
+     `.frame(maxWidth: .infinity)`. Only fixed-size design elements (badges,
+     icon buttons) should use intrinsic sizing.
+
+  2. INNER PADDING = COMPONENT, OUTER SPACING = PARENT — A card adds padding
+     inside its border. The parent stack controls gaps between cards.
+     Components never add outer margin around themselves.
+
+  3. MODIFIER ORDER — .padding() -> .background() -> .cornerRadius() -> .overlay()
+     Padding goes first so the background includes the padded area.
+
+  4. EXPLICIT STACK SPACING — Always specify `spacing:` on VStack/HStack.
+     Never rely on default (nil) spacing; it varies by child view type.
+
+  5. 8PT GRID — All spacing and padding values are multiples of 2, anchored
+     on the 8pt grid: 2, 4, 6, 8, 12, 16, 20.
+
+  ### Spacing Tiers (use Spacing enum)
+
+  - xxSmall (2): label+subtitle pairs
+  - xSmall (4): icon+text in badges
+  - small (6): compact content, detail section items
+  - medium (8): component-internal content
+  - large (12): section-internal, loading/error states
+  - xLarge (16): form fields, sheet content groups
+  - xxLarge (20): top-level scroll content
+
+  ### Padding Tiers (use Padding enum)
+
+  - rowItem (6): editor row items
+  - small (8): search fields, code blocks
+  - section (12): inside DetailSection, grouped areas
+  - standard (16): cards, panels, column margins — the default
+  - large (20): detail view scroll content
+
+  ### Corner Radius (use CornerRadius enum)
+
+  - small (4): badges, tags, row items
+  - medium (6): code blocks, search fields
+  - standard (8): cards, sections, sheets
+
+  ### Layout Constants (use Layout enum)
+
+  - iconColumnWidth (20): action icon columns for row alignment
+  - labelColumnWidth (80): InfoRow label column
+  - keyColumnMaxWidth (120): KeyValueEditor key column
+
+  ### Standard Patterns
+
+  LIST ROWS: Use ListRow constants — .horizontal 16pt, .vertical 10pt,
+  content spacing 12pt, divider leading 16pt.
+
+  BADGES: Use `.badgeStyle(color:)` view modifier for consistent styling.
+
+  VIEW STRUCTURE: All main views follow VStack(spacing: 0) { header; Divider;
+  content } with loading/error/empty states using Spacing.large (12).
+
+  SHEETS: VStack(spacing: 0) { header with .padding(); Divider; content;
+  Divider; footer with .padding() }.
+
+  MASTER-DETAIL: Use MasterDetailView component. Master column uses
+  MasterListHeader + ScrollView with LazyVStack(spacing: 0).
+
+  ### Existing Reusable Components (in Components/)
+
+  - DesignTokens — spacing, padding, radius, layout constants, BadgeStyle
+  - DetailSection — titled content section with background
+  - InfoRow — label-value pair (80pt label column)
+  - StringArrayEditor — editable string list with add/remove
+  - KeyValueEditor — editable key=value dictionary
+  - SummaryCard — metric card with icon, title, value
+  - OAuthConfigEditor — OAuth configuration form
+  - MasterDetailView — HSplitView with standard 1/3-2/3 split
+  - MasterListHeader — standard list column header with icon + title
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

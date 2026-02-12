@@ -18,6 +18,7 @@ import (
 	"github.com/diane-assistant/diane/mcp/tools"
 	"github.com/diane-assistant/diane/mcp/tools/apple"
 	"github.com/diane-assistant/diane/mcp/tools/downloads"
+	"github.com/diane-assistant/diane/mcp/tools/files"
 	"github.com/diane-assistant/diane/mcp/tools/finance"
 	githubbot "github.com/diane-assistant/diane/mcp/tools/github"
 	"github.com/diane-assistant/diane/mcp/tools/google"
@@ -44,6 +45,7 @@ var placesProvider *places.Provider
 var weatherProvider *weather.Provider
 var githubProvider *githubbot.Provider    // GitHub App bot tools
 var downloadsProvider *downloads.Provider // File download tools
+var filesProvider *files.Provider         // File index tools
 var apiServer *api.Server
 var mcpHTTPServer *api.MCPHTTPServer
 var startTime time.Time
@@ -165,6 +167,16 @@ func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
 			Enabled:   true,
 			Connected: true,
 			ToolCount: len(downloadsProvider.Tools()),
+			Builtin:   true,
+		})
+	}
+
+	if filesProvider != nil {
+		servers = append(servers, api.MCPServerStatus{
+			Name:      "files",
+			Enabled:   true,
+			Connected: true,
+			ToolCount: len(filesProvider.Tools()),
 			Builtin:   true,
 		})
 	}
@@ -634,6 +646,18 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 		}
 	}
 
+	// Files tools
+	if filesProvider != nil {
+		for _, tool := range filesProvider.Tools() {
+			tools = append(tools, api.ToolInfo{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Server:      "files",
+				Builtin:     true,
+			})
+		}
+	}
+
 	// External MCP server tools (from proxy)
 	if proxy != nil {
 		proxiedTools, err := proxy.ListAllTools()
@@ -837,6 +861,20 @@ func (d *DianeStatusProvider) GetToolsForContext(contextName string) []api.ToolI
 		}
 	}
 
+	// Files tools
+	if filesProvider != nil {
+		for _, tool := range filesProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "files", tool.Name); enabled {
+				tools = append(tools, api.ToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Server:      "files",
+					Builtin:     true,
+				})
+			}
+		}
+	}
+
 	// External MCP server tools (from proxy) with context filtering
 	if proxy != nil {
 		proxiedTools, err := proxy.ListToolsForContext(contextName, contextFilter)
@@ -890,6 +928,9 @@ func (d *DianeStatusProvider) countTotalTools() int {
 	}
 	if downloadsProvider != nil {
 		total += len(downloadsProvider.Tools())
+	}
+	if filesProvider != nil {
+		total += len(filesProvider.Tools())
 	}
 	if proxy != nil {
 		total += proxy.GetTotalToolCount()
@@ -1193,6 +1234,21 @@ func main() {
 	} else {
 		slog.Info("Downloads tools initialized successfully")
 	}
+
+	// Initialize Files tools provider (uses Emergent backend via env vars)
+	var filesErr error
+	filesProvider, filesErr = files.NewProvider()
+	if filesErr != nil {
+		slog.Warn("Files tools not available", "error", filesErr)
+		filesProvider = nil
+	} else {
+		slog.Info("Files tools initialized successfully")
+	}
+	defer func() {
+		if filesProvider != nil {
+			filesProvider.Close()
+		}
+	}()
 
 	// Start the Unix socket API server for companion app
 	statusProvider := &DianeStatusProvider{}
@@ -1598,6 +1654,17 @@ func listTools() MCPResponse {
 		}
 	}
 
+	// Add Files tools
+	if filesProvider != nil {
+		for _, tool := range filesProvider.Tools() {
+			tools = append(tools, map[string]interface{}{
+				"name":        tool.Name,
+				"description": tool.Description,
+				"inputSchema": tool.InputSchema,
+			})
+		}
+	}
+
 	// Add proxied tools from other MCP servers
 	if proxy != nil {
 		proxiedTools, err := proxy.ListAllTools()
@@ -1765,6 +1832,20 @@ func callTool(params json.RawMessage) MCPResponse {
 		// Try Downloads tools
 		if downloadsProvider != nil && downloadsProvider.HasTool(call.Name) {
 			result, err := downloadsProvider.Call(call.Name, call.Arguments)
+			if err != nil {
+				return MCPResponse{
+					Error: &MCPError{
+						Code:    -1,
+						Message: err.Error(),
+					},
+				}
+			}
+			return MCPResponse{Result: result}
+		}
+
+		// Try Files tools
+		if filesProvider != nil && filesProvider.HasTool(call.Name) {
+			result, err := filesProvider.Call(call.Name, call.Arguments)
 			if err != nil {
 				return MCPResponse{
 					Error: &MCPError{
@@ -1998,6 +2079,19 @@ func listToolsForContext(contextName string) MCPResponse {
 	if downloadsProvider != nil {
 		for _, tool := range downloadsProvider.Tools() {
 			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "downloads", tool.Name); enabled {
+				tools = append(tools, map[string]interface{}{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"inputSchema": tool.InputSchema,
+				})
+			}
+		}
+	}
+
+	// Files tools
+	if filesProvider != nil {
+		for _, tool := range filesProvider.Tools() {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "files", tool.Name); enabled {
 				tools = append(tools, map[string]interface{}{
 					"name":        tool.Name,
 					"description": tool.Description,
@@ -2242,6 +2336,23 @@ func callToolForContext(params json.RawMessage, contextName string) MCPResponse 
 			}
 		}
 		result, err := downloadsProvider.Call(call.Name, call.Arguments)
+		if err != nil {
+			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+		}
+		return MCPResponse{Result: result}
+	}
+
+	// Check Files tools
+	if filesProvider != nil && filesProvider.HasTool(call.Name) {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "files", call.Name); !enabled {
+			return MCPResponse{
+				Error: &MCPError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Tool %s is not enabled in context %s", call.Name, contextName),
+				},
+			}
+		}
+		result, err := filesProvider.Call(call.Name, call.Arguments)
 		if err != nil {
 			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 		}

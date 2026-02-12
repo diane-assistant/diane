@@ -14,6 +14,13 @@ struct Context: Codable, Identifiable {
         case isDefault = "is_default"
     }
     
+    init(id: Int64, name: String, description: String?, isDefault: Bool) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.isDefault = isDefault
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int64.self, forKey: .id)
@@ -43,6 +50,16 @@ struct ContextServer: Codable, Identifiable {
         case tools
     }
     
+    init(id: Int64, name: String, type: String, enabled: Bool, toolsActive: Int, toolsTotal: Int, tools: [ContextTool]?) {
+        self.id = id
+        self.name = name
+        self.type = type
+        self.enabled = enabled
+        self.toolsActive = toolsActive
+        self.toolsTotal = toolsTotal
+        self.tools = tools
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int64.self, forKey: .id)
@@ -115,6 +132,13 @@ struct AvailableServer: Codable, Identifiable {
         case builtin
     }
     
+    init(name: String, toolCount: Int, inContext: Bool, builtin: Bool?) {
+        self.name = name
+        self.toolCount = toolCount
+        self.inContext = inContext
+        self.builtin = builtin
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         name = try container.decode(String.self, forKey: .name)

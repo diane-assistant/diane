@@ -203,7 +203,7 @@ func (p *Provider) Tools() []Tool {
 
 	return []Tool{
 		{
-			Name:        "google-places_search_places",
+			Name:        "places_search",
 			Description: "Search for places using Google Places API. Find restaurants, cafes, attractions, hotels, shops, and more. Supports text search with optional location bias and filters.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -219,7 +219,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google-places_get_place_details",
+			Name:        "places_get_details",
 			Description: "Get detailed information about a specific place using its Place ID. Includes photos, reviews, opening hours, contact info, and more.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -230,7 +230,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google-places_find_nearby_places",
+			Name:        "places_find_nearby",
 			Description: "Find places near a specific location or coordinates. Great for 'what's near me' queries. Returns places within a radius sorted by prominence or distance.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -253,7 +253,7 @@ func (p *Provider) HasTool(name string) bool {
 	if !p.available {
 		return false
 	}
-	return strings.HasPrefix(name, "google-places_")
+	return strings.HasPrefix(name, "places_")
 }
 
 // Call executes a tool by name
@@ -263,11 +263,11 @@ func (p *Provider) Call(name string, args map[string]interface{}) (interface{}, 
 	}
 
 	switch name {
-	case "google-places_search_places":
+	case "places_search":
 		return p.searchPlaces(args)
-	case "google-places_get_place_details":
+	case "places_get_details":
 		return p.getPlaceDetails(args)
-	case "google-places_find_nearby_places":
+	case "places_find_nearby":
 		return p.findNearbyPlaces(args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)

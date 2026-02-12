@@ -66,6 +66,33 @@ struct Provider: Codable, Identifiable {
         case updatedAt = "updated_at"
     }
     
+    /// Memberwise initializer for programmatic construction (e.g. tests, mocks).
+    init(
+        id: Int64,
+        name: String,
+        type: ProviderType,
+        service: String,
+        enabled: Bool = true,
+        isDefault: Bool = false,
+        authType: AuthType = .none,
+        authConfig: [String: AnyCodable]? = nil,
+        config: [String: AnyCodable] = [:],
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.name = name
+        self.type = type
+        self.service = service
+        self.enabled = enabled
+        self.isDefault = isDefault
+        self.authType = authType
+        self.authConfig = authConfig
+        self.config = config
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int64.self, forKey: .id)
@@ -158,6 +185,25 @@ struct ConfigField: Codable, Identifiable {
         case description
     }
     
+    /// Memberwise initializer for programmatic construction (e.g. tests, mocks).
+    init(
+        key: String,
+        label: String,
+        type: String = "string",
+        required: Bool = false,
+        defaultValue: AnyCodable? = nil,
+        options: [String]? = nil,
+        description: String? = nil
+    ) {
+        self.key = key
+        self.label = label
+        self.type = type
+        self.required = required
+        self.defaultValue = defaultValue
+        self.options = options
+        self.description = description
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         key = try container.decode(String.self, forKey: .key)
@@ -204,6 +250,25 @@ struct ProviderTemplate: Codable, Identifiable {
         case description
     }
     
+    /// Memberwise initializer for programmatic construction (e.g. tests, mocks).
+    init(
+        service: String,
+        name: String,
+        type: ProviderType,
+        authType: AuthType = .none,
+        oauthScopes: [String]? = nil,
+        configSchema: [ConfigField] = [],
+        description: String = ""
+    ) {
+        self.service = service
+        self.name = name
+        self.type = type
+        self.authType = authType
+        self.oauthScopes = oauthScopes
+        self.configSchema = configSchema
+        self.description = description
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         service = try container.decode(String.self, forKey: .service)
@@ -281,6 +346,19 @@ struct ProviderTestResult: Codable {
         case details
     }
     
+    /// Memberwise initializer for programmatic construction (e.g. tests, mocks).
+    init(
+        success: Bool,
+        message: String,
+        responseTimeMs: Double = 0,
+        details: [String: AnyCodable]? = nil
+    ) {
+        self.success = success
+        self.message = message
+        self.responseTimeMs = responseTimeMs
+        self.details = details
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         success = try container.decode(Bool.self, forKey: .success)
@@ -389,6 +467,29 @@ struct AvailableModel: Codable, Identifiable, Hashable {
         case reasoning
     }
     
+    /// Memberwise initializer for programmatic construction (e.g. tests, mocks).
+    init(
+        id: String,
+        name: String,
+        displayName: String? = nil,
+        launchStage: String? = nil,
+        family: String? = nil,
+        cost: ModelCost? = nil,
+        limits: ModelLimits? = nil,
+        toolCall: Bool? = nil,
+        reasoning: Bool? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.displayName = displayName ?? name
+        self.launchStage = launchStage
+        self.family = family
+        self.cost = cost
+        self.limits = limits
+        self.toolCall = toolCall
+        self.reasoning = reasoning
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -536,7 +637,7 @@ struct UsageRecord: Codable, Identifiable {
     
     /// Format cost as currency
     var formattedCost: String {
-        String(format: "$%.4f", cost)
+        formatCost(cost)
     }
     
     /// Total tokens
@@ -573,7 +674,7 @@ struct UsageSummaryRecord: Codable, Identifiable {
     
     /// Format cost as currency
     var formattedCost: String {
-        String(format: "$%.4f", totalCost)
+        formatCost(totalCost)
     }
     
     /// Total tokens
@@ -624,6 +725,31 @@ struct UsageSummaryResponse: Codable {
     
     /// Format total cost as currency
     var formattedTotalCost: String {
-        String(format: "$%.4f", totalCost)
+        formatCost(totalCost)
+    }
+}
+
+/// Helper function to format costs intelligently
+/// - For costs >= $0.01: Shows 2 decimal places (e.g., "$1.23")
+/// - For costs < $0.01: Shows 4 decimal places (e.g., "$0.0012", "$0.0000")
+/// - For costs < $0.0001 but > 0: Shows in fractional cents (e.g., "0.05¢", "<0.01¢")
+fileprivate func formatCost(_ cost: Double) -> String {
+    if cost >= 0.01 {
+        // Regular amounts: show 2 decimals
+        return String(format: "$%.2f", cost)
+    } else if cost >= 0.0001 {
+        // Small amounts (including zero when displayed in context): show 4 decimals
+        return String(format: "$%.4f", cost)
+    } else if cost > 0 {
+        // Tiny amounts: show in fractional cents
+        let cents = cost * 100
+        if cents >= 0.01 {
+            return String(format: "%.2f¢", cents)
+        } else {
+            return "<0.01¢"
+        }
+    } else {
+        // Zero: show with 4 decimals to maintain precision context
+        return "$0.0000"
     }
 }

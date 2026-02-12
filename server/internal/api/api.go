@@ -136,6 +136,7 @@ type Server struct {
 	gallery        *acp.Gallery
 	contextsAPI    *ContextsAPI
 	providersAPI   *ProvidersAPI
+	mcpServersAPI  *MCPServersAPI
 }
 
 // NewServer creates a new API server
@@ -200,6 +201,12 @@ func NewServer(statusProvider StatusProvider) (*Server, error) {
 		providersAPI = NewProvidersAPI(database, modelsRegistry)
 	}
 
+	// Initialize MCP Servers API (uses same database)
+	var mcpServersAPI *MCPServersAPI
+	if database != nil {
+		mcpServersAPI = NewMCPServersAPI(database)
+	}
+
 	return &Server{
 		socketPath:     socketPath,
 		statusProvider: statusProvider,
@@ -207,6 +214,7 @@ func NewServer(statusProvider StatusProvider) (*Server, error) {
 		gallery:        gallery,
 		contextsAPI:    contextsAPI,
 		providersAPI:   providersAPI,
+		mcpServersAPI:  mcpServersAPI,
 	}, nil
 }
 
@@ -249,6 +257,11 @@ func (s *Server) Start() error {
 	// Register Providers API routes
 	if s.providersAPI != nil {
 		s.providersAPI.RegisterRoutes(mux)
+	}
+
+	// Register MCP Servers API routes
+	if s.mcpServersAPI != nil {
+		s.mcpServersAPI.RegisterRoutes(mux)
 	}
 
 	s.server = &http.Server{Handler: mux}

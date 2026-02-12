@@ -17,6 +17,14 @@ github.com/clipperhouse/uax29/v2 v2.3.0/go.mod h1:Wn1g7MK6OoeDT0vL+Q0SQLDz/KpfsV
 github.com/coder/acp-go-sdk v0.6.3 h1:LsXQytehdjKIYJnoVWON/nf7mqbiarnyuyE3rrjBsXQ=
 github.com/coder/acp-go-sdk v0.6.3/go.mod h1:yKzM/3R9uELp4+nBAwwtkS0aN1FOFjo11CNPy37yFko=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
+github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.5.3 h1:rUgV36cSBjIuBOmd22RdO1nDEc17AguzU/VbQ+DUd7Q=
+github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.5.3/go.mod h1:cp1Qz62eTu4gVb+ZhXuZysRpbZ1lcXmumW6GKjTs518=
+github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.6.1 h1:L0YN2QSHeWftodGVP2CWn7YM3teJta9PCnP3LcxaA+g=
+github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.6.1/go.mod h1:cp1Qz62eTu4gVb+ZhXuZysRpbZ1lcXmumW6GKjTs518=
+github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.6.2 h1:G4tM9HG6bJssGHAmP5IcoxncImBAdTKScwWthY4vkdE=
+github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.6.2/go.mod h1:cp1Qz62eTu4gVb+ZhXuZysRpbZ1lcXmumW6GKjTs518=
+github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.7.0 h1:0pNkQayJy50d6ffhWDhuY/u2JlEk6gv0gqSWJxnoMGc=
+github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.7.0/go.mod h1:cp1Qz62eTu4gVb+ZhXuZysRpbZ1lcXmumW6GKjTs518=
 github.com/fatih/color v1.18.0 h1:S8gINlzdQ840/4pfAwic/ZE0djQEH3wM94VfqLTZcOM=
 github.com/fatih/color v1.18.0/go.mod h1:4FelSpRwEGDpQ12mAdzqdOukCy4u8WUtOY6lkT/6HfU=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=

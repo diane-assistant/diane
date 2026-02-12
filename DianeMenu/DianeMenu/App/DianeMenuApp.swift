@@ -1,10 +1,35 @@
 import SwiftUI
 
+/// App delegate to handle window activation and lifecycle events
+class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Ensure the main window activates on launch
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // When clicking dock icon, show the main window
+        if !flag {
+            // No visible windows, open the main window
+            MainWindowView.openMainWindow()
+        }
+        return true
+    }
+    
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        // Keep the app running (menu bar stays visible) when main window is closed
+        // This is essential for menu bar apps
+        return false
+    }
+}
+
 @main
 struct DianeMenuApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var statusMonitor = StatusMonitor()
     @StateObject private var updateChecker = UpdateChecker()
     @State private var hasStarted = false
+    @Environment(\.openWindow) private var openWindow
     
     private var iconName: String {
         switch statusMonitor.connectionState {
@@ -29,6 +54,43 @@ struct DianeMenuApp: App {
     }
     
     var body: some Scene {
+        // Primary desktop window
+        Window("Diane", id: "main") {
+            MainWindowView()
+                .environmentObject(statusMonitor)
+                .environmentObject(updateChecker)
+                .frame(minWidth: 800, minHeight: 600)
+                .task {
+                    await startServicesIfNeeded()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenMainWindow"))) { _ in
+                    // When notification is received, the window should already be visible
+                    // Just make sure it's frontmost
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+        }
+        .defaultSize(width: 1000, height: 700)
+        .commands {
+            // Replace Cmd+Q to close window instead of quitting
+            CommandGroup(replacing: .appTermination) {
+                Button("Close Window") {
+                    // Close the main window but keep app running
+                    if let window = NSApp.windows.first(where: { $0.title == "Diane" }) {
+                        window.close()
+                    }
+                }
+                .keyboardShortcut("q", modifiers: .command)
+                
+                Divider()
+                
+                Button("Quit Diane") {
+                    exit(0)
+                }
+                .keyboardShortcut("q", modifiers: [.command, .option])
+            }
+        }
+        
+        // Menu bar as secondary quick-access
         MenuBarExtra {
             MenuBarView()
                 .environmentObject(statusMonitor)
@@ -46,11 +108,6 @@ struct DianeMenuApp: App {
                 }
         }
         .menuBarExtraStyle(.window)
-        
-        Settings {
-            SettingsView()
-                .environmentObject(statusMonitor)
-        }
     }
     
     @MainActor

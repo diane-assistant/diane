@@ -30,7 +30,7 @@ private func makeGoCompatibleDecoder() -> JSONDecoder {
 }
 
 /// Client for communicating with Diane via Unix socket
-class DianeClient {
+class DianeClient: DianeClientProtocol {
     private let socketPath: String
     private let session: URLSession
     
@@ -616,6 +616,97 @@ class DianeClient {
         let body: [String: Any] = ["server_name": serverName, "enabled": enabled]
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         _ = try await request("/contexts/\(encodedContext)/servers", method: "POST", body: bodyData)
+    }
+    
+    // MARK: - MCP Server Configuration API
+    
+    /// Get all MCP server configurations
+    func getMCPServerConfigs() async throws -> [MCPServer] {
+        let data = try await request("/mcp-servers-config")
+        return try makeGoCompatibleDecoder().decode([MCPServer].self, from: data)
+    }
+    
+    /// Get a specific MCP server configuration by ID
+    func getMCPServerConfig(id: Int64) async throws -> MCPServer {
+        let data = try await request("/mcp-servers-config/\(id)")
+        return try makeGoCompatibleDecoder().decode(MCPServer.self, from: data)
+    }
+    
+    /// Create a new MCP server configuration
+    func createMCPServerConfig(name: String, type: String, enabled: Bool = true, command: String? = nil, args: [String]? = nil, env: [String: String]? = nil, url: String? = nil, headers: [String: String]? = nil, oauth: OAuthConfig? = nil) async throws -> MCPServer {
+        var body: [String: Any] = [
+            "name": name,
+            "type": type,
+            "enabled": enabled
+        ]
+        if let command = command {
+            body["command"] = command
+        }
+        if let args = args {
+            body["args"] = args
+        }
+        if let env = env {
+            body["env"] = env
+        }
+        if let url = url {
+            body["url"] = url
+        }
+        if let headers = headers {
+            body["headers"] = headers
+        }
+        if let oauth = oauth {
+            body["oauth"] = try? JSONEncoder().encode(oauth)
+        }
+        
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let data = try await request("/mcp-servers-config", method: "POST", body: bodyData)
+        return try makeGoCompatibleDecoder().decode(MCPServer.self, from: data)
+    }
+    
+    /// Update an MCP server configuration
+    func updateMCPServerConfig(id: Int64, name: String? = nil, type: String? = nil, enabled: Bool? = nil, command: String? = nil, args: [String]? = nil, env: [String: String]? = nil, url: String? = nil, headers: [String: String]? = nil, oauth: OAuthConfig? = nil) async throws -> MCPServer {
+        var body: [String: Any] = [:]
+        if let name = name {
+            body["name"] = name
+        }
+        if let type = type {
+            body["type"] = type
+        }
+        if let enabled = enabled {
+            body["enabled"] = enabled
+        }
+        if let command = command {
+            body["command"] = command
+        }
+        if let args = args {
+            body["args"] = args
+        }
+        if let env = env {
+            body["env"] = env
+        }
+        if let url = url {
+            body["url"] = url
+        }
+        if let headers = headers {
+            body["headers"] = headers
+        }
+        if let oauth = oauth {
+            body["oauth"] = try? JSONEncoder().encode(oauth)
+        }
+        
+        guard !body.isEmpty else {
+            // Nothing to update, return current state
+            return try await getMCPServerConfig(id: id)
+        }
+        
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let data = try await request("/mcp-servers-config/\(id)", method: "PUT", body: bodyData)
+        return try makeGoCompatibleDecoder().decode(MCPServer.self, from: data)
+    }
+    
+    /// Delete an MCP server configuration
+    func deleteMCPServerConfig(id: Int64) async throws {
+        _ = try await request("/mcp-servers-config/\(id)", method: "DELETE")
     }
     
     // MARK: - Providers API

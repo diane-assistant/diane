@@ -46,6 +46,26 @@ struct MCPServerStatus: Codable, Identifiable {
         authenticated = try container.decodeIfPresent(Bool.self, forKey: .authenticated) ?? false
     }
     
+    init(
+        name: String,
+        enabled: Bool = true,
+        connected: Bool = true,
+        toolCount: Int = 0,
+        error: String? = nil,
+        builtin: Bool = false,
+        requiresAuth: Bool = false,
+        authenticated: Bool = false
+    ) {
+        self.name = name
+        self.enabled = enabled
+        self.connected = connected
+        self.toolCount = toolCount
+        self.error = error
+        self.builtin = builtin
+        self.requiresAuth = requiresAuth
+        self.authenticated = authenticated
+    }
+    
     /// Returns true if this server needs authentication but isn't authenticated yet
     var needsAuthentication: Bool {
         requiresAuth && !authenticated
@@ -130,7 +150,7 @@ struct DeviceCodeInfo: Codable {
 }
 
 /// Connection state for the UI
-enum ConnectionState {
+enum ConnectionState: Equatable {
     case unknown
     case connected
     case disconnected

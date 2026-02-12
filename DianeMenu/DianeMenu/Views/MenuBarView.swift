@@ -220,6 +220,33 @@ struct MenuBarView: View {
     
     private var statsSection: some View {
         VStack(spacing: 4) {
+            // Open Main Window button
+            Button {
+                // Properly dismiss the menu bar popover
+                dismiss()
+                
+                // Small delay to ensure popover closes before opening window
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    MainWindowView.openMainWindow()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "macwindow")
+                        .font(.subheadline)
+                        .foregroundStyle(.blue)
+                    Text("Open Diane")
+                        .font(.subheadline.weight(.medium))
+                    
+                    Spacer()
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .help("Open Diane main window")
+            
             // Tools row
             Button {
                 // Dismiss the menu bar popover first
@@ -491,9 +518,12 @@ struct MenuBarView: View {
             .help("Check for updates")
             .disabled(updateChecker.isChecking)
             
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
+            Button("Quit Diane") {
+                // Force quit by calling exit() since terminate is intercepted
+                // This is the only way for users to fully quit the app
+                exit(0)
             }
+            .keyboardShortcut("q", modifiers: [.command, .option])
         }
         .font(.subheadline)
     }

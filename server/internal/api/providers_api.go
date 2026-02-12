@@ -12,7 +12,6 @@ import (
 
 	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/models"
-	"github.com/diane-assistant/diane/mcp/tools/files"
 	"github.com/diane-assistant/diane/mcp/tools/google/auth"
 	"golang.org/x/oauth2"
 )
@@ -473,65 +472,12 @@ func (api *ProvidersAPI) testEmbeddingProvider(ctx context.Context, provider *db
 }
 
 func (api *ProvidersAPI) testVertexAI(ctx context.Context, provider *db.Provider) ProviderTestResult {
-	projectID := provider.GetConfigString("project_id")
-	location := provider.GetConfigString("location")
-	model := provider.GetConfigString("model")
-	account := provider.GetAuthString("oauth_account")
-
-	if projectID == "" {
-		return ProviderTestResult{
-			Success: false,
-			Message: "Missing project_id configuration",
-		}
-	}
-
-	if model == "" {
-		model = "text-embedding-005"
-	}
-	if account == "" {
-		account = "default"
-	}
-
-	client, err := files.NewEmbeddingClient(ctx, projectID, location, account)
-	if err != nil {
-		return ProviderTestResult{
-			Success: false,
-			Message: fmt.Sprintf("Failed to create client: %v", err),
-		}
-	}
-
-	client.WithModel(model)
-
-	// Test with a simple embedding request
-	testText := "Hello, this is a test message for embedding verification."
-	embedding, usage, err := client.EmbedTextWithUsage(ctx, testText, files.TaskTypeRetrievalDocument)
-	if err != nil {
-		return ProviderTestResult{
-			Success: false,
-			Message: fmt.Sprintf("Embedding request failed: %v", err),
-		}
-	}
-
-	// Record usage
-	var tokensUsed int
-	if usage != nil {
-		tokensUsed = usage.TotalTokens
-		if tokensUsed > 0 {
-			if err := api.RecordUsage(provider.ID, provider.Service, model, tokensUsed, 0, 0); err != nil {
-				slog.Warn("Failed to record embedding usage", "error", err, "provider_id", provider.ID)
-			}
-		}
-	}
-
+	// Vertex AI embedding testing is no longer available — embeddings are now
+	// handled by the Emergent backend. This test endpoint is retained as a
+	// placeholder until Emergent SDK integration provides its own health check.
 	return ProviderTestResult{
-		Success: true,
-		Message: "Successfully generated embedding",
-		Details: map[string]any{
-			"model":            model,
-			"location":         location,
-			"embedding_length": len(embedding),
-			"tokens_used":      tokensUsed,
-		},
+		Success: false,
+		Message: "Vertex AI embedding testing is deprecated; embeddings are now handled by Emergent",
 	}
 }
 

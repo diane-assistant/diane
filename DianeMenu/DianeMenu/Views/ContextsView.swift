@@ -2,33 +2,11 @@ import SwiftUI
 import AppKit
 
 struct ContextsView: View {
-    @State private var contexts: [Context] = []
-    @State private var selectedContext: Context?
-    @State private var contextDetail: ContextDetail?
-    @State private var isLoading = true
-    @State private var error: String?
+    @State private var viewModel: ContextsViewModel
     
-    // Create context state
-    @State private var showCreateContext = false
-    @State private var newContextName = ""
-    @State private var newContextDescription = ""
-    @State private var isCreating = false
-    @State private var createError: String?
-    
-    // Connection info state
-    @State private var showConnectionInfo = false
-    @State private var connectionInfo: ContextConnectInfo?
-    
-    // Delete confirmation
-    @State private var showDeleteConfirm = false
-    @State private var contextToDelete: Context?
-    
-    // Add server state
-    @State private var showAddServer = false
-    @State private var availableServers: [AvailableServer] = []
-    @State private var isLoadingServers = false
-    
-    private let client = DianeClient()
+    init(viewModel: ContextsViewModel = ContextsViewModel()) {
+        _viewModel = State(initialValue: viewModel)
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -36,45 +14,43 @@ struct ContextsView: View {
             
             Divider()
             
-            if isLoading {
+            if viewModel.isLoading {
                 loadingView
-            } else if let error = error {
+            } else if let error = viewModel.error {
                 errorView(error)
-            } else if contexts.isEmpty {
+            } else if viewModel.contexts.isEmpty {
                 emptyView
             } else {
-                HSplitView {
+                MasterDetailView {
                     contextsListView
-                        .frame(minWidth: 200, idealWidth: 225, maxWidth: 300)
-                    
+                } detail: {
                     detailView
-                        .frame(minWidth: 500, idealWidth: 675)
                 }
             }
         }
         .frame(minWidth: 750, idealWidth: 900, maxWidth: .infinity,
                minHeight: 450, idealHeight: 600, maxHeight: .infinity)
         .task {
-            await loadContexts()
+            await viewModel.loadContexts()
         }
-        .sheet(isPresented: $showCreateContext) {
+        .sheet(isPresented: $viewModel.showCreateContext) {
             createContextSheet
         }
-        .sheet(isPresented: $showConnectionInfo) {
+        .sheet(isPresented: $viewModel.showConnectionInfo) {
             connectionInfoSheet
         }
-        .sheet(isPresented: $showAddServer) {
+        .sheet(isPresented: $viewModel.showAddServer) {
             addServerSheet
         }
-        .alert("Delete Context", isPresented: $showDeleteConfirm) {
+        .alert("Delete Context", isPresented: $viewModel.showDeleteConfirm) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
-                if let context = contextToDelete {
-                    Task { await deleteContext(context) }
+                if let context = viewModel.contextToDelete {
+                    Task { await viewModel.deleteContext(context) }
                 }
             }
         } message: {
-            if let context = contextToDelete {
+            if let context = viewModel.contextToDelete {
                 Text("Are you sure you want to delete '\(context.name)'? This cannot be undone.")
             }
         }
@@ -94,21 +70,21 @@ struct ContextsView: View {
             
             // Create context button
             Button {
-                showCreateContext = true
+                viewModel.showCreateContext = true
             } label: {
                 Label("New Context", systemImage: "plus")
             }
             
             // Refresh button
             Button {
-                Task { await loadContexts() }
+                Task { await viewModel.loadContexts() }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .disabled(isLoading)
+            .disabled(viewModel.isLoading)
             
             // Stats
-            let defaultContext = contexts.first { $0.isDefault }
+            let defaultContext = viewModel.contexts.first { $0.isDefault }
             if let defaultName = defaultContext?.name {
                 Text("Default: \(defaultName)")
                     .font(.caption)
@@ -143,7 +119,7 @@ struct ContextsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("Retry") {
-                Task { await loadContexts() }
+                Task { await viewModel.loadContexts() }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -152,61 +128,38 @@ struct ContextsView: View {
     // MARK: - Empty View
     
     private var emptyView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "square.stack.3d.up")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("No contexts configured")
-                .font(.headline)
-            Text("Create a context to group MCP servers and control tool access")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Button {
-                showCreateContext = true
-            } label: {
-                Label("Create Context", systemImage: "plus")
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "square.stack.3d.up",
+            title: "No contexts configured",
+            description: "Create a context to group MCP servers and control tool access",
+            actionLabel: "Create Context",
+            action: { viewModel.showCreateContext = true }
+        )
     }
     
     // MARK: - Contexts List
     
     private var contextsListView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Section header
-            HStack {
-                Image(systemName: "list.bullet")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Contexts")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(Color(nsColor: .windowBackgroundColor))
+            MasterListHeader(icon: "list.bullet", title: "Contexts")
             
             Divider()
             
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(contexts) { context in
+                    ForEach(viewModel.contexts) { context in
                         ContextRow(
                             context: context,
-                            isSelected: selectedContext?.id == context.id,
+                            isSelected: viewModel.selectedContext?.id == context.id,
                             onSelect: {
-                                selectedContext = context
-                                Task { await loadContextDetail(context.name) }
+                                viewModel.onSelectContext(context)
+                                Task { await viewModel.loadContextDetail(context.name) }
                             },
                             onSetDefault: {
-                                Task { await setDefaultContext(context) }
+                                Task { await viewModel.setDefaultContext(context) }
                             },
                             onDelete: {
-                                contextToDelete = context
-                                showDeleteConfirm = true
+                                viewModel.prepareDeleteContext(context)
                             }
                         )
                         Divider()
@@ -221,7 +174,7 @@ struct ContextsView: View {
     
     private var detailView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let context = selectedContext {
+            if let context = viewModel.selectedContext {
                 // Context detail header
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -257,8 +210,8 @@ struct ContextsView: View {
                         // Connection info button
                         Button {
                             Task {
-                                await loadConnectionInfo(context.name)
-                                showConnectionInfo = true
+                                await viewModel.loadConnectionInfo(context.name)
+                                viewModel.showConnectionInfo = true
                             }
                         } label: {
                             Label("Connect", systemImage: "link")
@@ -267,7 +220,7 @@ struct ContextsView: View {
                         
                         // Sync tools button
                         Button {
-                            Task { await syncTools(context.name) }
+                            Task { await viewModel.syncTools(context.name) }
                         } label: {
                             Label("Sync Tools", systemImage: "arrow.triangle.2.circlepath")
                         }
@@ -276,7 +229,7 @@ struct ContextsView: View {
                     }
                     
                     // Summary stats
-                    if let detail = contextDetail {
+                    if let detail = viewModel.contextDetail {
                         HStack(spacing: 16) {
                             HStack(spacing: 4) {
                                 Image(systemName: "server.rack")
@@ -303,7 +256,7 @@ struct ContextsView: View {
                 Divider()
                 
                 // Servers list
-                if let detail = contextDetail {
+                if let detail = viewModel.contextDetail {
                     serversListView(detail: detail)
                 } else {
                     VStack(spacing: 12) {
@@ -344,11 +297,9 @@ struct ContextsView: View {
                 Spacer()
                 
                 Button {
-                    availableServers = []
-                    isLoadingServers = true
-                    showAddServer = true
+                    viewModel.prepareAddServer()
                     Task {
-                        await loadAvailableServers()
+                        await viewModel.loadAvailableServers()
                     }
                 } label: {
                     Label("Add Server", systemImage: "plus")
@@ -375,11 +326,9 @@ struct ContextsView: View {
                         .foregroundStyle(.secondary)
                     
                     Button {
-                        availableServers = []
-                        isLoadingServers = true
-                        showAddServer = true
+                        viewModel.prepareAddServer()
                         Task {
-                            await loadAvailableServers()
+                            await viewModel.loadAvailableServers()
                         }
                     } label: {
                         Label("Add Server", systemImage: "plus")
@@ -393,11 +342,11 @@ struct ContextsView: View {
                         ForEach(detail.servers) { server in
                             ContextServerRow(
                                 server: server,
-                                contextName: selectedContext?.name ?? "",
-                                client: client,
+                                contextName: viewModel.selectedContext?.name ?? "",
+                                client: viewModel.client,
                                 onUpdate: {
-                                    if let name = selectedContext?.name {
-                                        Task { await loadContextDetail(name) }
+                                    if let name = viewModel.selectedContext?.name {
+                                        Task { await viewModel.loadContextDetail(name) }
                                     }
                                 }
                             )
@@ -420,8 +369,8 @@ struct ContextsView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    showCreateContext = false
-                    resetCreateForm()
+                    viewModel.showCreateContext = false
+                    viewModel.resetCreateForm()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -436,7 +385,7 @@ struct ContextsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Name")
                         .font(.subheadline.weight(.medium))
-                    TextField("e.g., work, personal, dev", text: $newContextName)
+                    TextField("e.g., work, personal, dev", text: $viewModel.newContextName)
                         .textFieldStyle(.roundedBorder)
                     Text("A unique identifier for this context (lowercase, no spaces)")
                         .font(.caption)
@@ -446,11 +395,11 @@ struct ContextsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Description")
                         .font(.subheadline.weight(.medium))
-                    TextField("Optional description", text: $newContextDescription)
+                    TextField("Optional description", text: $viewModel.newContextDescription)
                         .textFieldStyle(.roundedBorder)
                 }
                 
-                if let error = createError {
+                if let error = viewModel.createError {
                     HStack(spacing: 4) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
@@ -469,17 +418,17 @@ struct ContextsView: View {
             // Footer
             HStack {
                 Button("Cancel") {
-                    showCreateContext = false
-                    resetCreateForm()
+                    viewModel.showCreateContext = false
+                    viewModel.resetCreateForm()
                 }
                 .keyboardShortcut(.escape)
                 
                 Spacer()
                 
                 Button {
-                    Task { await createContext() }
+                    Task { await viewModel.createContext() }
                 } label: {
-                    if isCreating {
+                    if viewModel.isCreating {
                         ProgressView()
                             .scaleEffect(0.7)
                     } else {
@@ -487,7 +436,7 @@ struct ContextsView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(newContextName.isEmpty || isCreating)
+                .disabled(viewModel.newContextName.isEmpty || viewModel.isCreating)
                 .keyboardShortcut(.return)
             }
             .padding()
@@ -505,7 +454,7 @@ struct ContextsView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    showConnectionInfo = false
+                    viewModel.showConnectionInfo = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -516,7 +465,7 @@ struct ContextsView: View {
             
             Divider()
             
-            if let info = connectionInfo {
+            if let info = viewModel.connectionInfo {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         // Context name
@@ -617,7 +566,7 @@ struct ContextsView: View {
             HStack {
                 Spacer()
                 Button("Done") {
-                    showConnectionInfo = false
+                    viewModel.showConnectionInfo = false
                 }
                 .keyboardShortcut(.escape)
             }
@@ -628,144 +577,9 @@ struct ContextsView: View {
     
     // MARK: - Actions
     
-    private func loadContexts() async {
-        isLoading = true
-        error = nil
-        
-        do {
-            contexts = try await client.getContexts()
-            // Auto-select first context if none selected
-            if selectedContext == nil, let first = contexts.first {
-                selectedContext = first
-                await loadContextDetail(first.name)
-            }
-        } catch {
-            self.error = error.localizedDescription
-        }
-        
-        isLoading = false
-    }
-    
-    private func loadContextDetail(_ name: String) async {
-        do {
-            contextDetail = try await client.getContextDetail(name: name)
-        } catch {
-            // Silently fail for detail loading
-            contextDetail = nil
-        }
-    }
-    
-    private func loadConnectionInfo(_ name: String) async {
-        connectionInfo = nil
-        do {
-            connectionInfo = try await client.getContextConnectInfo(name: name)
-        } catch {
-            // Silently fail
-        }
-    }
-    
-    private func syncTools(_ name: String) async {
-        do {
-            _ = try await client.syncContextTools(contextName: name)
-            // Reload context detail to show updated tools
-            await loadContextDetail(name)
-        } catch {
-            // Silently fail - could add error display
-        }
-    }
-    
-    private func createContext() async {
-        isCreating = true
-        createError = nil
-        
-        do {
-            let context = try await client.createContext(
-                name: newContextName.lowercased().replacingOccurrences(of: " ", with: "-"),
-                description: newContextDescription.isEmpty ? nil : newContextDescription
-            )
-            contexts = try await client.getContexts()
-            selectedContext = context
-            await loadContextDetail(context.name)
-            showCreateContext = false
-            resetCreateForm()
-        } catch {
-            createError = error.localizedDescription
-        }
-        
-        isCreating = false
-    }
-    
-    private func setDefaultContext(_ context: Context) async {
-        do {
-            try await client.setDefaultContext(name: context.name)
-            contexts = try await client.getContexts()
-            // Update selected context if it was the one we modified
-            if selectedContext?.id == context.id {
-                selectedContext = contexts.first { $0.id == context.id }
-            }
-        } catch {
-            // Show error somehow
-        }
-    }
-    
-    private func deleteContext(_ context: Context) async {
-        do {
-            try await client.deleteContext(name: context.name)
-            contexts = try await client.getContexts()
-            
-            // Clear selection if deleted context was selected
-            if selectedContext?.id == context.id {
-                selectedContext = contexts.first
-                if let first = selectedContext {
-                    await loadContextDetail(first.name)
-                } else {
-                    contextDetail = nil
-                }
-            }
-        } catch {
-            // Show error somehow
-        }
-        contextToDelete = nil
-    }
-    
-    private func resetCreateForm() {
-        newContextName = ""
-        newContextDescription = ""
-        createError = nil
-    }
-    
     private func copyToClipboard(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-    }
-    
-    private func loadAvailableServers() async {
-        guard let contextName = selectedContext?.name else { return }
-        isLoadingServers = true
-        do {
-            availableServers = try await client.getAvailableServers(contextName: contextName)
-            // Sort: servers not in context first, then alphabetically
-            availableServers.sort { a, b in
-                if a.inContext != b.inContext {
-                    return !a.inContext
-                }
-                return a.name < b.name
-            }
-        } catch {
-            availableServers = []
-        }
-        isLoadingServers = false
-    }
-    
-    private func addServer(_ serverName: String) async {
-        guard let contextName = selectedContext?.name else { return }
-        do {
-            try await client.addServerToContext(contextName: contextName, serverName: serverName)
-            await loadAvailableServers()
-            await loadContextDetail(contextName)
-        } catch {
-            // Show error somehow
-        }
     }
     
     // MARK: - Add Server Sheet
@@ -778,7 +592,7 @@ struct ContextsView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    showAddServer = false
+                    viewModel.showAddServer = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -789,7 +603,7 @@ struct ContextsView: View {
             
             Divider()
             
-            if isLoadingServers {
+            if viewModel.isLoadingServers {
                 VStack(spacing: 12) {
                     ProgressView()
                     Text("Loading available servers...")
@@ -797,7 +611,7 @@ struct ContextsView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if availableServers.isEmpty {
+            } else if viewModel.availableServers.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "server.rack")
                         .font(.largeTitle)
@@ -812,7 +626,7 @@ struct ContextsView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(availableServers) { server in
+                        ForEach(viewModel.availableServers) { server in
                             HStack(spacing: 12) {
                                 Image(systemName: server.builtin == true ? "cpu" : "server.rack")
                                     .font(.body)
@@ -854,7 +668,7 @@ struct ContextsView: View {
                                 
                                 if !server.inContext {
                                     Button {
-                                        Task { await addServer(server.name) }
+                                        Task { await viewModel.addServer(server.name) }
                                     } label: {
                                         Text("Add")
                                     }
@@ -875,12 +689,12 @@ struct ContextsView: View {
             
             // Footer
             HStack {
-                Text("\(availableServers.filter { !$0.inContext }.count) servers available")
+                Text("\(viewModel.availableServers.filter { !$0.inContext }.count) servers available")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Done") {
-                    showAddServer = false
+                    viewModel.showAddServer = false
                 }
                 .keyboardShortcut(.escape)
             }
@@ -974,7 +788,7 @@ struct ContextRow: View {
 struct ContextServerRow: View {
     let server: ContextServer
     let contextName: String
-    let client: DianeClient
+    let client: DianeClientProtocol
     let onUpdate: () -> Void
     
     @State private var isExpanded = false

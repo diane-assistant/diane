@@ -121,7 +121,7 @@ func (p *Provider) Tools() []Tool {
 	return []Tool{
 		// Gmail tools
 		{
-			Name:        "google_search_emails",
+			Name:        "gmail_search",
 			Description: "Search Gmail messages using Gmail search syntax. Returns metadata (id, subject, from, date, snippet, labels). For classification workflows, prefer gmail_search_and_fetch which returns the same data but is optimized for batch operations.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -133,7 +133,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_read_email",
+			Name:        "gmail_read",
 			Description: "Get full content of a specific Gmail message by its ID. Returns complete message with body, headers, and attachments info.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -287,8 +287,9 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		// Drive tools
+		// Drive tools
 		{
-			Name:        "google_search_files",
+			Name:        "drive_search",
 			Description: "Search Google Drive for files and folders using query syntax. Returns file metadata including ID, name, mimeType, and shared status.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -300,7 +301,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_list_files",
+			Name:        "drive_list",
 			Description: "List recent files from Google Drive with optional filtering. Simpler than search for basic listing.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -312,7 +313,7 @@ func (p *Provider) Tools() []Tool {
 		},
 		// Sheets tools
 		{
-			Name:        "google_get_sheet",
+			Name:        "sheets_get",
 			Description: "Get data from a Google Sheet range. Returns cell values in JSON format.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -324,7 +325,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_update_sheet",
+			Name:        "sheets_update",
 			Description: "Update data in a Google Sheet range. Overwrites existing values.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -337,7 +338,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_append_sheet",
+			Name:        "sheets_append",
 			Description: "Append data to a Google Sheet. Adds new rows at the end of the range.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -350,7 +351,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_clear_sheet",
+			Name:        "sheets_clear",
 			Description: "Clear data from a Google Sheet range without deleting the cells.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -362,7 +363,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_get_sheet_metadata",
+			Name:        "sheets_get_metadata",
 			Description: "Get metadata about a Google Sheet including sheet tabs, properties, and structure.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -374,7 +375,7 @@ func (p *Provider) Tools() []Tool {
 		},
 		// Calendar tools
 		{
-			Name:        "google_list_calendars",
+			Name:        "calendar_list",
 			Description: "List all calendars for a Google account",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -384,7 +385,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_list_events",
+			Name:        "calendar_list_events",
 			Description: "List events from a Google Calendar with flexible time filtering",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -404,7 +405,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_get_event",
+			Name:        "calendar_get_event",
 			Description: "Get details of a specific calendar event",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -416,7 +417,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_create_event",
+			Name:        "calendar_create_event",
 			Description: "Create a new event in Google Calendar",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -438,7 +439,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_update_event",
+			Name:        "calendar_update_event",
 			Description: "Update an existing calendar event",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -455,7 +456,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_delete_event",
+			Name:        "calendar_delete_event",
 			Description: "Delete a calendar event",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -467,7 +468,7 @@ func (p *Provider) Tools() []Tool {
 			),
 		},
 		{
-			Name:        "google_check_freebusy",
+			Name:        "calendar_check_freebusy",
 			Description: "Check free/busy status for one or more calendars",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -496,9 +497,9 @@ func (p *Provider) HasTool(name string) bool {
 func (p *Provider) Call(name string, args map[string]interface{}) (interface{}, error) {
 	switch name {
 	// Gmail
-	case "google_search_emails":
+	case "gmail_search":
 		return p.searchEmails(args)
-	case "google_read_email":
+	case "gmail_read":
 		return p.readEmail(args)
 	case "gmail_batch_get_messages":
 		return p.batchGetMessages(args)
@@ -527,35 +528,35 @@ func (p *Provider) Call(name string, args map[string]interface{}) (interface{}, 
 	case "gmail_batch_label_by_query":
 		return p.gmailBatchLabelByQuery(args)
 	// Drive
-	case "google_search_files":
+	case "drive_search":
 		return p.searchFiles(args)
-	case "google_list_files":
+	case "drive_list":
 		return p.listFiles(args)
 	// Sheets
-	case "google_get_sheet":
+	case "sheets_get":
 		return p.getSheet(args)
-	case "google_update_sheet":
+	case "sheets_update":
 		return p.updateSheet(args)
-	case "google_append_sheet":
+	case "sheets_append":
 		return p.appendSheet(args)
-	case "google_clear_sheet":
+	case "sheets_clear":
 		return p.clearSheet(args)
-	case "google_get_sheet_metadata":
+	case "sheets_get_metadata":
 		return p.getSheetMetadata(args)
 	// Calendar
-	case "google_list_calendars":
+	case "calendar_list":
 		return p.listCalendars(args)
-	case "google_list_events":
+	case "calendar_list_events":
 		return p.listEvents(args)
-	case "google_get_event":
+	case "calendar_get_event":
 		return p.getEvent(args)
-	case "google_create_event":
+	case "calendar_create_event":
 		return p.createEvent(args)
-	case "google_update_event":
+	case "calendar_update_event":
 		return p.updateEvent(args)
-	case "google_delete_event":
+	case "calendar_delete_event":
 		return p.deleteEvent(args)
-	case "google_check_freebusy":
+	case "calendar_check_freebusy":
 		return p.checkFreebusy(args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)

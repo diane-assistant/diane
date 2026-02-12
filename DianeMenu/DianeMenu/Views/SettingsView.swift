@@ -75,7 +75,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 450, height: 400)
+        .navigationTitle("Settings")
     }
     
     private func updateLaunchAtLogin(_ enabled: Bool) {

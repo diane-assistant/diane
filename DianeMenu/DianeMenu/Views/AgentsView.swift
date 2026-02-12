@@ -2,35 +2,11 @@ import SwiftUI
 import AppKit
 
 struct AgentsView: View {
-    @State private var agents: [AgentConfig] = []
-    @State private var logs: [AgentLog] = []
-    @State private var isLoading = true
-    @State private var error: String?
-    @State private var selectedAgent: AgentConfig?
-    @State private var testResults: [String: AgentTestResult] = [:]
-    @State private var testPrompt = ""
-    @State private var isRunningPrompt = false
-    @State private var promptResult: AgentRunResult?
+    @State private var viewModel: AgentsViewModel
     
-    // Remote agents state
-    @State private var remoteAgents: [RemoteAgentInfo] = []
-    @State private var isLoadingRemoteAgents = false
-    @State private var remoteAgentsError: String?
-    @State private var selectedSubAgent: String = ""
-    @State private var isSavingSubAgent = false
-    
-    // Gallery state
-    @State private var showAddAgent = false
-    @State private var galleryEntries: [GalleryEntry] = []
-    @State private var isLoadingGallery = false
-    @State private var selectedGalleryEntry: GalleryEntry?
-    @State private var newAgentName = ""
-    @State private var newAgentWorkdir = ""
-    @State private var newAgentPort = ""
-    @State private var isInstalling = false
-    @State private var installError: String?
-    
-    private let client = DianeClient()
+    init(viewModel: AgentsViewModel = AgentsViewModel()) {
+        _viewModel = State(initialValue: viewModel)
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -38,26 +14,24 @@ struct AgentsView: View {
             
             Divider()
             
-            if isLoading {
+            if viewModel.isLoading {
                 loadingView
-            } else if let error = error {
+            } else if let error = viewModel.error {
                 errorView(error)
-            } else if agents.isEmpty {
+            } else if viewModel.agents.isEmpty {
                 emptyView
             } else {
-                HSplitView {
+                MasterDetailView {
                     agentsListView
-                        .frame(minWidth: 300, idealWidth: 400)
-                    
+                } detail: {
                     detailView
-                        .frame(minWidth: 350, idealWidth: 500)
                 }
             }
         }
         .frame(minWidth: 750, idealWidth: 950, maxWidth: .infinity,
                minHeight: 450, idealHeight: 650, maxHeight: .infinity)
         .task {
-            await loadData()
+            await viewModel.loadData()
         }
     }
     
@@ -75,28 +49,28 @@ struct AgentsView: View {
             
             // Add Agent button
             Button {
-                showAddAgent = true
-                Task { await loadGallery() }
+                viewModel.showAddAgent = true
+                Task { await viewModel.loadGallery() }
             } label: {
                 Label("Add Agent", systemImage: "plus")
             }
             
             // Refresh button
             Button {
-                Task { await loadData() }
+                Task { await viewModel.loadData() }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .disabled(isLoading)
+            .disabled(viewModel.isLoading)
             
             // Stats
-            let enabledCount = agents.filter { $0.enabled }.count
-            Text("\(enabledCount)/\(agents.count) enabled")
+            let enabledCount = viewModel.agents.filter { $0.enabled }.count
+            Text("\(enabledCount)/\(viewModel.agents.count) enabled")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding()
-        .sheet(isPresented: $showAddAgent) {
+        .sheet(isPresented: $viewModel.showAddAgent) {
             addAgentSheet
         }
     }
@@ -126,7 +100,7 @@ struct AgentsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("Retry") {
-                Task { await loadData() }
+                Task { await viewModel.loadData() }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -135,63 +109,46 @@ struct AgentsView: View {
     // MARK: - Empty View
     
     private var emptyView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "person.3")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("No agents configured")
-                .font(.headline)
-            Text("Use the gallery to add agents:")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        EmptyStateView(
+            icon: "person.3",
+            title: "No agents configured",
+            description: "Use the gallery to add agents:"
+        ) {
             Text("./scripts/acp-gallery.sh install gemini")
                 .font(.system(.caption, design: .monospaced))
-                .padding(8)
+                .padding(Padding.small)
                 .background(Color(nsColor: .textBackgroundColor))
-                .cornerRadius(6)
+                .cornerRadius(CornerRadius.medium)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     // MARK: - Agents List
     
     private var agentsListView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Section header
-            HStack {
-                Image(systemName: "list.bullet")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Configured Agents")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(Color(nsColor: .windowBackgroundColor))
+            MasterListHeader(icon: "list.bullet", title: "Configured Agents")
             
             Divider()
             
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(agents) { agent in
+                    ForEach(viewModel.agents) { agent in
                         AgentRow(
                             agent: agent,
-                            testResult: testResults[agent.name],
-                            isSelected: selectedAgent?.name == agent.name,
+                            testResult: viewModel.testResults[agent.name],
+                            isSelected: viewModel.selectedAgent?.name == agent.name,
                             onTest: {
-                                Task { await testAgent(agent) }
+                                Task { await viewModel.testAgent(agent) }
                             },
                             onToggle: { enabled in
-                                Task { await toggleAgent(agent, enabled: enabled) }
+                                Task { await viewModel.toggleAgent(agent, enabled: enabled) }
                             },
                             onSelect: {
-                                selectedAgent = agent
-                                promptResult = nil
-                                Task { await loadLogs(forAgent: agent.name) }
+                                viewModel.onSelectAgent(agent)
+                                Task { await viewModel.loadLogs(forAgent: agent.name) }
                             },
                             onRemove: {
-                                Task { await removeAgent(name: agent.name) }
+                                Task { await viewModel.removeAgent(name: agent.name) }
                             }
                         )
                         Divider()
@@ -206,7 +163,7 @@ struct AgentsView: View {
     
     private var detailView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let agent = selectedAgent {
+            if let agent = viewModel.selectedAgent {
                 // Agent detail header
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -231,7 +188,7 @@ struct AgentsView: View {
                         Spacer()
                         
                         // Status badge
-                        if let result = testResults[agent.name] {
+                        if let result = viewModel.testResults[agent.name] {
                             statusBadge(for: result)
                         }
                     }
@@ -273,7 +230,7 @@ struct AgentsView: View {
                 }
                 
                 // Connection error section
-                if let result = testResults[agent.name], let error = result.error {
+                if let result = viewModel.testResults[agent.name], let error = result.error {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle.fill")
@@ -282,7 +239,7 @@ struct AgentsView: View {
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
                             Button {
-                                Task { await testAgent(agent) }
+                                Task { await viewModel.testAgent(agent) }
                             } label: {
                                 Label("Retry", systemImage: "arrow.clockwise")
                                     .font(.caption)
@@ -341,9 +298,9 @@ struct AgentsView: View {
                 Spacer()
                 
                 Button {
-                    Task { await loadRemoteAgents(for: agent) }
+                    Task { await viewModel.loadRemoteAgents(for: agent) }
                 } label: {
-                    if isLoadingRemoteAgents {
+                    if viewModel.isLoadingRemoteAgents {
                         ProgressView()
                             .scaleEffect(0.6)
                     } else {
@@ -352,10 +309,10 @@ struct AgentsView: View {
                     }
                 }
                 .buttonStyle(.bordered)
-                .disabled(isLoadingRemoteAgents || !agent.enabled)
+                .disabled(viewModel.isLoadingRemoteAgents || !agent.enabled)
             }
             
-            if let error = remoteAgentsError {
+            if let error = viewModel.remoteAgentsError {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
@@ -365,13 +322,13 @@ struct AgentsView: View {
                 }
             }
             
-            if remoteAgents.isEmpty {
+            if viewModel.remoteAgents.isEmpty {
                 Text("Click 'Discover' to find available sub-agents from this ACP server")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
                 // Show config options as pickers
-                ForEach(remoteAgents) { remoteAgent in
+                ForEach(viewModel.remoteAgents) { remoteAgent in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(remoteAgent.name)
                             .font(.caption.weight(.medium))
@@ -384,7 +341,7 @@ struct AgentsView: View {
                         
                         if let options = remoteAgent.options, !options.isEmpty {
                             HStack {
-                                Picker("", selection: $selectedSubAgent) {
+                                Picker("", selection: $viewModel.selectedSubAgent) {
                                     Text("Default").tag("")
                                     ForEach(options, id: \.self) { option in
                                         Text(option).tag(option)
@@ -394,15 +351,15 @@ struct AgentsView: View {
                                 .frame(maxWidth: 200)
                                 .labelsHidden()
                                 
-                                if isSavingSubAgent {
+                                if viewModel.isSavingSubAgent {
                                     ProgressView()
                                         .scaleEffect(0.6)
                                 } else {
                                     Button("Save") {
-                                        Task { await saveSubAgent(for: agent) }
+                                        Task { await viewModel.saveSubAgent(for: agent) }
                                     }
                                     .buttonStyle(.borderedProminent)
-                                    .disabled(selectedSubAgent == (agent.subAgent ?? ""))
+                                    .disabled(viewModel.selectedSubAgent == (agent.subAgent ?? ""))
                                 }
                             }
                         }
@@ -416,14 +373,10 @@ struct AgentsView: View {
         .padding()
         .background(Color.blue.opacity(0.03))
         .onAppear {
-            selectedSubAgent = agent.subAgent ?? ""
+            viewModel.selectedSubAgent = agent.subAgent ?? ""
         }
-        .onChange(of: selectedAgent) { _ in
-            remoteAgents = []
-            remoteAgentsError = nil
-            if let agent = selectedAgent {
-                selectedSubAgent = agent.subAgent ?? ""
-            }
+        .onChange(of: viewModel.selectedAgent) { _ in
+            viewModel.onSelectedAgentChanged()
         }
     }
     
@@ -441,25 +394,25 @@ struct AgentsView: View {
             }
             
             HStack(spacing: 8) {
-                TextField("Enter a prompt...", text: $testPrompt)
+                TextField("Enter a prompt...", text: $viewModel.testPrompt)
                     .textFieldStyle(.roundedBorder)
                 
                 Button {
-                    Task { await runPrompt(agent: agent) }
+                    Task { await viewModel.runPrompt(agent: agent) }
                 } label: {
-                    if isRunningPrompt {
+                    if viewModel.isRunningPrompt {
                         ProgressView()
                             .scaleEffect(0.7)
                     } else {
                         Image(systemName: "paperplane.fill")
                     }
                 }
-                .disabled(testPrompt.isEmpty || isRunningPrompt || !agent.enabled)
+                .disabled(viewModel.testPrompt.isEmpty || viewModel.isRunningPrompt || !agent.enabled)
                 .buttonStyle(.borderedProminent)
             }
             
             // Result display
-            if let result = promptResult {
+            if let result = viewModel.promptResult {
                 VStack(alignment: .leading, spacing: 4) {
                     if let error = result.error {
                         HStack(spacing: 4) {
@@ -511,7 +464,7 @@ struct AgentsView: View {
                 Spacer()
                 
                 Button {
-                    Task { await loadLogs(forAgent: agent.name) }
+                    Task { await viewModel.loadLogs(forAgent: agent.name) }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.caption)
@@ -524,7 +477,7 @@ struct AgentsView: View {
             
             Divider()
             
-            if logs.isEmpty {
+            if viewModel.logs.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.title2)
@@ -537,7 +490,7 @@ struct AgentsView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(logs) { log in
+                        ForEach(viewModel.logs) { log in
                             LogRow(log: log)
                             Divider()
                                 .padding(.leading, 16)
@@ -574,193 +527,6 @@ struct AgentsView: View {
         }
     }
     
-    // MARK: - Actions
-    
-    private func loadData() async {
-        isLoading = true
-        error = nil
-        
-        do {
-            agents = try await client.getAgents()
-            
-            // Auto-test enabled agents in the background
-            for agent in agents where agent.enabled {
-                Task {
-                    await testAgent(agent)
-                }
-            }
-        } catch {
-            self.error = error.localizedDescription
-        }
-        
-        isLoading = false
-    }
-    
-    private func loadLogs(forAgent agentName: String) async {
-        do {
-            logs = try await client.getAgentLogs(agentName: agentName, limit: 100)
-        } catch {
-            // Silently fail for log refresh
-            logs = []
-        }
-    }
-    
-    private func testAgent(_ agent: AgentConfig) async {
-        do {
-            let result = try await client.testAgent(name: agent.name)
-            testResults[agent.name] = result
-        } catch {
-            testResults[agent.name] = AgentTestResult(
-                name: agent.name,
-                url: agent.url,
-                workdir: agent.workdir,
-                enabled: agent.enabled,
-                status: "error",
-                error: error.localizedDescription,
-                version: nil,
-                agentCount: nil,
-                agents: nil
-            )
-        }
-    }
-    
-    private func toggleAgent(_ agent: AgentConfig, enabled: Bool) async {
-        do {
-            try await client.toggleAgent(name: agent.name, enabled: enabled)
-            agents = try await client.getAgents()
-        } catch {
-            // Show error somehow
-        }
-    }
-    
-    private func loadRemoteAgents(for agent: AgentConfig) async {
-        isLoadingRemoteAgents = true
-        remoteAgentsError = nil
-        
-        do {
-            remoteAgents = try await client.getRemoteAgents(agentName: agent.name)
-            if remoteAgents.isEmpty {
-                remoteAgentsError = "No configurable sub-agents found"
-            }
-        } catch {
-            remoteAgentsError = error.localizedDescription
-            remoteAgents = []
-        }
-        
-        isLoadingRemoteAgents = false
-    }
-    
-    private func saveSubAgent(for agent: AgentConfig) async {
-        isSavingSubAgent = true
-        
-        do {
-            try await client.updateAgent(name: agent.name, subAgent: selectedSubAgent)
-            // Refresh agents list to get updated config
-            agents = try await client.getAgents()
-            // Update selected agent if it's the same one
-            if let updated = agents.first(where: { $0.name == agent.name }) {
-                selectedAgent = updated
-            }
-        } catch {
-            remoteAgentsError = "Failed to save: \(error.localizedDescription)"
-        }
-        
-        isSavingSubAgent = false
-    }
-    
-    private func runPrompt(agent: AgentConfig) async {
-        isRunningPrompt = true
-        promptResult = nil
-        
-        do {
-            promptResult = try await client.runAgentPrompt(agentName: agent.name, prompt: testPrompt)
-        } catch {
-            promptResult = AgentRunResult(
-                agentName: agent.name,
-                sessionId: nil,
-                runId: UUID().uuidString,
-                status: "failed",
-                awaitRequest: nil,
-                output: [],
-                error: AgentError(code: "client_error", message: error.localizedDescription, data: nil),
-                createdAt: Date(),
-                finishedAt: Date()
-            )
-        }
-        
-        isRunningPrompt = false
-        
-        // Refresh logs after running
-        if let agentName = selectedAgent?.name {
-            await loadLogs(forAgent: agentName)
-        }
-    }
-    
-    // MARK: - Gallery Methods
-    
-    private func loadGallery() async {
-        isLoadingGallery = true
-        
-        do {
-            galleryEntries = try await client.getGallery(featured: false)
-        } catch {
-            galleryEntries = []
-        }
-        
-        isLoadingGallery = false
-    }
-    
-    private func installAgent() async {
-        guard let entry = selectedGalleryEntry else { return }
-        
-        isInstalling = true
-        installError = nil
-        
-        do {
-            let name = newAgentName.isEmpty ? nil : newAgentName
-            let workdir = newAgentWorkdir.isEmpty ? nil : newAgentWorkdir
-            let port = Int(newAgentPort)
-            
-            let result = try await client.installGalleryAgent(id: entry.id, name: name, workdir: workdir, port: port)
-            
-            // Refresh agents list
-            agents = try await client.getAgents()
-            
-            // Auto-test the newly installed agent
-            let agentName = result.agent
-            Task {
-                if let agent = agents.first(where: { $0.name == agentName }) {
-                    await testAgent(agent)
-                }
-            }
-            
-            // Reset and close sheet
-            selectedGalleryEntry = nil
-            newAgentName = ""
-            newAgentWorkdir = ""
-            newAgentPort = ""
-            showAddAgent = false
-        } catch {
-            installError = error.localizedDescription
-        }
-        
-        isInstalling = false
-    }
-    
-    private func removeAgent(name: String) async {
-        do {
-            try await client.removeAgent(name: name)
-            agents = try await client.getAgents()
-            
-            // Clear selection if removed agent was selected
-            if selectedAgent?.name == name {
-                selectedAgent = nil
-            }
-        } catch {
-            // TODO: Show error
-        }
-    }
-    
     // MARK: - Add Agent Sheet
     
     private var addAgentSheet: some View {
@@ -771,7 +537,7 @@ struct AgentsView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    showAddAgent = false
+                    viewModel.showAddAgent = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -782,7 +548,7 @@ struct AgentsView: View {
             
             Divider()
             
-            if isLoadingGallery {
+            if viewModel.isLoadingGallery {
                 VStack(spacing: 12) {
                     ProgressView()
                     Text("Loading gallery...")
@@ -790,7 +556,7 @@ struct AgentsView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if galleryEntries.isEmpty {
+            } else if viewModel.galleryEntries.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "tray")
                         .font(.largeTitle)
@@ -802,8 +568,8 @@ struct AgentsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // Gallery list
-                List(galleryEntries, selection: $selectedGalleryEntry) { entry in
-                    GalleryEntryRow(entry: entry, isSelected: selectedGalleryEntry?.id == entry.id)
+                List(viewModel.galleryEntries, selection: $viewModel.selectedGalleryEntry) { entry in
+                    GalleryEntryRow(entry: entry, isSelected: viewModel.selectedGalleryEntry?.id == entry.id)
                         .tag(entry)
                 }
                 .listStyle(.inset)
@@ -811,7 +577,7 @@ struct AgentsView: View {
                 Divider()
                 
                 // Configuration section
-                if let entry = selectedGalleryEntry {
+                if let entry = viewModel.selectedGalleryEntry {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Configuration")
                             .font(.subheadline.weight(.semibold))
@@ -819,21 +585,21 @@ struct AgentsView: View {
                         HStack {
                             Text("Name:")
                                 .frame(width: 70, alignment: .trailing)
-                            TextField("Leave empty for default", text: $newAgentName)
+                            TextField("Leave empty for default", text: $viewModel.newAgentName)
                                 .textFieldStyle(.roundedBorder)
                         }
                         
                         HStack {
                             Text("Workdir:")
                                 .frame(width: 70, alignment: .trailing)
-                            TextField("Optional working directory", text: $newAgentWorkdir)
+                            TextField("Optional working directory", text: $viewModel.newAgentWorkdir)
                                 .textFieldStyle(.roundedBorder)
                         }
                         
                         HStack {
                             Text("Port:")
                                 .frame(width: 70, alignment: .trailing)
-                            TextField("e.g. 4322 for ACP agents", text: $newAgentPort)
+                            TextField("e.g. 4322 for ACP agents", text: $viewModel.newAgentPort)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 150)
                             Spacer()
@@ -850,7 +616,7 @@ struct AgentsView: View {
                         }
                         
                         // Show install error if any
-                        if let error = installError {
+                        if let error = viewModel.installError {
                             HStack(spacing: 4) {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .foregroundStyle(.red)
@@ -869,16 +635,16 @@ struct AgentsView: View {
             // Footer
             HStack {
                 Button("Cancel") {
-                    showAddAgent = false
+                    viewModel.showAddAgent = false
                 }
                 .keyboardShortcut(.escape)
                 
                 Spacer()
                 
                 Button {
-                    Task { await installAgent() }
+                    Task { await viewModel.installAgent() }
                 } label: {
-                    if isInstalling {
+                    if viewModel.isInstalling {
                         ProgressView()
                             .scaleEffect(0.7)
                     } else {
@@ -886,7 +652,7 @@ struct AgentsView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(selectedGalleryEntry == nil || isInstalling)
+                .disabled(viewModel.selectedGalleryEntry == nil || viewModel.isInstalling)
                 .keyboardShortcut(.return)
             }
             .padding()

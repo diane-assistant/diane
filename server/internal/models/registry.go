@@ -224,6 +224,7 @@ func (r *Registry) GetProvider(providerID string) (Provider, bool) {
 }
 
 // GetModel returns a model by provider ID and model ID
+// If exact match isn't found, tries to strip version suffixes (e.g., -001, -002)
 func (r *Registry) GetModel(providerID, modelID string) (Model, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -231,8 +232,21 @@ func (r *Registry) GetModel(providerID, modelID string) (Model, bool) {
 	if !ok {
 		return Model{}, false
 	}
-	m, ok := p.Models[modelID]
-	return m, ok
+
+	// Try exact match first
+	if m, ok := p.Models[modelID]; ok {
+		return m, true
+	}
+
+	// Try without version suffix (e.g., gemini-2.0-flash-001 -> gemini-2.0-flash)
+	modelIDWithoutVersion := stripVersionSuffix(modelID)
+	if modelIDWithoutVersion != modelID {
+		if m, ok := p.Models[modelIDWithoutVersion]; ok {
+			return m, true
+		}
+	}
+
+	return Model{}, false
 }
 
 // ListProviders returns all provider IDs
@@ -291,4 +305,43 @@ func GetProviderIDForService(service string) string {
 		return id
 	}
 	return service
+}
+
+// stripVersionSuffix removes version suffixes like -001, -002, -v1, -v2 from model IDs
+// Examples: gemini-2.0-flash-001 -> gemini-2.0-flash
+//
+//	gpt-4-0125-preview -> gpt-4-0125-preview (no change, not a simple version)
+func stripVersionSuffix(modelID string) string {
+	// Common version suffix patterns: -NNN (e.g., -001, -002)
+	// Look for pattern: -\d{3,4}$ at the end
+	if len(modelID) < 4 {
+		return modelID
+	}
+
+	// Check if ends with -XXX where XXX is 3-4 digits
+	for suffixLen := 3; suffixLen <= 4; suffixLen++ {
+		if len(modelID) > suffixLen+1 {
+			suffix := modelID[len(modelID)-suffixLen:]
+			dash := modelID[len(modelID)-suffixLen-1]
+
+			if dash == '-' && isAllDigits(suffix) {
+				return modelID[:len(modelID)-suffixLen-1]
+			}
+		}
+	}
+
+	return modelID
+}
+
+// isAllDigits checks if a string contains only digits
+func isAllDigits(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }

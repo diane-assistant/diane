@@ -1,51 +1,32 @@
 import SwiftUI
 
 struct UsageView: View {
-    @State private var usageSummary: UsageSummaryResponse?
-    @State private var recentUsage: UsageResponse?
-    @State private var isLoading = true
-    @State private var error: String?
-    @State private var selectedTimeRange: TimeRange = .month
-    
-    private let client = DianeClient()
-    
-    enum TimeRange: String, CaseIterable {
-        case day = "24 Hours"
-        case week = "7 Days"
-        case month = "30 Days"
-        case year = "1 Year"
-        
-        var from: Date {
-            let now = Date()
-            switch self {
-            case .day: return Calendar.current.date(byAdding: .day, value: -1, to: now) ?? now
-            case .week: return Calendar.current.date(byAdding: .day, value: -7, to: now) ?? now
-            case .month: return Calendar.current.date(byAdding: .month, value: -1, to: now) ?? now
-            case .year: return Calendar.current.date(byAdding: .year, value: -1, to: now) ?? now
-            }
-        }
+    @State private var viewModel: UsageViewModel
+
+    init(viewModel: UsageViewModel = UsageViewModel()) {
+        _viewModel = State(initialValue: viewModel)
     }
-    
+
     var body: some View {
         VStack(spacing: 0) {
             headerView
             
             Divider()
             
-            if isLoading {
+            if viewModel.isLoading {
                 loadingView
-            } else if let error = error {
+            } else if let error = viewModel.error {
                 errorView(error)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         summaryCardsView
                         
-                        if let summary = usageSummary, !summary.summary.isEmpty {
+                        if let summary = viewModel.usageSummary, !summary.summary.isEmpty {
                             usageBreakdownView(summary)
                         }
                         
-                        if let recent = recentUsage, !recent.records.isEmpty {
+                        if let recent = viewModel.recentUsage, !recent.records.isEmpty {
                             recentActivityView(recent)
                         }
                     }
@@ -56,10 +37,10 @@ struct UsageView: View {
         .frame(minWidth: 600, idealWidth: 700, maxWidth: .infinity,
                minHeight: 400, idealHeight: 500, maxHeight: .infinity)
         .task {
-            await loadData()
+            await viewModel.loadData()
         }
-        .onChange(of: selectedTimeRange) { _, _ in
-            Task { await loadData() }
+        .onChange(of: viewModel.selectedTimeRange) { _, _ in
+            Task { await viewModel.loadData() }
         }
     }
     
@@ -75,20 +56,15 @@ struct UsageView: View {
             
             Spacer()
             
-            Picker("Time Range", selection: $selectedTimeRange) {
-                ForEach(TimeRange.allCases, id: \.self) { range in
-                    Text(range.rawValue).tag(range)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 300)
+            TimeRangePicker(selection: $viewModel.selectedTimeRange)
+                .frame(width: 300)
             
             Button {
-                Task { await loadData() }
+                Task { await viewModel.loadData() }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .disabled(isLoading)
+            .disabled(viewModel.isLoading)
         }
         .padding()
     }
@@ -118,7 +94,7 @@ struct UsageView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("Retry") {
-                Task { await loadData() }
+                Task { await viewModel.loadData() }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -130,28 +106,28 @@ struct UsageView: View {
         HStack(spacing: 16) {
             SummaryCard(
                 title: "Total Cost",
-                value: usageSummary?.formattedTotalCost ?? "$0.00",
+                value: viewModel.usageSummary?.formattedTotalCost ?? "$0.00",
                 icon: "dollarsign.circle",
                 color: .green
             )
             
             SummaryCard(
                 title: "Total Requests",
-                value: "\(usageSummary?.summary.reduce(0) { $0 + $1.totalRequests } ?? 0)",
+                value: "\(viewModel.totalRequests)",
                 icon: "arrow.up.arrow.down",
                 color: .blue
             )
             
             SummaryCard(
                 title: "Total Tokens",
-                value: formatTokens(usageSummary?.summary.reduce(0) { $0 + $1.totalTokens } ?? 0),
+                value: UsageViewModel.formatTokens(viewModel.totalTokens),
                 icon: "text.word.spacing",
                 color: .purple
             )
             
             SummaryCard(
                 title: "Providers",
-                value: "\(Set(usageSummary?.summary.map { $0.providerID } ?? []).count)",
+                value: "\(viewModel.providerCount)",
                 icon: "cpu",
                 color: .orange
             )
@@ -222,7 +198,7 @@ struct UsageView: View {
                             .frame(minWidth: 120, alignment: .leading)
                             .lineLimit(1)
                         Spacer()
-                        Text(formatTokens(record.totalTokens))
+                        Text(UsageViewModel.formatTokens(record.totalTokens))
                             .frame(width: 80, alignment: .trailing)
                         Text(record.formattedCost)
                             .frame(width: 70, alignment: .trailing)
@@ -240,63 +216,6 @@ struct UsageView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(8)
         }
-    }
-    
-    // MARK: - Helpers
-    
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000.0)
-        } else if count >= 1_000 {
-            return String(format: "%.1fK", Double(count) / 1_000.0)
-        }
-        return "\(count)"
-    }
-    
-    private func loadData() async {
-        isLoading = true
-        error = nil
-        
-        do {
-            async let summaryTask = client.getUsageSummary(from: selectedTimeRange.from)
-            async let recentTask = client.getUsage(from: selectedTimeRange.from, limit: 50)
-            
-            let (loadedSummary, loadedRecent) = try await (summaryTask, recentTask)
-            usageSummary = loadedSummary
-            recentUsage = loadedRecent
-        } catch {
-            self.error = error.localizedDescription
-        }
-        
-        isLoading = false
-    }
-}
-
-// MARK: - Summary Card
-
-struct SummaryCard: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: icon)
-                    .foregroundStyle(color)
-                Text(title)
-                    .foregroundStyle(.secondary)
-            }
-            .font(.caption)
-            
-            Text(value)
-                .font(.title2.weight(.semibold))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(8)
     }
 }
 

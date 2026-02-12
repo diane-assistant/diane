@@ -1,44 +1,13 @@
 import SwiftUI
 
 struct ToolsBrowserView: View {
-    @State private var tools: [ToolInfo] = []
-    @State private var isLoading = true
-    @State private var error: String?
-    @State private var searchText = ""
-    @State private var selectedServer: String?
-    
-    private let client = DianeClient()
-    
-    private var servers: [String] {
-        Array(Set(tools.map { $0.server })).sorted()
+    @EnvironmentObject var statusMonitor: StatusMonitor
+    @State private var viewModel: ToolsBrowserViewModel
+
+    init(viewModel: ToolsBrowserViewModel = ToolsBrowserViewModel()) {
+        _viewModel = State(initialValue: viewModel)
     }
-    
-    private var filteredTools: [ToolInfo] {
-        var result = tools
-        
-        // Filter by server
-        if let server = selectedServer {
-            result = result.filter { $0.server == server }
-        }
-        
-        // Filter by search text
-        if !searchText.isEmpty {
-            result = result.filter {
-                $0.name.localizedCaseInsensitiveContains(searchText) ||
-                $0.description.localizedCaseInsensitiveContains(searchText)
-            }
-        }
-        
-        return result
-    }
-    
-    private var groupedTools: [(server: String, tools: [ToolInfo])] {
-        let grouped = Dictionary(grouping: filteredTools) { $0.server }
-        return grouped.keys.sorted().map { server in
-            (server: server, tools: grouped[server]!.sorted { $0.name < $1.name })
-        }
-    }
-    
+
     var body: some View {
         VStack(spacing: 0) {
             // Header with search and filter
@@ -46,11 +15,11 @@ struct ToolsBrowserView: View {
             
             Divider()
             
-            if isLoading {
+            if viewModel.isLoading {
                 loadingView
-            } else if let error = error {
+            } else if let error = viewModel.error {
                 errorView(error)
-            } else if tools.isEmpty {
+            } else if viewModel.tools.isEmpty {
                 emptyView
             } else {
                 toolsListView
@@ -58,8 +27,23 @@ struct ToolsBrowserView: View {
         }
         .frame(minWidth: 500, idealWidth: 600, maxWidth: .infinity,
                minHeight: 400, idealHeight: 500, maxHeight: .infinity)
-        .task {
-            await loadTools()
+        .onAppear {
+            // Only load tools when view appears AND we're connected
+            FileLogger.shared.info("onAppear, connectionState=\(statusMonitor.connectionState)", category: "ToolsBrowserView")
+            if case .connected = statusMonitor.connectionState {
+                Task {
+                    await viewModel.loadTools()
+                }
+            }
+        }
+        .onChange(of: statusMonitor.connectionState) {
+            // Load tools when connection is established
+            FileLogger.shared.info("connectionState changed to \(statusMonitor.connectionState)", category: "ToolsBrowserView")
+            if case .connected = statusMonitor.connectionState, viewModel.tools.isEmpty {
+                Task {
+                    await viewModel.loadTools()
+                }
+            }
         }
     }
     
@@ -67,15 +51,23 @@ struct ToolsBrowserView: View {
     
     private var headerView: some View {
         HStack(spacing: 12) {
+            Image(systemName: "wrench.and.screwdriver")
+                .foregroundStyle(.secondary)
+            
+            Text("Tools")
+                .font(.headline)
+            
+            Spacer()
+            
             // Search field
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("Search tools...", text: $searchText)
+                TextField("Search tools...", text: $viewModel.searchText)
                     .textFieldStyle(.plain)
-                if !searchText.isEmpty {
+                if !viewModel.searchText.isEmpty {
                     Button {
-                        searchText = ""
+                        viewModel.searchText = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
@@ -88,10 +80,10 @@ struct ToolsBrowserView: View {
             .cornerRadius(8)
             
             // Server filter
-            Picker("Server", selection: $selectedServer) {
+            Picker("Server", selection: $viewModel.selectedServer) {
                 Text("All Servers").tag(nil as String?)
                 Divider()
-                ForEach(servers, id: \.self) { server in
+                ForEach(viewModel.servers, id: \.self) { server in
                     Text(server).tag(server as String?)
                 }
             }
@@ -100,14 +92,14 @@ struct ToolsBrowserView: View {
             
             // Refresh button
             Button {
-                Task { await loadTools() }
+                Task { await viewModel.loadTools() }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .disabled(isLoading)
+            .disabled(viewModel.isLoading)
             
             // Stats
-            Text("\(filteredTools.count) tools")
+            Text("\(viewModel.filteredTools.count) tools")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -139,7 +131,7 @@ struct ToolsBrowserView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("Retry") {
-                Task { await loadTools() }
+                Task { await viewModel.loadTools() }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -148,19 +140,13 @@ struct ToolsBrowserView: View {
     // MARK: - Empty View
     
     private var emptyView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "wrench.and.screwdriver")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("No tools found")
-                .font(.headline)
-            if !searchText.isEmpty || selectedServer != nil {
-                Text("Try adjusting your filters")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "wrench.and.screwdriver",
+            title: "No tools found",
+            description: (!viewModel.searchText.isEmpty || viewModel.selectedServer != nil)
+                ? "Try adjusting your filters"
+                : nil
+        )
     }
     
     // MARK: - Tools List
@@ -168,7 +154,7 @@ struct ToolsBrowserView: View {
     private var toolsListView: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16, pinnedViews: .sectionHeaders) {
-                ForEach(groupedTools, id: \.server) { group in
+                ForEach(viewModel.groupedTools, id: \.server) { group in
                     Section {
                         ForEach(group.tools) { tool in
                             ToolRow(tool: tool)
@@ -184,21 +170,6 @@ struct ToolsBrowserView: View {
             }
             .padding()
         }
-    }
-    
-    // MARK: - Actions
-    
-    private func loadTools() async {
-        isLoading = true
-        error = nil
-        
-        do {
-            tools = try await client.getTools()
-        } catch {
-            self.error = error.localizedDescription
-        }
-        
-        isLoading = false
     }
 }
 
