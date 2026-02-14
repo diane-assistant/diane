@@ -2,47 +2,47 @@
 
 ## ADDED Requirements
 
-### Requirement: DianeMenuTests Unit Test Target
+### Requirement: DianeTests Unit Test Target
 
-Create a new test target named `DianeMenuTests` for unit and integration tests. The target should be properly configured with dependencies and test infrastructure.
+Create a new test target named `DianeTests` for unit and integration tests. The target should be properly configured with dependencies and test infrastructure.
 
 #### Scenario: Test target exists in Xcode project
 
 **WHEN** the project is opened in Xcode  
-**THEN** a DianeMenuTests target must exist  
+**THEN** a DianeTests target must exist  
 **AND** the target type must be "Bundle" with product type "Unit Test Bundle"  
-**AND** the target must be associated with the DianeMenu app target
+**AND** the target must be associated with the Diane app target
 
 #### Scenario: Test target has access to app code
 
-**WHEN** tests in DianeMenuTests need to import app code  
-**THEN** the DianeMenu target must be available via @testable import  
+**WHEN** tests in DianeTests need to import app code  
+**THEN** the Diane target must be available via @testable import  
 **AND** all internal types and methods must be accessible in tests  
 **AND** tests can instantiate ViewModels, models, and services
 
 #### Scenario: Test target includes SPM dependencies
 
 **WHEN** tests need to use testing frameworks  
-**THEN** ViewInspector must be linked to DianeMenuTests  
-**AND** SnapshotTesting must be linked to DianeMenuTests  
+**THEN** ViewInspector must be linked to DianeTests  
+**AND** SnapshotTesting must be linked to DianeTests  
 **AND** XCTest must be available by default  
 **AND** all dependencies must resolve correctly
 
-### Requirement: DianeMenuUITests UI Test Target
+### Requirement: DianeUITests UI Test Target
 
-Create a new test target named `DianeMenuUITests` for end-to-end UI automation tests. The target should be configured for XCUITest and have access to launch the app.
+Create a new test target named `DianeUITests` for end-to-end UI automation tests. The target should be configured for XCUITest and have access to launch the app.
 
 #### Scenario: UI test target exists in Xcode project
 
 **WHEN** the project is opened in Xcode  
-**THEN** a DianeMenuUITests target must exist  
+**THEN** a DianeUITests target must exist  
 **AND** the target type must be "Bundle" with product type "UI Test Bundle"  
-**AND** the target must be associated with the DianeMenu app target
+**AND** the target must be associated with the Diane app target
 
 #### Scenario: UI test target can launch the app
 
 **WHEN** UI tests run  
-**THEN** tests must be able to launch DianeMenu.app  
+**THEN** tests must be able to launch Diane.app  
 **AND** the app must launch in a clean test environment  
 **AND** XCUIApplication must be available for automation
 
@@ -84,15 +84,15 @@ Configure Xcode schemes for running tests with appropriate settings. Schemes sho
 
 #### Scenario: Test scheme runs unit tests
 
-**WHEN** the "Test" action is executed on DianeMenu scheme  
-**THEN** DianeMenuTests must be enabled in the scheme  
+**WHEN** the "Test" action is executed on Diane scheme  
+**THEN** DianeTests must be enabled in the scheme  
 **AND** tests must run with code coverage enabled  
 **AND** test results must be reported in Xcode's test navigator
 
 #### Scenario: Test scheme runs UI tests separately
 
 **WHEN** developers want to run only UI tests  
-**THEN** a separate scheme or scheme option must exist for DianeMenuUITests  
+**THEN** a separate scheme or scheme option must exist for DianeUITests  
 **AND** UI tests must not run during quick unit test runs  
 **AND** UI tests must be clearly distinguishable in test output
 
@@ -119,7 +119,7 @@ Ensure tests run in isolation without affecting each other or the developer's lo
 **WHEN** UI tests launch the app  
 **THEN** the app must use a separate container directory  
 **AND** test data must not persist between test runs  
-**AND** tests must not interfere with the developer's personal DianeMenu data
+**AND** tests must not interfere with the developer's personal Diane data
 
 #### Scenario: Test cleanup happens automatically
 
@@ -161,7 +161,7 @@ Enable and configure code coverage reporting for the test suite. Coverage report
 
 **WHEN** tests run in Xcode  
 **THEN** code coverage gathering must be enabled  
-**AND** coverage data must be collected for DianeMenu target  
+**AND** coverage data must be collected for Diane target  
 **AND** coverage must be viewable in Xcode's coverage navigator
 
 #### Scenario: Coverage reports exported for CI
@@ -185,7 +185,7 @@ Provide clear documentation for writing, running, and maintaining tests. Guideli
 #### Scenario: Test README explains test structure
 
 **WHEN** developers want to understand the test suite  
-**THEN** a DianeMenuTests/README.md must exist  
+**THEN** a DianeTests/README.md must exist  
 **AND** the README must explain unit vs integration vs UI tests  
 **AND** the README must provide examples of each test type
 

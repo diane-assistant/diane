@@ -7,7 +7,7 @@ Define the standalone ComponentCatalog macOS application target, its three-colum
 ## Requirements
 
 ### Requirement: Catalog app launches as standalone macOS application
-The ComponentCatalog SHALL be a separate macOS app target in the DianeMenu Xcode project that builds and runs independently from the main DianeMenu app.
+The ComponentCatalog SHALL be a separate macOS app target in the Diane Xcode project that builds and runs independently from the main Diane app.
 
 #### Scenario: Build and launch
 - **WHEN** the user selects the ComponentCatalog scheme and runs it
@@ -15,7 +15,7 @@ The ComponentCatalog SHALL be a separate macOS app target in the DianeMenu Xcode
 
 #### Scenario: Independent from main app
 - **WHEN** the ComponentCatalog is running
-- **THEN** it does NOT require the diane daemon, network access, or any running DianeMenu instance
+- **THEN** it does NOT require the diane daemon, network access, or any running Diane instance
 
 ### Requirement: Sidebar navigation lists all cataloged items
 The catalog SHALL display a sidebar listing all screen-level views and reusable components, organized by category.

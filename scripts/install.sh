@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build and install DianeMenu.app with all components
+# Build and install Diane.app with all components
 # This builds the Go CLI, Swift app, and installs everything
 
 set -e
@@ -45,7 +45,7 @@ echo "║           Diane - Build & Install                        ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 echo "Version: $VERSION"
-echo "Install location: $INSTALL_APP_DIR/DianeMenu.app"
+echo "Install location: $INSTALL_APP_DIR/Diane.app"
 echo ""
 
 # Check if we're on macOS
@@ -55,7 +55,7 @@ if [[ "$(uname)" != "Darwin" ]]; then
 fi
 
 # Step 1: Build everything
-print_step "Building DianeMenu.app with embedded binaries..."
+print_step "Building Diane.app with embedded binaries..."
 echo ""
 
 # Run the build script
@@ -86,27 +86,27 @@ if [ -f "$DIANE_HOME/mcp.pid" ]; then
     fi
 fi
 
-# Step 3: Close DianeMenu if running
-print_step "Checking for running DianeMenu app..."
-if pgrep -x "DianeMenu" > /dev/null; then
-    print_warning "Closing DianeMenu app..."
-    osascript -e 'quit app "DianeMenu"' 2>/dev/null || pkill -x "DianeMenu" 2>/dev/null || true
+# Step 3: Close Diane if running
+print_step "Checking for running Diane app..."
+if pgrep -x "Diane" > /dev/null; then
+    print_warning "Closing Diane app..."
+    osascript -e 'quit app "Diane"' 2>/dev/null || pkill -x "Diane" 2>/dev/null || true
     sleep 1
-    print_success "Closed DianeMenu"
+    print_success "Closed Diane"
 fi
 
 # Step 4: Install the app
-print_step "Installing DianeMenu.app to $INSTALL_APP_DIR..."
+print_step "Installing Diane.app to $INSTALL_APP_DIR..."
 
 # Remove old installation if exists
-if [ -d "$INSTALL_APP_DIR/DianeMenu.app" ]; then
-    rm -rf "$INSTALL_APP_DIR/DianeMenu.app"
+if [ -d "$INSTALL_APP_DIR/Diane.app" ]; then
+    rm -rf "$INSTALL_APP_DIR/Diane.app"
     print_success "Removed old installation"
 fi
 
 # Copy new app
-cp -R "$BUILD_DIR/DianeMenu.app" "$INSTALL_APP_DIR/"
-print_success "Installed DianeMenu.app"
+cp -R "$BUILD_DIR/Diane.app" "$INSTALL_APP_DIR/"
+print_success "Installed Diane.app"
 
 # Step 5: Create ~/.diane directory structure
 print_step "Setting up ~/.diane directory..."
@@ -118,7 +118,7 @@ print_success "Created directory structure"
 
 # Step 6: Create symlink for diane CLI
 print_step "Creating symlink for diane CLI..."
-BUNDLED_DIANE="$INSTALL_APP_DIR/DianeMenu.app/Contents/MacOS/diane"
+BUNDLED_DIANE="$INSTALL_APP_DIR/Diane.app/Contents/MacOS/diane-server"
 
 # Remove existing binary/symlink
 if [ -e "$DIANE_BIN/diane" ] || [ -L "$DIANE_BIN/diane" ]; then
@@ -150,9 +150,9 @@ else
 fi
 
 # Step 9: Launch the app
-print_step "Launching DianeMenu..."
-open "$INSTALL_APP_DIR/DianeMenu.app"
-print_success "DianeMenu started"
+print_step "Launching Diane..."
+open "$INSTALL_APP_DIR/Diane.app"
+print_success "Diane started"
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
@@ -160,13 +160,13 @@ echo "║           Installation Complete!                         ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 echo "Installed components:"
-echo "  • DianeMenu.app    → $INSTALL_APP_DIR/DianeMenu.app"
+echo "  • Diane.app    → $INSTALL_APP_DIR/Diane.app"
 echo "  • diane CLI        → ~/.diane/bin/diane (symlink to app)"
 echo "  • diane-ctl        → ~/.diane/bin/diane-ctl"
 echo "  • acp-server       → ~/.diane/bin/acp-server"
 echo ""
 echo "Version: $VERSION"
 echo ""
-echo "The DianeMenu app is now running in your menu bar."
+echo "The Diane app is now running in your menu bar."
 echo "Use 'diane' from the terminal to interact with the CLI."
 echo ""

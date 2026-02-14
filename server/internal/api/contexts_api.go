@@ -299,8 +299,8 @@ func (api *ContextsAPI) handleConnect(w http.ResponseWriter, r *http.Request, co
 	info := ConnectInfo{
 		Context: contextName,
 		SSE: ConnectionDetails{
-			URL:     baseURL + "/sse?context=" + contextName,
-			Example: `curl -N "` + baseURL + `/sse?context=` + contextName + `"`,
+			URL:     baseURL + "/mcp/sse?context=" + contextName,
+			Example: `curl -N "` + baseURL + `/mcp/sse?context=` + contextName + `"`,
 		},
 		Streamable: ConnectionDetails{
 			URL:     baseURL + "/mcp?context=" + contextName,

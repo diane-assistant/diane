@@ -2,7 +2,7 @@
 
 ## Context
 
-DianeMenu is a macOS SwiftUI application that provides a GUI for managing the Diane daemon. The app communicates with the daemon via a Unix socket at `~/.diane/diane.sock` using the `DianeClient` service. Currently, the application has:
+Diane is a macOS SwiftUI application that provides a GUI for managing the Diane daemon. The app communicates with the daemon via a Unix socket at `~/.diane/diane.sock` using the `DianeClient` service. Currently, the application has:
 
 - **No test infrastructure**: No test targets, no testing dependencies, no test coverage
 - **Tightly coupled architecture**: Business logic embedded in SwiftUI views, making unit testing difficult
@@ -136,25 +136,25 @@ class MockDianeClient: DianeClientProtocol {
 
 **Test tiers:**
 
-1. **Unit tests** (DianeMenuTests target)
+1. **Unit tests** (DianeTests target)
    - Test ViewModels with MockDianeClient
    - Test pure functions (duplicate name generation, filtering, validation)
    - Fast execution (< 1 second per test)
    - High coverage of business logic
 
-2. **Integration tests** (DianeMenuTests target)
+2. **Integration tests** (DianeTests target)
    - Test DianeClient protocol conformance
    - Test ViewModel + MockClient integration
    - Test async/await behavior, error handling
    - Medium execution speed (< 5 seconds per test)
 
-3. **Snapshot tests** (DianeMenuTests target)
+3. **Snapshot tests** (DianeTests target)
    - Test visual appearance of views with SnapshotTesting
    - Capture empty state, loaded state, error state
    - Test light/dark mode, different window sizes
    - Medium execution speed (1-2 seconds per snapshot)
 
-4. **UI tests** (DianeMenuUITests target)
+4. **UI tests** (DianeUITests target)
    - Test end-to-end user flows with XCUITest
    - Create, edit, duplicate, delete MCP servers
    - Slow execution (5-15 seconds per test)
@@ -183,7 +183,7 @@ class MockDianeClient: DianeClientProtocol {
 - **Active maintenance**: Regularly updated for new iOS/macOS versions
 
 **Configuration:**
-- Snapshots stored in `DianeMenuTests/__Snapshots__/` directory
+- Snapshots stored in `DianeTests/__Snapshots__/` directory
 - Committed to version control (not git LFS)
 - Light mode default, dark mode as separate snapshots
 - Fixed window sizes (800x600, 1024x768, 1920x1080)
@@ -255,9 +255,9 @@ func testMCPServersView_EmptyState() {
 
 **Implementation:**
 ```swift
-// In app code (e.g., DianeMenuApp.swift)
+// In app code (e.g., DianeApp.swift)
 @main
-struct DianeMenuApp: App {
+struct DianeApp: App {
     let client: DianeClientProtocol
     
     init() {
@@ -288,28 +288,28 @@ func testCreateServer() {
 **Choice:** Create two test targets with separate schemes for different test types.
 
 **Target structure:**
-- **DianeMenuTests**: Unit, integration, and snapshot tests
+- **DianeTests**: Unit, integration, and snapshot tests
   - Product type: Unit Test Bundle
-  - Host application: DianeMenu
+  - Host application: Diane
   - Dependencies: ViewInspector, SnapshotTesting
   - Scheme: Run on every test action (Cmd+U)
   - Code coverage: Enabled
 
-- **DianeMenuUITests**: End-to-end UI automation tests
+- **DianeUITests**: End-to-end UI automation tests
   - Product type: UI Test Bundle
-  - Target application: DianeMenu
+  - Target application: Diane
   - Dependencies: None (uses XCUITest built-in)
   - Scheme: Separate scheme or disabled by default
   - Parallel execution: Disabled (sequential for stability)
 
 **Scheme configuration:**
 ```
-DianeMenu scheme:
-  - Test action: Runs DianeMenuTests (not UI tests)
+Diane scheme:
+  - Test action: Runs DianeTests (not UI tests)
   - Code coverage: Enabled
   - Parallelization: Enabled for unit tests
   
-DianeMenuUITests scheme:
+DianeUITests scheme:
   - Test action: Runs only UI tests
   - Code coverage: Disabled (not useful for UI tests)
   - Parallelization: Disabled
@@ -332,7 +332,7 @@ DianeMenuUITests scheme:
 
 **Directory structure:**
 ```
-DianeMenuTests/
+DianeTests/
 ├── README.md                          # Testing guide
 ├── TestHelpers/
 │   ├── TestFixtures.swift             # Sample data
@@ -356,7 +356,7 @@ DianeMenuTests/
     ├── MCPServersViewSnapshotTests/
     └── ServerFormSnapshotTests/
 
-DianeMenuUITests/
+DianeUITests/
 ├── README.md                          # UI testing guide
 ├── TestHelpers/
 │   └── XCUIElementHelpers.swift       # UI test utilities
@@ -442,7 +442,7 @@ DianeMenuUITests/
 ## Migration Plan
 
 ### Phase 1: Infrastructure Setup (Low risk)
-1. Add DianeMenuTests and DianeMenuUITests targets to Xcode project
+1. Add DianeTests and DianeUITests targets to Xcode project
 2. Add Swift Package Manager dependencies: ViewInspector, SnapshotTesting
 3. Configure test schemes with code coverage enabled
 4. Create test helper files: TestFixtures.swift, MockDianeClient.swift

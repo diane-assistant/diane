@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,6 +22,7 @@ type SSEClient struct {
 	baseURL         string
 	headers         map[string]string
 	httpClient      *http.Client
+	sseTransport    *http.Transport
 	sessionID       string
 	messageEndpoint string
 	mu              sync.Mutex
@@ -33,6 +35,7 @@ type SSEClient struct {
 	toolCountValid  bool
 	refreshing      bool
 	lastError       string
+	lastActivity    time.Time
 	nextID          int
 	pendingMu       sync.Mutex
 	pending         map[interface{}]chan MCPResponse
@@ -40,14 +43,26 @@ type SSEClient struct {
 
 // NewSSEClient creates a new SSE MCP client
 func NewSSEClient(name string, url string, headers map[string]string) (*SSEClient, error) {
+	// Transport with TCP keep-alive for long-lived SSE connections
+	sseTransport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 15 * time.Second,
+		}).DialContext,
+		IdleConnTimeout:       0, // no idle timeout for SSE
+		ResponseHeaderTimeout: 10 * time.Second,
+	}
+
 	client := &SSEClient{
 		name:          name,
 		baseURL:       strings.TrimSuffix(url, "/"),
 		headers:       headers,
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		sseTransport:  sseTransport,
 		notifyChan:    make(chan string, 10),
 		stopChan:      make(chan struct{}),
 		reconnectChan: make(chan struct{}, 1),
+		lastActivity:  time.Now(),
 		nextID:        1,
 		pending:       make(map[interface{}]chan MCPResponse),
 	}
@@ -71,8 +86,6 @@ func NewSSEClient(name string, url string, headers map[string]string) (*SSEClien
 
 // connect establishes SSE connection and gets session info
 func (c *SSEClient) connect() error {
-	// Use the URL as-is - don't append /sse suffix
-	// The user should provide the complete SSE endpoint URL
 	sseURL := c.baseURL
 
 	req, err := http.NewRequest("GET", sseURL, nil)
@@ -86,8 +99,8 @@ func (c *SSEClient) connect() error {
 		req.Header.Set(k, v)
 	}
 
-	// Use a client without timeout for SSE
-	sseClient := &http.Client{}
+	// Use the SSE transport with TCP keep-alive (no overall timeout — stream is long-lived)
+	sseClient := &http.Client{Transport: c.sseTransport}
 	resp, err := sseClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("SSE connection failed: %w", err)
@@ -99,16 +112,20 @@ func (c *SSEClient) connect() error {
 	}
 
 	c.connected.Store(true)
+	c.mu.Lock()
+	c.lastActivity = time.Now()
+	c.mu.Unlock()
 
 	// Start SSE event loop in background
 	go c.eventLoop(resp.Body)
+
+	// Start liveness monitor
+	go c.livenessMonitor()
 
 	// Wait briefly for the endpoint event
 	time.Sleep(100 * time.Millisecond)
 
 	if c.messageEndpoint == "" {
-		// No endpoint event received - this shouldn't happen with proper SSE servers
-		// Log a warning but don't try to guess the endpoint
 		slog.Warn("No endpoint event received from SSE server", "client", c.name)
 	}
 
@@ -142,6 +159,11 @@ func (c *SSEClient) eventLoop(body io.ReadCloser) {
 
 		line := scanner.Text()
 
+		// Any data from the server means the connection is alive
+		c.mu.Lock()
+		c.lastActivity = time.Now()
+		c.mu.Unlock()
+
 		if line == "" {
 			// Empty line = end of event
 			if eventType != "" || eventData != "" {
@@ -149,6 +171,11 @@ func (c *SSEClient) eventLoop(body io.ReadCloser) {
 				eventType = ""
 				eventData = ""
 			}
+			continue
+		}
+
+		// SSE comment lines (e.g. ": keepalive") — just track activity, no processing needed
+		if strings.HasPrefix(line, ":") {
 			continue
 		}
 
@@ -173,6 +200,45 @@ func (c *SSEClient) eventLoop(body io.ReadCloser) {
 		c.mu.Lock()
 		c.lastError = "connection closed by server"
 		c.mu.Unlock()
+	}
+}
+
+// livenessMonitor checks that we've received data recently and forces reconnect if stale
+func (c *SSEClient) livenessMonitor() {
+	// Most SSE servers send keepalives every 15-30s. If we haven't seen anything
+	// in 90s the connection is likely dead (TCP half-open).
+	const staleDuration = 90 * time.Second
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.stopChan:
+			return
+		case <-ticker.C:
+			if !c.connected.Load() {
+				return // eventLoop already triggered reconnect
+			}
+			c.mu.Lock()
+			sinceActivity := time.Since(c.lastActivity)
+			c.mu.Unlock()
+
+			if sinceActivity > staleDuration {
+				slog.Warn("SSE connection stale, forcing reconnect",
+					"client", c.name,
+					"last_activity", sinceActivity.Round(time.Second))
+				c.connected.Store(false)
+				c.mu.Lock()
+				c.lastError = fmt.Sprintf("no data received for %s", sinceActivity.Round(time.Second))
+				c.mu.Unlock()
+				// Trigger reconnect
+				select {
+				case c.reconnectChan <- struct{}{}:
+				default:
+				}
+				return
+			}
+		}
 	}
 }
 
@@ -221,7 +287,7 @@ func (c *SSEClient) reconnectLoop() {
 	}
 }
 
-// reconnect re-establishes the SSE connection
+// reconnect re-establishes the SSE connection and MCP session
 func (c *SSEClient) reconnect() error {
 	sseURL := c.baseURL
 
@@ -236,7 +302,7 @@ func (c *SSEClient) reconnect() error {
 		req.Header.Set(k, v)
 	}
 
-	sseClient := &http.Client{}
+	sseClient := &http.Client{Transport: c.sseTransport}
 	resp, err := sseClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("SSE connection failed: %w", err)
@@ -250,13 +316,23 @@ func (c *SSEClient) reconnect() error {
 	c.connected.Store(true)
 	c.mu.Lock()
 	c.lastError = ""
+	c.lastActivity = time.Now()
 	c.mu.Unlock()
 
 	// Start new event loop
 	go c.eventLoop(resp.Body)
 
+	// Start new liveness monitor
+	go c.livenessMonitor()
+
 	// Wait briefly for the endpoint event
 	time.Sleep(100 * time.Millisecond)
+
+	// Re-initialize the MCP session — the server requires this after a new SSE connection
+	if err := c.initialize(); err != nil {
+		slog.Warn("SSE re-initialize failed after reconnect", "client", c.name, "error", err)
+		return fmt.Errorf("re-initialize failed: %w", err)
+	}
 
 	return nil
 }

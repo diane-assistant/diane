@@ -1,10 +1,10 @@
 ## Why
 
-Adjusting the layout of DianeMenu's SwiftUI views currently requires an edit-build-run cycle for every small change — spacing, padding, font sizes, colors. There is no way to see all views side-by-side with different states, or to interactively tweak visual properties without recompiling. A Storybook-like component catalog app would let a developer (or AI assistant) see the full component system at a glance, manipulate layout parameters with live controls, and make informed design decisions before committing code changes.
+Adjusting the layout of Diane's SwiftUI views currently requires an edit-build-run cycle for every small change — spacing, padding, font sizes, colors. There is no way to see all views side-by-side with different states, or to interactively tweak visual properties without recompiling. A Storybook-like component catalog app would let a developer (or AI assistant) see the full component system at a glance, manipulate layout parameters with live controls, and make informed design decisions before committing code changes.
 
 ## What Changes
 
-- **New macOS app target** (`ComponentCatalog`) in the existing Xcode project that imports `DianeMenu` module types via `@testable import`-style access or a shared framework
+- **New macOS app target** (`ComponentCatalog`) in the existing Xcode project that imports `Diane` module types via `@testable import`-style access or a shared framework
 - **Catalog sidebar** listing every screen-level view (MCPServersView, AgentsView, ProvidersView, ContextsView, SchedulerView, UsageView, ToolsBrowserView, SettingsView) and every reusable component (MasterDetailView, MasterListHeader, DetailSection, InfoRow, StringArrayEditor, KeyValueEditor, SummaryCard, etc.)
 - **State selector** for each view — pick from predefined states (empty, loading, error, loaded with N items, selected item) backed by MockDianeClient and TestFixtures
 - **Interactive controls panel** exposing key layout parameters (spacing, padding, font sizes, corner radii, colors) as sliders, steppers, and color pickers that update the preview in real time without recompilation

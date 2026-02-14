@@ -19,7 +19,7 @@ The ComponentCatalog app currently lets you browse and preview every view and co
 
 ## Impact
 
-- `DianeMenu/ComponentCatalog/CatalogContentView.swift` — new feedback section in controls panel
+- `Diane/ComponentCatalog/CatalogContentView.swift` — new feedback section in controls panel
 - New file(s) for the feedback/issue creation logic (keeping it out of the view)
-- ComponentCatalog target only — no changes to the DianeMenu target
+- ComponentCatalog target only — no changes to the Diane target
 - Runtime dependency on `gh` CLI being installed and authenticated

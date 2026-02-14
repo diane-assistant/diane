@@ -1,6 +1,6 @@
 ## Context
 
-The ComponentCatalog is a standalone macOS app target that renders every DianeMenu view and component with mock data, preset states, and interactive layout controls. It already has a three-column layout: sidebar (item list), center (preview canvas), and trailing (controls panel with preset selector and layout sliders).
+The ComponentCatalog is a standalone macOS app target that renders every Diane view and component with mock data, preset states, and interactive layout controls. It already has a three-column layout: sidebar (item list), center (preview canvas), and trailing (controls panel with preset selector and layout sliders).
 
 The goal is to add a feedback flow so that while reviewing components in the catalog, the user can write a comment and create a GitHub issue directly — with the component selector and state context automatically included. This eliminates the context-switch of manually filing issues.
 

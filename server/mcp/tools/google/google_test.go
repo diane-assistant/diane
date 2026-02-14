@@ -318,27 +318,27 @@ func TestHasTool(t *testing.T) {
 	// Test known tools exist
 	knownTools := []string{
 		// Gmail
-		"google_search_emails",
-		"google_read_email",
+		"gmail_search",
+		"gmail_read",
 		"gmail_batch_get_messages",
 		"gmail_list_labels",
 		// Drive
-		"google_search_files",
-		"google_list_files",
+		"drive_search",
+		"drive_list",
 		// Sheets
-		"google_get_sheet",
-		"google_update_sheet",
-		"google_append_sheet",
-		"google_clear_sheet",
-		"google_get_sheet_metadata",
+		"sheets_get",
+		"sheets_update",
+		"sheets_append",
+		"sheets_clear",
+		"sheets_get_metadata",
 		// Calendar
-		"google_list_calendars",
-		"google_list_events",
-		"google_get_event",
-		"google_create_event",
-		"google_update_event",
-		"google_delete_event",
-		"google_check_freebusy",
+		"calendar_list",
+		"calendar_list_events",
+		"calendar_get_event",
+		"calendar_create_event",
+		"calendar_update_event",
+		"calendar_delete_event",
+		"calendar_check_freebusy",
 	}
 
 	for _, tool := range knownTools {
@@ -430,32 +430,32 @@ func TestCallMissingRequiredArgs(t *testing.T) {
 		errorMsg string
 	}{
 		{
-			tool:     "google_search_emails",
+			tool:     "gmail_search",
 			args:     map[string]interface{}{},
 			errorMsg: "query",
 		},
 		{
-			tool:     "google_read_email",
+			tool:     "gmail_read",
 			args:     map[string]interface{}{},
 			errorMsg: "id",
 		},
 		{
-			tool:     "google_get_sheet",
+			tool:     "sheets_get",
 			args:     map[string]interface{}{},
 			errorMsg: "sheetId",
 		},
 		{
-			tool:     "google_get_sheet",
+			tool:     "sheets_get",
 			args:     map[string]interface{}{"sheetId": "abc"},
 			errorMsg: "range",
 		},
 		{
-			tool:     "google_create_event",
+			tool:     "calendar_create_event",
 			args:     map[string]interface{}{},
 			errorMsg: "calendar_id",
 		},
 		{
-			tool:     "google_get_event",
+			tool:     "calendar_get_event",
 			args:     map[string]interface{}{"calendar_id": "primary"},
 			errorMsg: "event_id",
 		},
@@ -606,13 +606,13 @@ func TestToolCount(t *testing.T) {
 
 	for _, tool := range tools {
 		switch {
-		case strings.HasPrefix(tool.Name, "gmail_") || strings.HasPrefix(tool.Name, "google_search_emails") || strings.HasPrefix(tool.Name, "google_read_email"):
+		case strings.HasPrefix(tool.Name, "gmail_"):
 			gmailCount++
-		case strings.Contains(tool.Name, "files"):
+		case strings.HasPrefix(tool.Name, "drive_"):
 			driveCount++
-		case strings.Contains(tool.Name, "sheet"):
+		case strings.HasPrefix(tool.Name, "sheets_"):
 			sheetsCount++
-		case strings.Contains(tool.Name, "calendar") || strings.Contains(tool.Name, "event") || strings.Contains(tool.Name, "freebusy"):
+		case strings.HasPrefix(tool.Name, "calendar_"):
 			calendarCount++
 		}
 	}

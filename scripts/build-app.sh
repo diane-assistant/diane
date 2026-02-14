@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build script for DianeMenu.app with embedded diane binary
+# Build script for Diane.app with embedded diane binary
 # This builds both the Go CLI and Swift app together
 
 set -e
@@ -7,7 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/dist"
-APP_BUILD_DIR="$PROJECT_ROOT/DianeMenu/build"
+APP_BUILD_DIR="$PROJECT_ROOT/Diane/build"
 
 # Get version from git
 VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo "dev")}"
@@ -23,7 +23,7 @@ else
     exit 1
 fi
 
-echo "=== Building DianeMenu.app with embedded diane binary ==="
+echo "=== Building Diane.app with embedded diane binary ==="
 echo "Version: $VERSION"
 echo "Architecture: darwin/$GO_ARCH"
 echo ""
@@ -39,15 +39,15 @@ echo "Built: $BUILD_DIR/diane"
 
 # Step 2: Build Swift app
 echo ""
-echo "=== Step 2: Building DianeMenu Swift app ==="
-cd "$PROJECT_ROOT/DianeMenu"
+echo "=== Step 2: Building Diane Swift app ==="
+cd "$PROJECT_ROOT/Diane"
 
 # Determine build configuration
 CONFIGURATION="${CONFIGURATION:-Release}"
 
 xcodebuild \
-    -project DianeMenu.xcodeproj \
-    -scheme DianeMenu \
+    -project Diane.xcodeproj \
+    -scheme Diane \
     -configuration "$CONFIGURATION" \
     -derivedDataPath "$APP_BUILD_DIR" \
     -arch "$ARCH" \
@@ -56,7 +56,7 @@ xcodebuild \
     2>&1 | grep -E "^(Build|Compile|Link|Sign|warning:|error:|\*\*)" || true
 
 # Find the built app
-APP_PATH="$APP_BUILD_DIR/Build/Products/$CONFIGURATION/DianeMenu.app"
+APP_PATH="$APP_BUILD_DIR/Build/Products/$CONFIGURATION/Diane.app"
 if [ ! -d "$APP_PATH" ]; then
     echo "Error: App not found at $APP_PATH"
     exit 1
@@ -67,25 +67,25 @@ echo "Built: $APP_PATH"
 echo ""
 echo "=== Step 3: Embedding diane binary in app bundle ==="
 MACOS_DIR="$APP_PATH/Contents/MacOS"
-cp "$BUILD_DIR/diane" "$MACOS_DIR/diane"
-chmod +x "$MACOS_DIR/diane"
-echo "Embedded: $MACOS_DIR/diane"
+cp "$BUILD_DIR/diane" "$MACOS_DIR/diane-server"
+chmod +x "$MACOS_DIR/diane-server"
+echo "Embedded: $MACOS_DIR/diane-server"
 
 # Step 4: Copy to dist folder for easy access
 echo ""
 echo "=== Step 4: Copying app to dist/ ==="
-rm -rf "$BUILD_DIR/DianeMenu.app"
-cp -R "$APP_PATH" "$BUILD_DIR/DianeMenu.app"
-echo "Copied: $BUILD_DIR/DianeMenu.app"
+rm -rf "$BUILD_DIR/Diane.app"
+cp -R "$APP_PATH" "$BUILD_DIR/Diane.app"
+echo "Copied: $BUILD_DIR/Diane.app"
 
 echo ""
 echo "=== Build Complete ==="
 echo ""
-echo "App bundle: $BUILD_DIR/DianeMenu.app"
-echo "  - DianeMenu (Swift menu bar app)"
-echo "  - diane (Go CLI binary embedded)"
+echo "App bundle: $BUILD_DIR/Diane.app"
+echo "  - Diane (Swift menu bar app)"
+echo "  - diane-server (Go CLI binary embedded)"
 echo ""
 echo "To install:"
-echo "  1. Copy DianeMenu.app to /Applications"
+echo "  1. Copy Diane.app to /Applications"
 echo "  2. The app will create ~/.diane/bin/diane symlink on first launch"
 echo ""

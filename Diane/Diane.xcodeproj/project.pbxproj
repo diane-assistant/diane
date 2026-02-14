@@ -1,0 +1,1178 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		001 /* DianeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101 /* DianeApp.swift */; };
+		002 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 102 /* MenuBarView.swift */; };
+		003 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103 /* SettingsView.swift */; };
+		004 /* DianeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 104 /* DianeClient.swift */; };
+		005 /* StatusMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 105 /* StatusMonitor.swift */; };
+		006 /* DianeStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 106 /* DianeStatus.swift */; };
+		007 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 107 /* Assets.xcassets */; };
+		008 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 109 /* UpdateChecker.swift */; };
+		009 /* ToolsBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110 /* ToolsBrowserView.swift */; };
+		010 /* WindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111 /* WindowManager.swift */; };
+		011 /* Job.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112 /* Job.swift */; };
+		012 /* SchedulerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113 /* SchedulerView.swift */; };
+		013 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114 /* Agent.swift */; };
+		014 /* AgentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115 /* AgentsView.swift */; };
+		015 /* FileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 116 /* FileLogger.swift */; };
+		016 /* Context.swift in Sources */ = {isa = PBXBuildFile; fileRef = 117 /* Context.swift */; };
+		017 /* ContextsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118 /* ContextsView.swift */; };
+		018 /* Provider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 119 /* Provider.swift */; };
+		019 /* ProvidersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120 /* ProvidersView.swift */; };
+		020 /* UsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121 /* UsageView.swift */; };
+		021 /* MCPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122 /* MCPServer.swift */; };
+		022 /* MCPServersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 123 /* MCPServersView.swift */; };
+		024 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124 /* MainWindowView.swift */; };
+		025 /* MasterDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 125 /* MasterDetailView.swift */; };
+		026 /* DianeClientProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 126 /* DianeClientProtocol.swift */; };
+		027 /* MCPServersViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127 /* MCPServersViewModel.swift */; };
+		028 /* MockDianeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 129 /* MockDianeClient.swift */; };
+		029 /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130 /* TestFixtures.swift */; };
+		030 /* MCPServersViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 131 /* MCPServersViewModelTests.swift */; };
+		031 /* SchedulerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 132 /* SchedulerViewModel.swift */; };
+		032 /* SchedulerViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 133 /* SchedulerViewModelTests.swift */; };
+		033 /* UsageViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 134 /* UsageViewModel.swift */; };
+		034 /* UsageViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 135 /* UsageViewModelTests.swift */; };
+		035 /* ToolsBrowserViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136 /* ToolsBrowserViewModel.swift */; };
+		036 /* ToolsBrowserViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 137 /* ToolsBrowserViewModelTests.swift */; };
+		037 /* ProvidersViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 138 /* ProvidersViewModel.swift */; };
+		038 /* ProvidersViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139 /* ProvidersViewModelTests.swift */; };
+		039 /* AgentsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140 /* AgentsViewModel.swift */; };
+		040 /* AgentsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 141 /* AgentsViewModelTests.swift */; };
+		041 /* ContextsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142 /* ContextsViewModel.swift */; };
+		042 /* ContextsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 143 /* ContextsViewModelTests.swift */; };
+		043 /* MCPServersViewSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 144 /* MCPServersViewSnapshotTests.swift */; };
+		044 /* DetailSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145 /* DetailSection.swift */; };
+		045 /* InfoRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146 /* InfoRow.swift */; };
+		046 /* StringArrayEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 147 /* StringArrayEditor.swift */; };
+		047 /* KeyValueEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 148 /* KeyValueEditor.swift */; };
+		048 /* OAuthConfigEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 149 /* OAuthConfigEditor.swift */; };
+		049 /* SummaryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150 /* SummaryCard.swift */; };
+		050 /* CatalogApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151 /* CatalogApp.swift */; };
+		051 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 102 /* MenuBarView.swift */; };
+		052 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103 /* SettingsView.swift */; };
+		053 /* DianeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 104 /* DianeClient.swift */; };
+		054 /* StatusMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 105 /* StatusMonitor.swift */; };
+		055 /* DianeStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 106 /* DianeStatus.swift */; };
+		056 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 109 /* UpdateChecker.swift */; };
+		057 /* ToolsBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110 /* ToolsBrowserView.swift */; };
+		058 /* WindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111 /* WindowManager.swift */; };
+		059 /* Job.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112 /* Job.swift */; };
+		060 /* SchedulerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113 /* SchedulerView.swift */; };
+		061 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114 /* Agent.swift */; };
+		062 /* AgentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115 /* AgentsView.swift */; };
+		063 /* FileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 116 /* FileLogger.swift */; };
+		064 /* Context.swift in Sources */ = {isa = PBXBuildFile; fileRef = 117 /* Context.swift */; };
+		065 /* ContextsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118 /* ContextsView.swift */; };
+		066 /* Provider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 119 /* Provider.swift */; };
+		067 /* ProvidersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120 /* ProvidersView.swift */; };
+		068 /* UsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121 /* UsageView.swift */; };
+		069 /* MCPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122 /* MCPServer.swift */; };
+		070 /* MCPServersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 123 /* MCPServersView.swift */; };
+		071 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124 /* MainWindowView.swift */; };
+		072 /* MasterDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 125 /* MasterDetailView.swift */; };
+		073 /* DianeClientProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 126 /* DianeClientProtocol.swift */; };
+		074 /* MCPServersViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127 /* MCPServersViewModel.swift */; };
+		075 /* SchedulerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 132 /* SchedulerViewModel.swift */; };
+		076 /* UsageViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 134 /* UsageViewModel.swift */; };
+		077 /* ToolsBrowserViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136 /* ToolsBrowserViewModel.swift */; };
+		078 /* ProvidersViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 138 /* ProvidersViewModel.swift */; };
+		079 /* AgentsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140 /* AgentsViewModel.swift */; };
+		080 /* ContextsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142 /* ContextsViewModel.swift */; };
+		081 /* DetailSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145 /* DetailSection.swift */; };
+		082 /* InfoRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146 /* InfoRow.swift */; };
+		083 /* StringArrayEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 147 /* StringArrayEditor.swift */; };
+		084 /* KeyValueEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 148 /* KeyValueEditor.swift */; };
+		085 /* OAuthConfigEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 149 /* OAuthConfigEditor.swift */; };
+		086 /* SummaryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150 /* SummaryCard.swift */; };
+		087 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 107 /* Assets.xcassets */; };
+		088 /* CatalogContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 153 /* CatalogContentView.swift */; };
+		089 /* CatalogTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 154 /* CatalogTheme.swift */; };
+		090 /* MockDianeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 129 /* MockDianeClient.swift */; };
+		091 /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130 /* TestFixtures.swift */; };
+		092 /* CatalogPresets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 155 /* CatalogPresets.swift */; };
+		093 /* MockStatusMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 156 /* MockStatusMonitor.swift */; };
+		094 /* GitHubIssueService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 157 /* GitHubIssueService.swift */; };
+		095 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 158 /* DesignTokens.swift */; };
+		096 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 158 /* DesignTokens.swift */; };
+		097 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 159 /* EmptyStateView.swift */; };
+		098 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 159 /* EmptyStateView.swift */; };
+		099 /* TimeRangePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160 /* TimeRangePicker.swift */; };
+		161 /* TimeRangePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160 /* TimeRangePicker.swift */; };
+		1100 /* DianeIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000 /* DianeIOSApp.swift */; };
+		1101 /* DianeStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 106 /* DianeStatus.swift */; };
+		1102 /* Job.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112 /* Job.swift */; };
+		1103 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114 /* Agent.swift */; };
+		1104 /* Context.swift in Sources */ = {isa = PBXBuildFile; fileRef = 117 /* Context.swift */; };
+		1105 /* Provider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 119 /* Provider.swift */; };
+		1106 /* MCPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122 /* MCPServer.swift */; };
+		1107 /* DianeClientProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 126 /* DianeClientProtocol.swift */; };
+		1108 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 158 /* DesignTokens.swift */; };
+		1109 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 159 /* EmptyStateView.swift */; };
+		1110 /* InfoRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146 /* InfoRow.swift */; };
+		1111 /* TimeRangePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160 /* TimeRangePicker.swift */; };
+		1112 /* DetailSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145 /* DetailSection.swift */; };
+		1113 /* SummaryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150 /* SummaryCard.swift */; };
+		1114 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 107 /* Assets.xcassets */; };
+		1115 /* DianeHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1002 /* DianeHTTPClient.swift */; };
+		1116 /* ServerConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1003 /* ServerConfiguration.swift */; };
+		1117 /* IOSStatusMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1004 /* IOSStatusMonitor.swift */; };
+		1118 /* ServerSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1005 /* ServerSetupView.swift */; };
+		1119 /* IOSContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1006 /* IOSContentView.swift */; };
+		1120 /* StatusDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1007 /* StatusDashboardView.swift */; };
+		1121 /* MCPServersViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1008 /* MCPServersViews.swift */; };
+		1122 /* AgentsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1009 /* AgentsViews.swift */; };
+		1123 /* ProvidersViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1010 /* ProvidersViews.swift */; };
+		1124 /* ContextsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1011 /* ContextsViews.swift */; };
+		1125 /* JobsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1012 /* JobsViews.swift */; };
+		1126 /* UsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1013 /* UsageView.swift */; };
+		1127 /* IOSSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1014 /* IOSSettingsView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		100 /* Diane.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Diane.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		101 /* DianeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeApp.swift; sourceTree = "<group>"; };
+		102 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		103 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		104 /* DianeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeClient.swift; sourceTree = "<group>"; };
+		105 /* StatusMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusMonitor.swift; sourceTree = "<group>"; };
+		106 /* DianeStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeStatus.swift; sourceTree = "<group>"; };
+		107 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		108 /* Diane.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Diane.entitlements; sourceTree = "<group>"; };
+		109 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
+		110 /* ToolsBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsBrowserView.swift; sourceTree = "<group>"; };
+		111 /* WindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManager.swift; sourceTree = "<group>"; };
+		112 /* Job.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Job.swift; sourceTree = "<group>"; };
+		113 /* SchedulerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerView.swift; sourceTree = "<group>"; };
+		114 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
+		115 /* AgentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsView.swift; sourceTree = "<group>"; };
+		116 /* FileLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLogger.swift; sourceTree = "<group>"; };
+		117 /* Context.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Context.swift; sourceTree = "<group>"; };
+		118 /* ContextsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextsView.swift; sourceTree = "<group>"; };
+		119 /* Provider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Provider.swift; sourceTree = "<group>"; };
+		120 /* ProvidersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersView.swift; sourceTree = "<group>"; };
+		121 /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
+		122 /* MCPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServer.swift; sourceTree = "<group>"; };
+		123 /* MCPServersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServersView.swift; sourceTree = "<group>"; };
+		124 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		125 /* MasterDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MasterDetailView.swift; sourceTree = "<group>"; };
+		126 /* DianeClientProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeClientProtocol.swift; sourceTree = "<group>"; };
+		127 /* MCPServersViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServersViewModel.swift; sourceTree = "<group>"; };
+		128 /* DianeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DianeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		129 /* MockDianeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDianeClient.swift; sourceTree = "<group>"; };
+		130 /* TestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFixtures.swift; sourceTree = "<group>"; };
+		131 /* MCPServersViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServersViewModelTests.swift; sourceTree = "<group>"; };
+		132 /* SchedulerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerViewModel.swift; sourceTree = "<group>"; };
+		133 /* SchedulerViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerViewModelTests.swift; sourceTree = "<group>"; };
+		134 /* UsageViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageViewModel.swift; sourceTree = "<group>"; };
+		135 /* UsageViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageViewModelTests.swift; sourceTree = "<group>"; };
+		136 /* ToolsBrowserViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsBrowserViewModel.swift; sourceTree = "<group>"; };
+		137 /* ToolsBrowserViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsBrowserViewModelTests.swift; sourceTree = "<group>"; };
+		138 /* ProvidersViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersViewModel.swift; sourceTree = "<group>"; };
+		139 /* ProvidersViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersViewModelTests.swift; sourceTree = "<group>"; };
+		140 /* AgentsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsViewModel.swift; sourceTree = "<group>"; };
+		141 /* AgentsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsViewModelTests.swift; sourceTree = "<group>"; };
+		142 /* ContextsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextsViewModel.swift; sourceTree = "<group>"; };
+		143 /* ContextsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextsViewModelTests.swift; sourceTree = "<group>"; };
+		144 /* MCPServersViewSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServersViewSnapshotTests.swift; sourceTree = "<group>"; };
+		145 /* DetailSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailSection.swift; sourceTree = "<group>"; };
+		146 /* InfoRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InfoRow.swift; sourceTree = "<group>"; };
+		147 /* StringArrayEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringArrayEditor.swift; sourceTree = "<group>"; };
+		148 /* KeyValueEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyValueEditor.swift; sourceTree = "<group>"; };
+		149 /* OAuthConfigEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthConfigEditor.swift; sourceTree = "<group>"; };
+		150 /* SummaryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryCard.swift; sourceTree = "<group>"; };
+		151 /* CatalogApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogApp.swift; sourceTree = "<group>"; };
+		152 /* ComponentCatalog.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ComponentCatalog.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		153 /* CatalogContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogContentView.swift; sourceTree = "<group>"; };
+		154 /* CatalogTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogTheme.swift; sourceTree = "<group>"; };
+		155 /* CatalogPresets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogPresets.swift; sourceTree = "<group>"; };
+		156 /* MockStatusMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockStatusMonitor.swift; sourceTree = "<group>"; };
+		157 /* GitHubIssueService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubIssueService.swift; sourceTree = "<group>"; };
+		158 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
+		159 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
+		160 /* TimeRangePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeRangePicker.swift; sourceTree = "<group>"; };
+		1000 /* DianeIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeIOSApp.swift; sourceTree = "<group>"; };
+		1001 /* DianeIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DianeIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1002 /* DianeHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeHTTPClient.swift; sourceTree = "<group>"; };
+		1003 /* ServerConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConfiguration.swift; sourceTree = "<group>"; };
+		1004 /* IOSStatusMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSStatusMonitor.swift; sourceTree = "<group>"; };
+		1005 /* ServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSetupView.swift; sourceTree = "<group>"; };
+		1006 /* IOSContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSContentView.swift; sourceTree = "<group>"; };
+		1007 /* StatusDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDashboardView.swift; sourceTree = "<group>"; };
+		1008 /* MCPServersViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServersViews.swift; sourceTree = "<group>"; };
+		1009 /* AgentsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsViews.swift; sourceTree = "<group>"; };
+		1010 /* ProvidersViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersViews.swift; sourceTree = "<group>"; };
+		1011 /* ContextsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextsViews.swift; sourceTree = "<group>"; };
+		1012 /* JobsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobsViews.swift; sourceTree = "<group>"; };
+		1013 /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
+		1014 /* IOSSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSettingsView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		200 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		201 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		202 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1200 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXContainerItemProxy section */
+		800 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 600 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 400;
+			remoteInfo = Diane;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		801 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 400 /* Diane */;
+			targetProxy = 800 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXGroup section */
+		300 = {
+			isa = PBXGroup;
+			children = (
+				301 /* Diane */,
+				313 /* ComponentCatalog */,
+				309 /* DianeTests */,
+				302 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		301 /* Diane */ = {
+			isa = PBXGroup;
+			children = (
+				303 /* App */,
+				304 /* Views */,
+				312 /* Components */,
+				305 /* Services */,
+				306 /* Models */,
+				307 /* Resources */,
+				308 /* ViewModels */,
+			);
+			path = Diane;
+			sourceTree = "<group>";
+		};
+		302 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				100 /* Diane.app */,
+				128 /* DianeTests.xctest */,
+				152 /* ComponentCatalog.app */,
+				1001 /* DianeIOS.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		303 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				101 /* DianeApp.swift */,
+				1000 /* DianeIOSApp.swift */,
+				108 /* Diane.entitlements */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		304 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				314 /* iOS */,
+				102 /* MenuBarView.swift */,
+				103 /* SettingsView.swift */,
+				110 /* ToolsBrowserView.swift */,
+				113 /* SchedulerView.swift */,
+				115 /* AgentsView.swift */,
+				118 /* ContextsView.swift */,
+				120 /* ProvidersView.swift */,
+				123 /* MCPServersView.swift */,
+				124 /* MainWindowView.swift */,
+				125 /* MasterDetailView.swift */,
+				121 /* UsageView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		305 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				104 /* DianeClient.swift */,
+				105 /* StatusMonitor.swift */,
+				109 /* UpdateChecker.swift */,
+				111 /* WindowManager.swift */,
+				116 /* FileLogger.swift */,
+				126 /* DianeClientProtocol.swift */,
+				1002 /* DianeHTTPClient.swift */,
+				1003 /* ServerConfiguration.swift */,
+				1004 /* IOSStatusMonitor.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		306 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				106 /* DianeStatus.swift */,
+				112 /* Job.swift */,
+				114 /* Agent.swift */,
+				117 /* Context.swift */,
+				119 /* Provider.swift */,
+				122 /* MCPServer.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		307 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				107 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		308 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				127 /* MCPServersViewModel.swift */,
+				132 /* SchedulerViewModel.swift */,
+				134 /* UsageViewModel.swift */,
+				136 /* ToolsBrowserViewModel.swift */,
+				138 /* ProvidersViewModel.swift */,
+				140 /* AgentsViewModel.swift */,
+				142 /* ContextsViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		309 /* DianeTests */ = {
+			isa = PBXGroup;
+			children = (
+				131 /* MCPServersViewModelTests.swift */,
+				133 /* SchedulerViewModelTests.swift */,
+				135 /* UsageViewModelTests.swift */,
+				137 /* ToolsBrowserViewModelTests.swift */,
+				139 /* ProvidersViewModelTests.swift */,
+				141 /* AgentsViewModelTests.swift */,
+				143 /* ContextsViewModelTests.swift */,
+				310 /* TestHelpers */,
+				311 /* SnapshotTests */,
+			);
+			path = DianeTests;
+			sourceTree = "<group>";
+		};
+		310 /* TestHelpers */ = {
+			isa = PBXGroup;
+			children = (
+				129 /* MockDianeClient.swift */,
+				130 /* TestFixtures.swift */,
+			);
+			path = TestHelpers;
+			sourceTree = "<group>";
+		};
+		311 /* SnapshotTests */ = {
+			isa = PBXGroup;
+			children = (
+				144 /* MCPServersViewSnapshotTests.swift */,
+			);
+			path = SnapshotTests;
+			sourceTree = "<group>";
+		};
+		312 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				158 /* DesignTokens.swift */,
+				159 /* EmptyStateView.swift */,
+				160 /* TimeRangePicker.swift */,
+				145 /* DetailSection.swift */,
+				146 /* InfoRow.swift */,
+				147 /* StringArrayEditor.swift */,
+				148 /* KeyValueEditor.swift */,
+				149 /* OAuthConfigEditor.swift */,
+				150 /* SummaryCard.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		313 /* ComponentCatalog */ = {
+			isa = PBXGroup;
+			children = (
+				151 /* CatalogApp.swift */,
+				153 /* CatalogContentView.swift */,
+				154 /* CatalogTheme.swift */,
+				155 /* CatalogPresets.swift */,
+				156 /* MockStatusMonitor.swift */,
+				157 /* GitHubIssueService.swift */,
+			);
+			path = ComponentCatalog;
+			sourceTree = "<group>";
+		};
+		314 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				1005 /* ServerSetupView.swift */,
+				1006 /* IOSContentView.swift */,
+				1007 /* StatusDashboardView.swift */,
+				1008 /* MCPServersViews.swift */,
+				1009 /* AgentsViews.swift */,
+				1010 /* ProvidersViews.swift */,
+				1011 /* ContextsViews.swift */,
+				1012 /* JobsViews.swift */,
+				1013 /* UsageView.swift */,
+				1014 /* IOSSettingsView.swift */,
+			);
+			path = iOS;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		400 /* Diane */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 500 /* Build configuration list for PBXNativeTarget "Diane" */;
+			buildPhases = (
+				401 /* Sources */,
+				200 /* Frameworks */,
+				402 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Diane;
+			productName = Diane;
+			productReference = 100 /* Diane.app */;
+			productType = "com.apple.product-type.application";
+		};
+		410 /* DianeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 501 /* Build configuration list for PBXNativeTarget "DianeTests" */;
+			buildPhases = (
+				403 /* Sources */,
+				201 /* Frameworks */,
+				404 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				801 /* PBXTargetDependency */,
+			);
+			name = DianeTests;
+			packageProductDependencies = (
+				901 /* SnapshotTesting */,
+			);
+			productName = DianeTests;
+			productReference = 128 /* DianeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		420 /* ComponentCatalog */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 502 /* Build configuration list for PBXNativeTarget "ComponentCatalog" */;
+			buildPhases = (
+				405 /* Sources */,
+				202 /* Frameworks */,
+				406 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ComponentCatalog;
+			productName = ComponentCatalog;
+			productReference = 152 /* ComponentCatalog.app */;
+			productType = "com.apple.product-type.application";
+		};
+		1300 /* DianeIOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1400 /* Build configuration list for PBXNativeTarget "DianeIOS" */;
+			buildPhases = (
+				1201 /* Sources */,
+				1200 /* Frameworks */,
+				1202 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DianeIOS;
+			productName = DianeIOS;
+			productReference = 1001 /* DianeIOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		600 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					400 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					410 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = 400;
+					};
+					420 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					1300 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = 601 /* Build configuration list for PBXProject "Diane" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 300;
+			productRefGroup = 302 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				400 /* Diane */,
+				410 /* DianeTests */,
+				420 /* ComponentCatalog */,
+				1300 /* DianeIOS */,
+			);
+			packageReferences = (
+				900 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		402 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				007 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		404 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		406 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				087 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1202 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1114 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		401 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				001 /* DianeApp.swift in Sources */,
+				002 /* MenuBarView.swift in Sources */,
+				003 /* SettingsView.swift in Sources */,
+				004 /* DianeClient.swift in Sources */,
+				005 /* StatusMonitor.swift in Sources */,
+				006 /* DianeStatus.swift in Sources */,
+				008 /* UpdateChecker.swift in Sources */,
+				009 /* ToolsBrowserView.swift in Sources */,
+				010 /* WindowManager.swift in Sources */,
+				011 /* Job.swift in Sources */,
+				012 /* SchedulerView.swift in Sources */,
+				013 /* Agent.swift in Sources */,
+				014 /* AgentsView.swift in Sources */,
+				015 /* FileLogger.swift in Sources */,
+				016 /* Context.swift in Sources */,
+				017 /* ContextsView.swift in Sources */,
+				018 /* Provider.swift in Sources */,
+				019 /* ProvidersView.swift in Sources */,
+				020 /* UsageView.swift in Sources */,
+				021 /* MCPServer.swift in Sources */,
+				022 /* MCPServersView.swift in Sources */,
+				024 /* MainWindowView.swift in Sources */,
+				025 /* MasterDetailView.swift in Sources */,
+				026 /* DianeClientProtocol.swift in Sources */,
+				027 /* MCPServersViewModel.swift in Sources */,
+				031 /* SchedulerViewModel.swift in Sources */,
+				033 /* UsageViewModel.swift in Sources */,
+				035 /* ToolsBrowserViewModel.swift in Sources */,
+				037 /* ProvidersViewModel.swift in Sources */,
+				039 /* AgentsViewModel.swift in Sources */,
+				041 /* ContextsViewModel.swift in Sources */,
+				044 /* DetailSection.swift in Sources */,
+				045 /* InfoRow.swift in Sources */,
+				046 /* StringArrayEditor.swift in Sources */,
+				047 /* KeyValueEditor.swift in Sources */,
+				048 /* OAuthConfigEditor.swift in Sources */,
+				049 /* SummaryCard.swift in Sources */,
+				095 /* DesignTokens.swift in Sources */,
+				097 /* EmptyStateView.swift in Sources */,
+				099 /* TimeRangePicker.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		403 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				028 /* MockDianeClient.swift in Sources */,
+				029 /* TestFixtures.swift in Sources */,
+				030 /* MCPServersViewModelTests.swift in Sources */,
+				032 /* SchedulerViewModelTests.swift in Sources */,
+				034 /* UsageViewModelTests.swift in Sources */,
+				036 /* ToolsBrowserViewModelTests.swift in Sources */,
+				038 /* ProvidersViewModelTests.swift in Sources */,
+				040 /* AgentsViewModelTests.swift in Sources */,
+				042 /* ContextsViewModelTests.swift in Sources */,
+				043 /* MCPServersViewSnapshotTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		405 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				050 /* CatalogApp.swift in Sources */,
+				088 /* CatalogContentView.swift in Sources */,
+				089 /* CatalogTheme.swift in Sources */,
+				092 /* CatalogPresets.swift in Sources */,
+				093 /* MockStatusMonitor.swift in Sources */,
+				094 /* GitHubIssueService.swift in Sources */,
+				090 /* MockDianeClient.swift in Sources */,
+				091 /* TestFixtures.swift in Sources */,
+				051 /* MenuBarView.swift in Sources */,
+				052 /* SettingsView.swift in Sources */,
+				053 /* DianeClient.swift in Sources */,
+				054 /* StatusMonitor.swift in Sources */,
+				055 /* DianeStatus.swift in Sources */,
+				056 /* UpdateChecker.swift in Sources */,
+				057 /* ToolsBrowserView.swift in Sources */,
+				058 /* WindowManager.swift in Sources */,
+				059 /* Job.swift in Sources */,
+				060 /* SchedulerView.swift in Sources */,
+				061 /* Agent.swift in Sources */,
+				062 /* AgentsView.swift in Sources */,
+				063 /* FileLogger.swift in Sources */,
+				064 /* Context.swift in Sources */,
+				065 /* ContextsView.swift in Sources */,
+				066 /* Provider.swift in Sources */,
+				067 /* ProvidersView.swift in Sources */,
+				068 /* UsageView.swift in Sources */,
+				069 /* MCPServer.swift in Sources */,
+				070 /* MCPServersView.swift in Sources */,
+				071 /* MainWindowView.swift in Sources */,
+				072 /* MasterDetailView.swift in Sources */,
+				073 /* DianeClientProtocol.swift in Sources */,
+				074 /* MCPServersViewModel.swift in Sources */,
+				075 /* SchedulerViewModel.swift in Sources */,
+				076 /* UsageViewModel.swift in Sources */,
+				077 /* ToolsBrowserViewModel.swift in Sources */,
+				078 /* ProvidersViewModel.swift in Sources */,
+				079 /* AgentsViewModel.swift in Sources */,
+				080 /* ContextsViewModel.swift in Sources */,
+				081 /* DetailSection.swift in Sources */,
+				082 /* InfoRow.swift in Sources */,
+				083 /* StringArrayEditor.swift in Sources */,
+				084 /* KeyValueEditor.swift in Sources */,
+				085 /* OAuthConfigEditor.swift in Sources */,
+				086 /* SummaryCard.swift in Sources */,
+				096 /* DesignTokens.swift in Sources */,
+				098 /* EmptyStateView.swift in Sources */,
+				161 /* TimeRangePicker.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1201 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1100 /* DianeIOSApp.swift in Sources */,
+				1101 /* DianeStatus.swift in Sources */,
+				1102 /* Job.swift in Sources */,
+				1103 /* Agent.swift in Sources */,
+				1104 /* Context.swift in Sources */,
+				1105 /* Provider.swift in Sources */,
+				1106 /* MCPServer.swift in Sources */,
+				1107 /* DianeClientProtocol.swift in Sources */,
+				1108 /* DesignTokens.swift in Sources */,
+				1109 /* EmptyStateView.swift in Sources */,
+				1110 /* InfoRow.swift in Sources */,
+				1111 /* TimeRangePicker.swift in Sources */,
+				1112 /* DetailSection.swift in Sources */,
+				1113 /* SummaryCard.swift in Sources */,
+				1115 /* DianeHTTPClient.swift in Sources */,
+				1116 /* ServerConfiguration.swift in Sources */,
+				1117 /* IOSStatusMonitor.swift in Sources */,
+				1118 /* ServerSetupView.swift in Sources */,
+				1119 /* IOSContentView.swift in Sources */,
+				1120 /* StatusDashboardView.swift in Sources */,
+				1121 /* MCPServersViews.swift in Sources */,
+				1122 /* AgentsViews.swift in Sources */,
+				1123 /* ProvidersViews.swift in Sources */,
+				1124 /* ContextsViews.swift in Sources */,
+				1125 /* JobsViews.swift in Sources */,
+				1126 /* UsageView.swift in Sources */,
+				1127 /* IOSSettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		700 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		701 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		702 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Diane/App/Diane.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Diane;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSUIElement = NO;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diane.Diane;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		703 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Diane/App/Diane.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Diane;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSUIElement = NO;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diane.Diane;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		704 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diane.DianeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Diane.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Diane";
+			};
+			name = Debug;
+		};
+		705 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diane.DianeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Diane.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Diane";
+			};
+			name = Release;
+		};
+		706 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ComponentCatalog;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diane.ComponentCatalog;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG COMPONENT_CATALOG $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		707 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ComponentCatalog;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diane.ComponentCatalog;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "COMPONENT_CATALOG $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		1401 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Diane;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diane.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1402 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Diane;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diane.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		500 /* Build configuration list for PBXNativeTarget "Diane" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				702 /* Debug */,
+				703 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		501 /* Build configuration list for PBXNativeTarget "DianeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				704 /* Debug */,
+				705 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		502 /* Build configuration list for PBXNativeTarget "ComponentCatalog" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				706 /* Debug */,
+				707 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1400 /* Build configuration list for PBXNativeTarget "DianeIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1401 /* Debug */,
+				1402 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		601 /* Build configuration list for PBXProject "Diane" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				700 /* Debug */,
+				701 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		900 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.17.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		901 /* SnapshotTesting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 900 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
+			productName = SnapshotTesting;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 600 /* Project object */;
+}

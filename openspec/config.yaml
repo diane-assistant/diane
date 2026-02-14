@@ -1,12 +1,12 @@
 schema: spec-driven
 
 context: |
-  Tech stack: Swift, SwiftUI, macOS native app (DianeMenu)
+  Tech stack: Swift, SwiftUI, macOS native app (Diane)
   Domain: Developer tool — MCP server management, AI agent orchestration
 
   ## SwiftUI Component Guidelines
 
-  Design tokens are defined in DianeMenu/DianeMenu/Components/DesignTokens.swift.
+  Design tokens are defined in Diane/Diane/Components/DesignTokens.swift.
   All components and views MUST use these tokens instead of magic numbers.
 
   ### Core Principles

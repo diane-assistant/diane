@@ -139,6 +139,54 @@ func (c *Client) IsRunning() bool {
 	return c.Health() == nil
 }
 
+// ContextInfo represents a context from the API
+type ContextInfo struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	IsDefault   bool   `json:"is_default"`
+}
+
+// ListContexts returns the list of available contexts
+func (c *Client) ListContexts() ([]ContextInfo, error) {
+	resp, err := c.httpClient.Get("http://unix/contexts")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get contexts: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("contexts request failed: %d", resp.StatusCode)
+	}
+
+	var contexts []ContextInfo
+	if err := json.NewDecoder(resp.Body).Decode(&contexts); err != nil {
+		return nil, fmt.Errorf("failed to decode contexts: %w", err)
+	}
+
+	return contexts, nil
+}
+
+// Doctor runs diagnostic checks and returns a report
+func (c *Client) Doctor() (*DoctorReport, error) {
+	resp, err := c.httpClient.Get("http://unix/doctor")
+	if err != nil {
+		return nil, fmt.Errorf("failed to run doctor: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("doctor request failed: %d", resp.StatusCode)
+	}
+
+	var report DoctorReport
+	if err := json.NewDecoder(resp.Body).Decode(&report); err != nil {
+		return nil, fmt.Errorf("failed to decode doctor report: %w", err)
+	}
+
+	return &report, nil
+}
+
 // ListAgents returns the list of configured ACP agents
 func (c *Client) ListAgents() ([]acp.AgentConfig, error) {
 	resp, err := c.httpClient.Get("http://unix/agents")
@@ -441,6 +489,26 @@ func (c *Client) RefreshGallery() error {
 	}
 
 	return nil
+}
+
+// GetMCPServerConfigs returns the full configuration for all MCP servers from the database
+func (c *Client) GetMCPServerConfigs() ([]MCPServerResponse, error) {
+	resp, err := c.httpClient.Get("http://unix/mcp-servers-config")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get MCP server configs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("MCP server configs request failed: %d", resp.StatusCode)
+	}
+
+	var configs []MCPServerResponse
+	if err := json.NewDecoder(resp.Body).Decode(&configs); err != nil {
+		return nil, fmt.Errorf("failed to decode server configs: %w", err)
+	}
+
+	return configs, nil
 }
 
 // ListOAuthServers returns all MCP servers with OAuth configuration

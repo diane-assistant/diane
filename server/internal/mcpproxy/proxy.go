@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -46,32 +44,41 @@ type Config struct {
 	Servers []ServerConfig `json:"servers"`
 }
 
-// Proxy manages multiple MCP clients
-type Proxy struct {
-	clients      map[string]Client
-	config       *Config
-	configPath   string // Store config path for reload
-	mu           sync.RWMutex
-	notifyChan   chan string       // Aggregated notifications channel
-	initErrors   map[string]string // Store initialization errors per server
-	initializing map[string]bool   // Track servers currently initializing
-	initWg       sync.WaitGroup    // Wait group for initial startup
+// ConfigProvider is an interface for loading MCP server configurations.
+// This allows the proxy to load configs from any source (database, file, etc.)
+type ConfigProvider interface {
+	// LoadMCPServerConfigs returns all MCP server configurations
+	LoadMCPServerConfigs() ([]ServerConfig, error)
 }
 
-// NewProxy creates a new MCP proxy
-func NewProxy(configPath string) (*Proxy, error) {
-	config, err := loadConfig(configPath)
+// Proxy manages multiple MCP clients
+type Proxy struct {
+	clients        map[string]Client
+	config         *Config
+	configProvider ConfigProvider // Provider for loading server configs
+	mu             sync.RWMutex
+	notifyChan     chan string       // Aggregated notifications channel
+	initErrors     map[string]string // Store initialization errors per server
+	initializing   map[string]bool   // Track servers currently initializing
+	initWg         sync.WaitGroup    // Wait group for initial startup
+}
+
+// NewProxy creates a new MCP proxy that loads config from the given provider
+func NewProxy(provider ConfigProvider) (*Proxy, error) {
+	servers, err := provider.LoadMCPServerConfigs()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
+	config := &Config{Servers: servers}
+
 	proxy := &Proxy{
-		clients:      make(map[string]Client),
-		config:       config,
-		configPath:   configPath,
-		notifyChan:   make(chan string, 10), // Buffered channel for notifications
-		initErrors:   make(map[string]string),
-		initializing: make(map[string]bool),
+		clients:        make(map[string]Client),
+		config:         config,
+		configProvider: provider,
+		notifyChan:     make(chan string, 10), // Buffered channel for notifications
+		initErrors:     make(map[string]string),
+		initializing:   make(map[string]bool),
 	}
 
 	// Start enabled MCP servers concurrently in background
@@ -232,12 +239,13 @@ func (p *Proxy) NotificationChan() <-chan string {
 
 // Reload reloads the MCP configuration and starts/stops servers as needed
 func (p *Proxy) Reload() error {
-	slog.Info("Reloading MCP configuration", "path", p.configPath)
+	slog.Info("Reloading MCP configuration")
 
-	newConfig, err := loadConfig(p.configPath)
+	servers, err := p.configProvider.LoadMCPServerConfigs()
 	if err != nil {
 		return fmt.Errorf("failed to load new config: %w", err)
 	}
+	newConfig := &Config{Servers: servers}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -492,27 +500,6 @@ func (p *Proxy) GetServersWithOAuth() []ServerConfig {
 		}
 	}
 	return result
-}
-
-// loadConfig loads the MCP proxy configuration
-func loadConfig(configPath string) (*Config, error) {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, err
-	}
-
-	var config Config
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, err
-	}
-
-	return &config, nil
-}
-
-// GetDefaultConfigPath returns the default config path
-func GetDefaultConfigPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".diane", "mcp-servers.json")
 }
 
 // ContextFilter provides methods to filter tools by context

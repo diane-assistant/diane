@@ -48,7 +48,51 @@ var downloadsProvider *downloads.Provider // File download tools
 var filesProvider *files.Provider         // File index tools
 var apiServer *api.Server
 var mcpHTTPServer *api.MCPHTTPServer
+var database *db.DB // Shared database instance
 var startTime time.Time
+
+// DBConfigProvider implements mcpproxy.ConfigProvider, loading server configs from the database
+type DBConfigProvider struct {
+	db *db.DB
+}
+
+func (p *DBConfigProvider) LoadMCPServerConfigs() ([]mcpproxy.ServerConfig, error) {
+	servers, err := p.db.ListMCPServers()
+	if err != nil {
+		return nil, err
+	}
+
+	configs := make([]mcpproxy.ServerConfig, 0, len(servers))
+	for _, s := range servers {
+		// Skip builtin servers — they are managed separately
+		if s.Type == "builtin" {
+			continue
+		}
+		var oauth *mcpproxy.OAuthConfig
+		if s.OAuth != nil {
+			oauth = &mcpproxy.OAuthConfig{
+				Provider:      s.OAuth.Provider,
+				ClientID:      s.OAuth.ClientID,
+				ClientSecret:  s.OAuth.ClientSecret,
+				Scopes:        s.OAuth.Scopes,
+				DeviceAuthURL: s.OAuth.DeviceAuthURL,
+				TokenURL:      s.OAuth.TokenURL,
+			}
+		}
+		configs = append(configs, mcpproxy.ServerConfig{
+			Name:    s.Name,
+			Enabled: s.Enabled,
+			Type:    s.Type,
+			Command: s.Command,
+			Args:    s.Args,
+			Env:     s.Env,
+			URL:     s.URL,
+			Headers: s.Headers,
+			OAuth:   oauth,
+		})
+	}
+	return configs, nil
+}
 
 // DianeStatusProvider implements api.StatusProvider
 type DianeStatusProvider struct{}
@@ -79,6 +123,15 @@ func (d *DianeStatusProvider) GetMCPServers() []api.MCPServerStatus {
 // getAllMCPServers returns all MCP servers including builtin providers
 func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
 	var servers []api.MCPServerStatus
+
+	// Jobs tools are always available (built into the server)
+	servers = append(servers, api.MCPServerStatus{
+		Name:      "jobs",
+		Enabled:   true,
+		Connected: true,
+		ToolCount: 9, // job_list, job_add, job_enable, job_disable, job_delete, job_pause, job_resume, job_logs, server_status
+		Builtin:   true,
+	})
 
 	// Add builtin providers as MCP servers
 	if appleProvider != nil {
@@ -173,7 +226,7 @@ func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
 
 	if filesProvider != nil {
 		servers = append(servers, api.MCPServerStatus{
-			Name:      "files",
+			Name:      "file_registry",
 			Enabled:   true,
 			Connected: true,
 			ToolCount: len(filesProvider.Tools()),
@@ -652,7 +705,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 			tools = append(tools, api.ToolInfo{
 				Name:        tool.Name,
 				Description: tool.Description,
-				Server:      "files",
+				Server:      "file_registry",
 				Builtin:     true,
 			})
 		}
@@ -864,11 +917,11 @@ func (d *DianeStatusProvider) GetToolsForContext(contextName string) []api.ToolI
 	// Files tools
 	if filesProvider != nil {
 		for _, tool := range filesProvider.Tools() {
-			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "files", tool.Name); enabled {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "file_registry", tool.Name); enabled {
 				tools = append(tools, api.ToolInfo{
 					Name:        tool.Name,
 					Description: tool.Description,
-					Server:      "files",
+					Server:      "file_registry",
 					Builtin:     true,
 				})
 			}
@@ -1139,12 +1192,37 @@ func main() {
 	}
 	defer os.Remove(pidFile)
 
-	// Initialize MCP proxy
-	configPath := mcpproxy.GetDefaultConfigPath()
-	proxy, err = mcpproxy.NewProxy(configPath)
-	if err != nil {
-		slog.Warn("Failed to initialize MCP proxy", "error", err)
-		// Continue without proxy - built-in tools will still work
+	// Initialize database (shared across proxy, API, and other subsystems)
+	dbPath := filepath.Join(home, ".diane", "cron.db")
+	var err2 error
+	database, err2 = db.New(dbPath)
+	if err2 != nil {
+		slog.Warn("Failed to initialize database", "error", err2)
+	} else {
+		// One-time migration: import servers from mcp-servers.json if DB is empty
+		jsonPath := filepath.Join(home, ".diane", "mcp-servers.json")
+		imported, err := database.MigrateFromJSON(jsonPath)
+		if err != nil {
+			slog.Warn("Failed to migrate MCP servers from JSON", "error", err)
+		} else if imported > 0 {
+			slog.Info("Migrated MCP servers from JSON to database", "count", imported)
+		}
+	}
+	defer func() {
+		if database != nil {
+			database.Close()
+		}
+	}()
+
+	// Initialize MCP proxy from database
+	if database != nil {
+		provider := &DBConfigProvider{db: database}
+		proxy, err = mcpproxy.NewProxy(provider)
+		if err != nil {
+			slog.Warn("Failed to initialize MCP proxy", "error", err)
+		}
+	} else {
+		slog.Warn("MCP proxy not available: database not initialized")
 	}
 	defer func() {
 		if proxy != nil {
@@ -1252,7 +1330,7 @@ func main() {
 
 	// Start the Unix socket API server for companion app
 	statusProvider := &DianeStatusProvider{}
-	apiServer, err = api.NewServer(statusProvider)
+	apiServer, err = api.NewServer(statusProvider, database)
 	if err != nil {
 		slog.Warn("Failed to create API server", "error", err)
 	} else {
@@ -2091,7 +2169,7 @@ func listToolsForContext(contextName string) MCPResponse {
 	// Files tools
 	if filesProvider != nil {
 		for _, tool := range filesProvider.Tools() {
-			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "files", tool.Name); enabled {
+			if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "file_registry", tool.Name); enabled {
 				tools = append(tools, map[string]interface{}{
 					"name":        tool.Name,
 					"description": tool.Description,
@@ -2344,7 +2422,7 @@ func callToolForContext(params json.RawMessage, contextName string) MCPResponse 
 
 	// Check Files tools
 	if filesProvider != nil && filesProvider.HasTool(call.Name) {
-		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "files", call.Name); !enabled {
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "file_registry", call.Name); !enabled {
 			return MCPResponse{
 				Error: &MCPError{
 					Code:    -32601,

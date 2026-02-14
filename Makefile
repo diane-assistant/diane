@@ -96,21 +96,21 @@ test:
 run: build
 	./$(BUILD_DIR)/$(BINARY_NAME)
 
-## Build DianeMenu.app with embedded diane binary (macOS only)
+## Build Diane.app with embedded diane binary (macOS only)
 app:
-	@echo "Building DianeMenu.app with embedded diane binary..."
+	@echo "Building Diane.app with embedded diane binary..."
 	VERSION=$(VERSION) $(SCRIPTS_DIR)/build-app.sh
 
 ## Build and install everything (macOS only)
 install-app:
-	@echo "Building and installing DianeMenu.app..."
+	@echo "Building and installing Diane.app..."
 	VERSION=$(VERSION) $(SCRIPTS_DIR)/install.sh
 
 ## Clean build artifacts
 clean:
 	@echo "Cleaning..."
 	@rm -rf $(BUILD_DIR)
-	@rm -rf DianeMenu/build
+	@rm -rf Diane/build
 	@echo "Done"
 
 ## Show version
@@ -128,8 +128,8 @@ help:
 	@echo "  build-ctl   Build diane-ctl for current platform"
 	@echo "  build-acp   Build acp-server for current platform"
 	@echo "  build-all   Build for all platforms (darwin/linux, arm64/amd64)"
-	@echo "  app         Build DianeMenu.app with embedded diane binary (macOS)"
-	@echo "  install-app Build and install DianeMenu.app + CLI tools (macOS)"
+	@echo "  app         Build Diane.app with embedded diane binary (macOS)"
+	@echo "  install-app Build and install Diane.app + CLI tools (macOS)"
 	@echo "  release     Build all platforms and create release archives"
 	@echo "  install     Install CLI binaries to ~/.diane/bin/"
 	@echo "  test        Run tests"
@@ -140,7 +140,7 @@ help:
 	@echo ""
 	@echo "Examples:"
 	@echo "  make                    # Build diane, diane-ctl, and acp-server"
-	@echo "  make app                # Build DianeMenu.app bundle"
+	@echo "  make app                # Build Diane.app bundle"
 	@echo "  make install-app        # Build and install everything (macOS)"
 	@echo "  make install            # Install CLI binaries only"
 	@echo "  make VERSION=v1.0.0 release  # Create versioned release"

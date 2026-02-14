@@ -77,6 +77,19 @@ type JobExecution struct {
 	Error     *string    `json:"error,omitempty"`
 }
 
+// DoctorCheck represents a single diagnostic check result
+type DoctorCheck struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"` // "ok", "warn", "fail"
+	Message string `json:"message"`
+}
+
+// DoctorReport is the full diagnostic report
+type DoctorReport struct {
+	Healthy bool          `json:"healthy"`
+	Checks  []DoctorCheck `json:"checks"`
+}
+
 // StatusProvider is an interface for getting status from the main server
 type StatusProvider interface {
 	GetStatus() Status
@@ -131,6 +144,9 @@ type Server struct {
 	socketPath     string
 	listener       net.Listener
 	server         *http.Server
+	httpAddr       string       // optional TCP address for HTTP listener (e.g., ":8080")
+	tcpListener    net.Listener // TCP listener for HTTP access (nil if disabled)
+	httpServer     *http.Server // separate http.Server for TCP listener
 	statusProvider StatusProvider
 	acpManager     *acp.Manager
 	gallery        *acp.Gallery
@@ -140,7 +156,7 @@ type Server struct {
 }
 
 // NewServer creates a new API server
-func NewServer(statusProvider StatusProvider) (*Server, error) {
+func NewServer(statusProvider StatusProvider, database *db.DB) (*Server, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
@@ -167,20 +183,7 @@ func NewServer(statusProvider StatusProvider) (*Server, error) {
 
 	// Initialize Contexts API with database
 	var contextsAPI *ContextsAPI
-	dbPath := filepath.Join(home, ".diane", "cron.db")
-	database, err := db.New(dbPath)
-	if err != nil {
-		slog.Warn("Failed to initialize database for contexts API", "error", err)
-	} else {
-		// Perform first-run migration from mcp-servers.json to database
-		jsonPath := filepath.Join(home, ".diane", "mcp-servers.json")
-		imported, err := database.MigrateFromJSON(jsonPath)
-		if err != nil {
-			slog.Warn("Failed to migrate MCP servers from JSON", "error", err)
-		} else if imported > 0 {
-			slog.Info("Migrated MCP servers from JSON to database", "count", imported)
-		}
-
+	if database != nil {
 		contextsAPI = NewContextsAPI(database)
 		contextsAPI.SetToolProvider(statusProvider)
 	}
@@ -209,6 +212,7 @@ func NewServer(statusProvider StatusProvider) (*Server, error) {
 
 	return &Server{
 		socketPath:     socketPath,
+		httpAddr:       os.Getenv("DIANE_HTTP_ADDR"),
 		statusProvider: statusProvider,
 		acpManager:     acpManager,
 		gallery:        gallery,
@@ -216,6 +220,19 @@ func NewServer(statusProvider StatusProvider) (*Server, error) {
 		providersAPI:   providersAPI,
 		mcpServersAPI:  mcpServersAPI,
 	}, nil
+}
+
+// readOnlyMiddleware wraps a handler to reject non-GET/HEAD requests with 405.
+// This is used on the TCP HTTP listener to enforce read-only access from iOS clients.
+func readOnlyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "Method not allowed (read-only listener)", http.StatusMethodNotAllowed)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Start starts the API server
@@ -233,6 +250,7 @@ func (s *Server) Start() error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/doctor", s.handleDoctor)
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/tools", s.handleTools)
 	mux.HandleFunc("/mcp-servers", s.handleMCPServers)
@@ -273,14 +291,44 @@ func (s *Server) Start() error {
 		}
 	}()
 
+	// Optionally start TCP HTTP listener for remote read-only access (e.g., iOS via Tailscale)
+	if s.httpAddr != "" {
+		tcpListener, err := net.Listen("tcp", s.httpAddr)
+		if err != nil {
+			slog.Error("Failed to start HTTP listener", "addr", s.httpAddr, "error", err)
+			// Non-fatal: Unix socket still works
+		} else {
+			s.tcpListener = tcpListener
+			s.httpServer = &http.Server{Handler: readOnlyMiddleware(mux)}
+			go func() {
+				slog.Info("HTTP listener started (read-only)", "addr", s.httpAddr)
+				if err := s.httpServer.Serve(tcpListener); err != nil && err != http.ErrServerClosed {
+					slog.Error("HTTP listener error", "error", err)
+				}
+			}()
+		}
+	}
+
 	return nil
 }
 
 // Stop stops the API server
 func (s *Server) Stop() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Shut down TCP HTTP listener first (if running)
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			slog.Error("Failed to shut down HTTP listener", "error", err)
+		}
+	}
+	if s.tcpListener != nil {
+		s.tcpListener.Close()
+	}
+
+	// Shut down Unix socket server
 	if s.server != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		if err := s.server.Shutdown(ctx); err != nil {
 			return err
 		}
@@ -301,6 +349,198 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// handleDoctor runs diagnostic checks and returns a report
+func (s *Server) handleDoctor(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var checks []DoctorCheck
+	healthy := true
+
+	// 1. Daemon running (trivially true if we're responding)
+	checks = append(checks, DoctorCheck{
+		Name:    "daemon",
+		Status:  "ok",
+		Message: "Diane daemon is running",
+	})
+
+	// 2. Socket file
+	socketPath := GetSocketPath()
+	if _, err := os.Stat(socketPath); err != nil {
+		healthy = false
+		checks = append(checks, DoctorCheck{
+			Name:    "socket",
+			Status:  "fail",
+			Message: fmt.Sprintf("Unix socket missing: %s", socketPath),
+		})
+	} else {
+		checks = append(checks, DoctorCheck{
+			Name:    "socket",
+			Status:  "ok",
+			Message: fmt.Sprintf("Unix socket: %s", socketPath),
+		})
+	}
+
+	// 3. MCP HTTP server (port 8765)
+	httpClient := &http.Client{Timeout: 3 * time.Second}
+	resp, err := httpClient.Get("http://localhost:8765/health")
+	if err != nil {
+		healthy = false
+		checks = append(checks, DoctorCheck{
+			Name:    "mcp_http",
+			Status:  "fail",
+			Message: fmt.Sprintf("MCP HTTP server not reachable: %s", err),
+		})
+	} else {
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			checks = append(checks, DoctorCheck{
+				Name:    "mcp_http",
+				Status:  "ok",
+				Message: "MCP HTTP server listening on :8765",
+			})
+		} else {
+			healthy = false
+			checks = append(checks, DoctorCheck{
+				Name:    "mcp_http",
+				Status:  "fail",
+				Message: fmt.Sprintf("MCP HTTP /health returned %d", resp.StatusCode),
+			})
+		}
+	}
+
+	// 4. MCP SSE endpoint
+	sseReq, _ := http.NewRequest(http.MethodGet, "http://localhost:8765/mcp/sse", nil)
+	sseCtx, sseCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer sseCancel()
+	sseReq = sseReq.WithContext(sseCtx)
+	sseResp, err := httpClient.Do(sseReq)
+	if err != nil {
+		// context deadline exceeded is expected since SSE stays open — check if we got headers
+		healthy = false
+		checks = append(checks, DoctorCheck{
+			Name:    "mcp_sse",
+			Status:  "fail",
+			Message: fmt.Sprintf("MCP SSE endpoint not reachable: %s", err),
+		})
+	} else {
+		sseResp.Body.Close()
+		ct := sseResp.Header.Get("Content-Type")
+		if sseResp.StatusCode == http.StatusOK && strings.Contains(ct, "text/event-stream") {
+			checks = append(checks, DoctorCheck{
+				Name:    "mcp_sse",
+				Status:  "ok",
+				Message: "MCP SSE endpoint responding at /mcp/sse",
+			})
+		} else {
+			healthy = false
+			checks = append(checks, DoctorCheck{
+				Name:    "mcp_sse",
+				Status:  "fail",
+				Message: fmt.Sprintf("MCP SSE returned status %d, content-type: %s", sseResp.StatusCode, ct),
+			})
+		}
+	}
+
+	// 5. MCP Streamable endpoint
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"diane-doctor","version":"1.0"}}}`
+	streamResp, err := httpClient.Post("http://localhost:8765/mcp", "application/json", strings.NewReader(initBody))
+	if err != nil {
+		healthy = false
+		checks = append(checks, DoctorCheck{
+			Name:    "mcp_streamable",
+			Status:  "fail",
+			Message: fmt.Sprintf("MCP Streamable endpoint not reachable: %s", err),
+		})
+	} else {
+		streamResp.Body.Close()
+		if streamResp.StatusCode == http.StatusOK {
+			checks = append(checks, DoctorCheck{
+				Name:    "mcp_streamable",
+				Status:  "ok",
+				Message: "MCP Streamable endpoint responding at /mcp",
+			})
+		} else {
+			healthy = false
+			checks = append(checks, DoctorCheck{
+				Name:    "mcp_streamable",
+				Status:  "fail",
+				Message: fmt.Sprintf("MCP Streamable /mcp returned %d", streamResp.StatusCode),
+			})
+		}
+	}
+
+	// 6. Built-in MCP servers
+	servers := s.statusProvider.GetMCPServers()
+	activeCount := 0
+	failedServers := []string{}
+	for _, srv := range servers {
+		if srv.Connected {
+			activeCount++
+		} else if srv.Enabled && srv.Error != "" {
+			failedServers = append(failedServers, fmt.Sprintf("%s (%s)", srv.Name, srv.Error))
+		}
+	}
+	if len(failedServers) > 0 {
+		healthy = false
+		checks = append(checks, DoctorCheck{
+			Name:    "mcp_servers",
+			Status:  "fail",
+			Message: fmt.Sprintf("%d/%d servers active, failed: %s", activeCount, len(servers), strings.Join(failedServers, ", ")),
+		})
+	} else {
+		checks = append(checks, DoctorCheck{
+			Name:    "mcp_servers",
+			Status:  "ok",
+			Message: fmt.Sprintf("%d/%d MCP servers active", activeCount, len(servers)),
+		})
+	}
+
+	// 7. Database
+	home, _ := os.UserHomeDir()
+	dbPath := filepath.Join(home, ".diane", "cron.db")
+	if info, err := os.Stat(dbPath); err != nil {
+		healthy = false
+		checks = append(checks, DoctorCheck{
+			Name:    "database",
+			Status:  "fail",
+			Message: fmt.Sprintf("Database not found: %s", dbPath),
+		})
+	} else {
+		checks = append(checks, DoctorCheck{
+			Name:    "database",
+			Status:  "ok",
+			Message: fmt.Sprintf("Database: %s (%.1f KB)", dbPath, float64(info.Size())/1024),
+		})
+	}
+
+	// 8. PID file
+	pidPath := filepath.Join(home, ".diane", "mcp.pid")
+	if _, err := os.Stat(pidPath); err != nil {
+		checks = append(checks, DoctorCheck{
+			Name:    "pid_file",
+			Status:  "warn",
+			Message: "PID file missing (daemon may have been started differently)",
+		})
+	} else {
+		checks = append(checks, DoctorCheck{
+			Name:    "pid_file",
+			Status:  "ok",
+			Message: fmt.Sprintf("PID file: %s", pidPath),
+		})
+	}
+
+	report := DoctorReport{
+		Healthy: healthy,
+		Checks:  checks,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
 }
 
 // handleStatus returns the full status

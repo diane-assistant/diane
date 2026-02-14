@@ -1,6 +1,6 @@
 ## Context
 
-DianeMenu is a macOS menu-bar/window app built with SwiftUI. It has 8 screen-level views and ~8 reusable components. We recently refactored all views to an MVVM pattern with `DianeClientProtocol` for dependency injection, created `MockDianeClient` and `TestFixtures`, and have 253 passing tests including 10 snapshot tests.
+Diane is a macOS menu-bar/window app built with SwiftUI. It has 8 screen-level views and ~8 reusable components. We recently refactored all views to an MVVM pattern with `DianeClientProtocol` for dependency injection, created `MockDianeClient` and `TestFixtures`, and have 253 passing tests including 10 snapshot tests.
 
 The codebase currently has:
 - 7 ViewModels, all accepting `DianeClientProtocol` via `init(client:)`
@@ -30,11 +30,11 @@ The codebase currently has:
 
 ### 1. Source file sharing via multi-target membership (not a framework)
 
-**Decision:** The ComponentCatalog target will compile the same source files as DianeMenu by adding them to both targets' "Compile Sources" build phases in pbxproj. No shared framework or module.
+**Decision:** The ComponentCatalog target will compile the same source files as Diane by adding them to both targets' "Compile Sources" build phases in pbxproj. No shared framework or module.
 
 **Alternatives considered:**
 - **Shared framework target**: Cleaner separation, but adds a third target, complicates the pbxproj significantly, requires restructuring imports across the entire codebase, and introduces framework linking overhead. Overkill for a dev tool.
-- **`@testable import DianeMenu`**: Would require DianeMenu to be built as a framework (it's an app), and `@testable` doesn't work across app targets.
+- **`@testable import Diane`**: Would require Diane to be built as a framework (it's an app), and `@testable` doesn't work across app targets.
 
 **Rationale:** Multi-target file membership is the simplest approach for Xcode. Each source file gets a second entry in the ComponentCatalog's Sources build phase. No import changes needed — types are compiled directly into the catalog binary. This is the standard Xcode pattern for companion apps that share code with a main app.
 
@@ -87,15 +87,15 @@ enum CatalogPresets {
 
 ### 5. Catalog-only files live in `ComponentCatalog/` directory
 
-**Decision:** Catalog-specific files (CatalogApp.swift, CatalogContentView.swift, CatalogPresets.swift, CatalogTheme.swift, component preview wrappers) live in a new `DianeMenu/ComponentCatalog/` directory alongside the existing `DianeMenu/DianeMenu/` directory.
+**Decision:** Catalog-specific files (CatalogApp.swift, CatalogContentView.swift, CatalogPresets.swift, CatalogTheme.swift, component preview wrappers) live in a new `Diane/ComponentCatalog/` directory alongside the existing `Diane/Diane/` directory.
 
 **Rationale:** Keeps catalog code physically separate from the main app code. The pbxproj references these files only in the ComponentCatalog target's Sources build phase.
 
-### 6. Component extraction into `DianeMenu/DianeMenu/Components/`
+### 6. Component extraction into `Diane/Diane/Components/`
 
-**Decision:** Extract shared components into `DianeMenu/DianeMenu/Components/`, one file per component. This directory is inside the main app's source tree because these components belong to the DianeMenu module — the catalog just also compiles them.
+**Decision:** Extract shared components into `Diane/Diane/Components/`, one file per component. This directory is inside the main app's source tree because these components belong to the Diane module — the catalog just also compiles them.
 
-**Rationale:** These are DianeMenu components that happen to be reusable. Placing them alongside Views and ViewModels is the natural home. Both targets compile them via multi-target membership.
+**Rationale:** These are Diane components that happen to be reusable. Placing them alongside Views and ViewModels is the natural home. Both targets compile them via multi-target membership.
 
 ### 7. View injection pattern matches MCPServersView exactly
 
@@ -128,7 +128,7 @@ init(viewModel: XxxViewModel = XxxViewModel()) {
 
 **[Layout controls have limited reach in V1]** → Most internal view spacing is hardcoded, not read from environment. The controls will primarily affect the preview container (padding, background, canvas size) and accent color. Full internal theme propagation is future work. → This is acceptable — the primary value is state previews and canvas sizing, not pixel-perfect theme control.
 
-**[SettingsView mock may be incomplete]** → SettingsView uses `@AppStorage` for actual preferences. In the catalog, `@AppStorage` will use the catalog app's UserDefaults, which is isolated from DianeMenu's. This is actually fine — it means toggles work but don't affect the real app. → No mitigation needed; this is desirable isolation.
+**[SettingsView mock may be incomplete]** → SettingsView uses `@AppStorage` for actual preferences. In the catalog, `@AppStorage` will use the catalog app's UserDefaults, which is isolated from Diane's. This is actually fine — it means toggles work but don't affect the real app. → No mitigation needed; this is desirable isolation.
 
 **[Snapshot test baselines may need re-recording]** → Extracting components into separate files shouldn't change rendering, but if the extraction accidentally changes access levels or initializer defaults, snapshot tests will catch it. → Run full test suite after extraction to verify.
 

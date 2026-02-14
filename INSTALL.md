@@ -41,12 +41,21 @@ Add to your `opencode.json`:
 
 ```json
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "diane": {
-      "command": ["~/.diane/bin/diane"]
+    "diane-personal": {
+      "type": "remote",
+      "url": "http://localhost:8765/mcp/sse?context=personal",
+      "oauth": false
     }
   }
 }
+```
+
+Or install automatically with:
+
+```bash
+diane-ctl mcp install opencode
 ```
 
 ### Claude Desktop

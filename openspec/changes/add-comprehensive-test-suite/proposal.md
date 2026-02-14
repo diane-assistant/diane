@@ -1,11 +1,11 @@
 ## Why
 
-DianeMenu currently has no automated tests, making it difficult to confidently refactor code, catch regressions, or maintain quality as the application grows. A comprehensive test suite covering GUI components, business logic, and API interactions will increase reliability, enable faster iteration, and provide confidence when making changes to critical user flows like MCP server configuration.
+Diane currently has no automated tests, making it difficult to confidently refactor code, catch regressions, or maintain quality as the application grows. A comprehensive test suite covering GUI components, business logic, and API interactions will increase reliability, enable faster iteration, and provide confidence when making changes to critical user flows like MCP server configuration.
 
 ## What Changes
 
-- Add **DianeMenuTests** target to Xcode project for unit and integration tests
-- Add **DianeMenuUITests** target to Xcode project for end-to-end UI automation
+- Add **DianeTests** target to Xcode project for unit and integration tests
+- Add **DianeUITests** target to Xcode project for end-to-end UI automation
 - Extract ViewModels from SwiftUI views to separate presentation logic from business logic (enables unit testing)
 - Introduce protocol-based dependency injection for `DianeClient` and other services (enables mocking)
 - Add testing dependencies: ViewInspector, SnapshotTesting via Swift Package Manager
@@ -39,7 +39,7 @@ None - this is net-new testing infrastructure with no changes to existing requir
 - Business logic will be extracted from view code into testable units
 
 **Xcode Project:**
-- New test targets added: `DianeMenuTests` and `DianeMenuUITests`
+- New test targets added: `DianeTests` and `DianeUITests`
 - Swift Package Manager dependencies added for testing libraries
 
 **Dependencies:**

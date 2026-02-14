@@ -7,11 +7,19 @@ package files
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"log/slog"
+	"mime"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	sdk "github.com/emergent-company/emergent/apps/server-go/pkg/sdk"
@@ -31,24 +39,22 @@ type Provider struct {
 }
 
 // NewProvider creates a new files provider using Emergent as the backend.
-// Configuration is read from environment variables:
+// Configuration is read from ~/.diane/secrets/emergent-config.json first,
+// falling back to environment variables:
 //   - EMERGENT_BASE_URL (default: http://localhost:3002)
 //   - EMERGENT_API_KEY (required)
 //   - EMERGENT_PROJECT_ID (required)
 func NewProvider() (*Provider, error) {
-	baseURL := os.Getenv("EMERGENT_BASE_URL")
+	baseURL, apiKey, projectID := loadConfig()
+
+	if apiKey == "" {
+		return nil, fmt.Errorf("Emergent API key not configured. Create ~/.diane/secrets/emergent-config.json or set EMERGENT_API_KEY")
+	}
+	if projectID == "" {
+		return nil, fmt.Errorf("Emergent project ID not configured. Create ~/.diane/secrets/emergent-config.json or set EMERGENT_PROJECT_ID")
+	}
 	if baseURL == "" {
 		baseURL = "http://localhost:3002"
-	}
-
-	apiKey := os.Getenv("EMERGENT_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("EMERGENT_API_KEY environment variable is required")
-	}
-
-	projectID := os.Getenv("EMERGENT_PROJECT_ID")
-	if projectID == "" {
-		return nil, fmt.Errorf("EMERGENT_PROJECT_ID environment variable is required")
 	}
 
 	client, err := sdk.New(sdk.Config{
@@ -68,6 +74,43 @@ func NewProvider() (*Provider, error) {
 	}, nil
 }
 
+// emergentConfig represents the JSON config file structure
+type emergentConfig struct {
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	ProjectID string `json:"project_id"`
+}
+
+// loadConfig reads config from ~/.diane/secrets/emergent-config.json,
+// falling back to environment variables for any missing values.
+func loadConfig() (baseURL, apiKey, projectID string) {
+	// Try config file first
+	home, err := os.UserHomeDir()
+	if err == nil {
+		configPath := fmt.Sprintf("%s/.diane/secrets/emergent-config.json", home)
+		if data, err := os.ReadFile(configPath); err == nil {
+			var cfg emergentConfig
+			if err := json.Unmarshal(data, &cfg); err == nil {
+				baseURL = cfg.BaseURL
+				apiKey = cfg.APIKey
+				projectID = cfg.ProjectID
+			}
+		}
+	}
+
+	// Fall back to env vars for any missing values
+	if baseURL == "" {
+		baseURL = os.Getenv("EMERGENT_BASE_URL")
+	}
+	if apiKey == "" {
+		apiKey = os.Getenv("EMERGENT_API_KEY")
+	}
+	if projectID == "" {
+		projectID = os.Getenv("EMERGENT_PROJECT_ID")
+	}
+	return
+}
+
 // Close is a no-op for the Emergent-backed provider (HTTP client, no persistent connections)
 func (p *Provider) Close() error {
 	return nil
@@ -75,7 +118,7 @@ func (p *Provider) Close() error {
 
 // Name returns the provider name
 func (p *Provider) Name() string {
-	return "files"
+	return "file_registry"
 }
 
 // CheckDependencies verifies Emergent configuration is present
@@ -140,10 +183,10 @@ func numberProperty(description string) map[string]interface{} {
 func (p *Provider) Tools() []Tool {
 	return []Tool{
 		{
-			Name: "file_register",
+			Name: "file_registry_register",
 			Description: `Register a file in the unified file index. Use this after discovering files via shell commands (find, stat, file, sha256sum) or other tools (Drive, Gmail). 
 The LLM gathers file metadata and registers it here for unified search and management.
-Required: source (local, gdrive, gmail, etc.) and path. Other fields are optional but improve search.`,
+Required: source, path, and content_hash. Other fields are optional but improve search.`,
 			InputSchema: objectSchema(
 				map[string]interface{}{
 					"source":          stringProperty("Source identifier: 'local', 'gdrive', 'gmail', 'dropbox', etc."),
@@ -155,7 +198,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 					"is_directory":    boolProperty("True if this is a directory"),
 					"created_at":      stringProperty("Creation timestamp (ISO 8601 format)"),
 					"modified_at":     stringProperty("Modification timestamp (ISO 8601 format)"),
-					"content_hash":    stringProperty("SHA-256 hash of full file content (for duplicate detection)"),
+					"content_hash":    stringProperty("SHA-256 hash of full file content (required for duplicate detection)"),
 					"partial_hash":    stringProperty("SHA-256 hash of first 64KB (for quick duplicate detection)"),
 					"content_text":    stringProperty("Extracted text content (for full-text search and embeddings)"),
 					"content_preview": stringProperty("First ~500 chars preview"),
@@ -163,11 +206,11 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 					"subcategory":     stringProperty("Subcategory: invoice, receipt, photo, screenshot, etc."),
 					"tags":            arrayProperty("Tags/labels to apply to this file", "string"),
 				},
-				[]string{"source", "path"},
+				[]string{"source", "path", "content_hash"},
 			),
 		},
 		{
-			Name:        "file_get",
+			Name:        "file_registry_get",
 			Description: "Get details about a file by ID or by source+path. Returns all indexed metadata including tags.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -179,7 +222,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 			),
 		},
 		{
-			Name:        "file_search",
+			Name:        "file_registry_search",
 			Description: "Search for files using full-text search across filenames, paths, and content. Supports filtering by source, category, tags, and type. Returns paginated results.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -197,7 +240,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 			),
 		},
 		{
-			Name:        "file_semantic_search",
+			Name:        "file_registry_semantic_search",
 			Description: "Search for files using semantic similarity. Combines full-text and vector search (hybrid) to find files with similar meaning to the query, even if they don't contain the exact words. Emergent handles embedding generation automatically.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -213,7 +256,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 			),
 		},
 		{
-			Name:        "file_tag",
+			Name:        "file_registry_tag",
 			Description: "Add one or more tags/labels to a file.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -226,7 +269,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 			),
 		},
 		{
-			Name:        "file_untag",
+			Name:        "file_registry_untag",
 			Description: "Remove one or more tags/labels from a file.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -239,7 +282,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 			),
 		},
 		{
-			Name:        "file_tags",
+			Name:        "file_registry_tags",
 			Description: "List all tags/labels in the file index with usage information.",
 			InputSchema: objectSchema(
 				map[string]interface{}{},
@@ -247,7 +290,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 			),
 		},
 		{
-			Name:        "file_duplicates",
+			Name:        "file_registry_duplicates",
 			Description: "Find duplicate files based on content hash. Groups files with identical content across all sources.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -258,7 +301,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 			),
 		},
 		{
-			Name:        "file_remove",
+			Name:        "file_registry_remove",
 			Description: "Remove a file from the index (soft-delete). This only removes the file from the index, not from the actual source.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -270,7 +313,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 			),
 		},
 		{
-			Name:        "file_verify",
+			Name:        "file_registry_verify",
 			Description: "Mark a file as verified (still exists at source). Updates the verified_at timestamp.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -282,7 +325,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 			),
 		},
 		{
-			Name:        "file_stats",
+			Name:        "file_registry_stats",
 			Description: "Get statistics about the file index: total files by category, by source, etc.",
 			InputSchema: objectSchema(
 				map[string]interface{}{},
@@ -290,7 +333,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 			),
 		},
 		{
-			Name:        "file_recent",
+			Name:        "file_registry_recent",
 			Description: "Get recently indexed or accessed files.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -300,7 +343,7 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 			),
 		},
 		{
-			Name:        "file_similar",
+			Name:        "file_registry_similar",
 			Description: "Find files similar to a given file using vector similarity.",
 			InputSchema: objectSchema(
 				map[string]interface{}{
@@ -312,15 +355,122 @@ Required: source (local, gdrive, gmail, etc.) and path. Other fields are optiona
 				nil,
 			),
 		},
+		// --- Batch operations ---
+		{
+			Name:        "file_registry_batch_register",
+			Description: "Register multiple files in one call. Much faster than individual file_registry_register calls. Each file needs source and path at minimum. Processes up to 50 files per call with 10 concurrent workers.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"files": map[string]interface{}{
+						"type":        "array",
+						"description": "Array of file objects to register. Each object has the same fields as file_registry_register (source, path, filename, size, mime_type, etc.)",
+						"items": objectSchema(
+							map[string]interface{}{
+								"source":          stringProperty("Source identifier: 'local', 'gdrive', 'gmail', 'dropbox', etc."),
+								"path":            stringProperty("Full path within the source"),
+								"source_file_id":  stringProperty("Provider-specific file ID"),
+								"filename":        stringProperty("Base filename (extracted from path if not provided)"),
+								"size":            intProperty("File size in bytes", 0),
+								"mime_type":       stringProperty("MIME type"),
+								"is_directory":    boolProperty("True if this is a directory"),
+								"created_at":      stringProperty("Creation timestamp (ISO 8601)"),
+								"modified_at":     stringProperty("Modification timestamp (ISO 8601)"),
+								"content_hash":    stringProperty("SHA-256 hash of file content (required for duplicate detection)"),
+								"partial_hash":    stringProperty("SHA-256 hash of first 64KB"),
+								"content_text":    stringProperty("Extracted text content"),
+								"content_preview": stringProperty("First ~500 chars preview"),
+								"category":        stringProperty("File category: document, image, video, audio, code, archive, data, other"),
+								"subcategory":     stringProperty("Subcategory: invoice, receipt, photo, screenshot, etc."),
+								"tags":            arrayProperty("Tags/labels", "string"),
+							},
+							[]string{"source", "path", "content_hash"},
+						),
+					},
+				},
+				[]string{"files"},
+			),
+		},
+		{
+			Name:        "file_registry_batch_get",
+			Description: "Get details for multiple files in one call. Accepts a list of IDs or source+path pairs. Processes up to 100 files with 10 concurrent workers.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"ids": arrayProperty("File IDs (UUIDs) to retrieve", "string"),
+					"keys": map[string]interface{}{
+						"type":        "array",
+						"description": "Array of {source, path} objects to look up (alternative to ids)",
+						"items": objectSchema(
+							map[string]interface{}{
+								"source": stringProperty("Source identifier"),
+								"path":   stringProperty("Path within source"),
+							},
+							[]string{"source", "path"},
+						),
+					},
+				},
+				nil,
+			),
+		},
+		{
+			Name:        "file_registry_batch_tag",
+			Description: "Add tags to multiple files in one call. All specified files get the same set of tags added. Processes with 10 concurrent workers.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"ids":  arrayProperty("File IDs (UUIDs) to tag", "string"),
+					"tags": arrayProperty("Tags to add to all specified files", "string"),
+				},
+				[]string{"ids", "tags"},
+			),
+		},
+		{
+			Name:        "file_registry_batch_untag",
+			Description: "Remove tags from multiple files in one call. All specified files get the same set of tags removed. Processes with 10 concurrent workers.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"ids":  arrayProperty("File IDs (UUIDs) to untag", "string"),
+					"tags": arrayProperty("Tags to remove from all specified files", "string"),
+				},
+				[]string{"ids", "tags"},
+			),
+		},
+		{
+			Name:        "file_registry_batch_remove",
+			Description: "Remove multiple files from the index in one call (soft-delete). Only removes from the index, not from actual sources. Processes with 10 concurrent workers.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"ids": arrayProperty("File IDs (UUIDs) to remove", "string"),
+				},
+				[]string{"ids"},
+			),
+		},
+		{
+			Name:        "file_registry_crawl",
+			Description: "Crawl a local directory and register all discovered files. Computes SHA-256 hashes, detects MIME types, and batch-registers files into the index. Skips files already registered with the same source:path key. Use this instead of manually running find/stat/sha256sum and calling batch_register.",
+			InputSchema: objectSchema(
+				map[string]interface{}{
+					"path":            stringProperty("Absolute path to the directory to crawl (e.g. /Users/me/Downloads)"),
+					"pattern":         stringProperty("Regexp to match filenames to include (e.g. '\\.(pdf|docx|xlsx)$'). If omitted, all files are included."),
+					"exclude_pattern": stringProperty("Regexp to match filenames to exclude (e.g. '\\.(DS_Store|tmp)$')"),
+					"max_depth":       intProperty("Maximum directory depth to descend (0 = target dir only, -1 or omitted = unlimited)", -1),
+					"include_hidden":  boolProperty("Include hidden files and directories (names starting with '.'). Default: false"),
+					"dry_run":         boolProperty("If true, only report what would be registered without actually registering. Default: false"),
+					"tags":            arrayProperty("Tags to apply to all crawled files", "string"),
+				},
+				[]string{"path"},
+			),
+		},
 	}
 }
 
 // HasTool checks if a tool name belongs to this provider
 func (p *Provider) HasTool(name string) bool {
 	switch name {
-	case "file_register", "file_get", "file_search", "file_semantic_search",
-		"file_tag", "file_untag", "file_tags", "file_duplicates",
-		"file_remove", "file_verify", "file_stats", "file_recent", "file_similar":
+	case "file_registry_register", "file_registry_get", "file_registry_search", "file_registry_semantic_search",
+		"file_registry_tag", "file_registry_untag", "file_registry_tags", "file_registry_duplicates",
+		"file_registry_remove", "file_registry_verify", "file_registry_stats", "file_registry_recent", "file_registry_similar",
+		"file_registry_batch_register", "file_registry_batch_get", "file_registry_batch_tag",
+		"file_registry_batch_untag", "file_registry_batch_remove",
+		"file_registry_crawl":
 		return true
 	}
 	return false
@@ -329,32 +479,44 @@ func (p *Provider) HasTool(name string) bool {
 // Call executes a file management tool
 func (p *Provider) Call(name string, args map[string]interface{}) (interface{}, error) {
 	switch name {
-	case "file_register":
+	case "file_registry_register":
 		return p.register(args)
-	case "file_get":
+	case "file_registry_get":
 		return p.get(args)
-	case "file_search":
+	case "file_registry_search":
 		return p.search(args)
-	case "file_semantic_search":
+	case "file_registry_semantic_search":
 		return p.semanticSearch(args)
-	case "file_tag":
+	case "file_registry_tag":
 		return p.tag(args)
-	case "file_untag":
+	case "file_registry_untag":
 		return p.untag(args)
-	case "file_tags":
+	case "file_registry_tags":
 		return p.tags(args)
-	case "file_duplicates":
+	case "file_registry_duplicates":
 		return p.duplicates(args)
-	case "file_remove":
+	case "file_registry_remove":
 		return p.remove(args)
-	case "file_verify":
+	case "file_registry_verify":
 		return p.verify(args)
-	case "file_stats":
+	case "file_registry_stats":
 		return p.stats(args)
-	case "file_recent":
+	case "file_registry_recent":
 		return p.recent(args)
-	case "file_similar":
+	case "file_registry_similar":
 		return p.similar(args)
+	case "file_registry_batch_register":
+		return p.batchRegister(args)
+	case "file_registry_batch_get":
+		return p.batchGet(args)
+	case "file_registry_batch_tag":
+		return p.batchTag(args)
+	case "file_registry_batch_untag":
+		return p.batchUntag(args)
+	case "file_registry_batch_remove":
+		return p.batchRemove(args)
+	case "file_registry_crawl":
+		return p.crawl(args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -516,11 +678,15 @@ func (p *Provider) resolveFileID(ctx context.Context, id, source, path string) (
 func (p *Provider) register(args map[string]interface{}) (interface{}, error) {
 	source := getString(args, "source")
 	path := getString(args, "path")
+	contentHash := getString(args, "content_hash")
 	if source == "" {
 		return nil, fmt.Errorf("source is required")
 	}
 	if path == "" {
 		return nil, fmt.Errorf("path is required")
+	}
+	if contentHash == "" {
+		return nil, fmt.Errorf("content_hash is required")
 	}
 
 	filename := getString(args, "filename")
@@ -531,10 +697,11 @@ func (p *Provider) register(args map[string]interface{}) (interface{}, error) {
 
 	// Build properties from file metadata
 	properties := map[string]interface{}{
-		"source":    source,
-		"path":      path,
-		"filename":  filename,
-		"extension": extension,
+		"source":       source,
+		"path":         path,
+		"filename":     filename,
+		"extension":    extension,
+		"content_hash": contentHash,
 	}
 	if v := getString(args, "source_file_id"); v != "" {
 		properties["source_file_id"] = v
@@ -553,9 +720,6 @@ func (p *Provider) register(args map[string]interface{}) (interface{}, error) {
 	}
 	if v := getString(args, "modified_at"); v != "" {
 		properties["modified_at"] = v
-	}
-	if v := getString(args, "content_hash"); v != "" {
-		properties["content_hash"] = v
 	}
 	if v := getString(args, "partial_hash"); v != "" {
 		properties["partial_hash"] = v
@@ -1114,4 +1278,884 @@ func (p *Provider) similar(args map[string]interface{}) (interface{}, error) {
 		"similar":   results,
 		"total":     len(results),
 	}), nil
+}
+
+// --- Batch Operations ---
+
+const batchWorkers = 10
+
+// batchResult tracks the outcome of a single item in a batch operation.
+type batchResult struct {
+	Index   int                    `json:"index"`
+	ID      string                 `json:"id,omitempty"`
+	Key     string                 `json:"key,omitempty"`
+	Status  string                 `json:"status"`
+	Error   string                 `json:"error,omitempty"`
+	Details map[string]interface{} `json:"details,omitempty"`
+}
+
+// getObjectArray extracts an array of map objects from args.
+func getObjectArray(args map[string]interface{}, key string) []map[string]interface{} {
+	val, ok := args[key].([]interface{})
+	if !ok {
+		return nil
+	}
+	result := make([]map[string]interface{}, 0, len(val))
+	for _, v := range val {
+		if m, ok := v.(map[string]interface{}); ok {
+			result = append(result, m)
+		}
+	}
+	return result
+}
+
+func (p *Provider) batchRegister(args map[string]interface{}) (interface{}, error) {
+	files := getObjectArray(args, "files")
+	if len(files) == 0 {
+		return nil, fmt.Errorf("files array is required and must not be empty")
+	}
+	if len(files) > 50 {
+		return nil, fmt.Errorf("maximum 50 files per batch call, got %d", len(files))
+	}
+
+	ctx := context.Background()
+	results := make([]batchResult, len(files))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, batchWorkers)
+
+	for i, fileArgs := range files {
+		wg.Add(1)
+		go func(idx int, fa map[string]interface{}) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			source := getString(fa, "source")
+			path := getString(fa, "path")
+			contentHash := getString(fa, "content_hash")
+
+			br := batchResult{Index: idx}
+
+			if source == "" || path == "" {
+				br.Status = "error"
+				br.Error = "source and path are required"
+				mu.Lock()
+				results[idx] = br
+				mu.Unlock()
+				return
+			}
+			if contentHash == "" {
+				br.Status = "error"
+				br.Error = "content_hash is required"
+				mu.Lock()
+				results[idx] = br
+				mu.Unlock()
+				return
+			}
+
+			filename := getString(fa, "filename")
+			if filename == "" {
+				filename = extractFilename(path)
+			}
+			extension := extractExtension(filename)
+
+			properties := map[string]interface{}{
+				"source":       source,
+				"path":         path,
+				"filename":     filename,
+				"extension":    extension,
+				"content_hash": contentHash,
+			}
+			if v := getString(fa, "source_file_id"); v != "" {
+				properties["source_file_id"] = v
+			}
+			if v := getInt64(fa, "size", 0); v > 0 {
+				properties["size"] = v
+			}
+			if v := getString(fa, "mime_type"); v != "" {
+				properties["mime_type"] = v
+			}
+			if b := getBool(fa, "is_directory"); b != nil {
+				properties["is_directory"] = *b
+			}
+			if v := getString(fa, "created_at"); v != "" {
+				properties["created_at"] = v
+			}
+			if v := getString(fa, "modified_at"); v != "" {
+				properties["modified_at"] = v
+			}
+			if v := getString(fa, "partial_hash"); v != "" {
+				properties["partial_hash"] = v
+			}
+			if v := getString(fa, "content_text"); v != "" {
+				properties["content_text"] = v
+			}
+			if v := getString(fa, "content_preview"); v != "" {
+				properties["content_preview"] = v
+			}
+			if v := getString(fa, "category"); v != "" {
+				properties["category"] = v
+			}
+			if v := getString(fa, "subcategory"); v != "" {
+				properties["subcategory"] = v
+			}
+
+			key := fmt.Sprintf("%s:%s", source, path)
+			tags := getStringArray(fa, "tags")
+
+			obj, err := p.client.Graph.CreateObject(ctx, &graph.CreateObjectRequest{
+				Type:       "file",
+				Key:        &key,
+				Status:     strPtr("active"),
+				Properties: properties,
+				Labels:     tags,
+			})
+			if err != nil {
+				br.Status = "error"
+				br.Error = err.Error()
+				br.Key = key
+			} else {
+				br.Status = "registered"
+				br.ID = obj.ID
+				br.Key = key
+			}
+
+			mu.Lock()
+			results[idx] = br
+			mu.Unlock()
+		}(i, fileArgs)
+	}
+
+	wg.Wait()
+
+	succeeded := 0
+	failed := 0
+	for _, r := range results {
+		if r.Status == "registered" {
+			succeeded++
+		} else {
+			failed++
+		}
+	}
+
+	slog.Info("Batch register completed", "succeeded", succeeded, "failed", failed, "total", len(files))
+	return textContent(map[string]interface{}{
+		"status":    "completed",
+		"total":     len(files),
+		"succeeded": succeeded,
+		"failed":    failed,
+		"results":   results,
+	}), nil
+}
+
+func (p *Provider) batchGet(args map[string]interface{}) (interface{}, error) {
+	ids := getStringArray(args, "ids")
+	keys := getObjectArray(args, "keys")
+
+	if len(ids) == 0 && len(keys) == 0 {
+		return nil, fmt.Errorf("either 'ids' or 'keys' is required")
+	}
+
+	totalItems := len(ids) + len(keys)
+	if totalItems > 100 {
+		return nil, fmt.Errorf("maximum 100 files per batch call, got %d", totalItems)
+	}
+
+	ctx := context.Background()
+	results := make([]batchResult, totalItems)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, batchWorkers)
+
+	// Process IDs
+	for i, id := range ids {
+		wg.Add(1)
+		go func(idx int, fileID string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			br := batchResult{Index: idx, ID: fileID}
+
+			obj, err := p.client.Graph.GetObject(ctx, fileID)
+			if err != nil {
+				br.Status = "error"
+				br.Error = fmt.Sprintf("file not found: %v", err)
+			} else {
+				br.Status = "found"
+				br.Details = graphObjectToMap(obj)
+			}
+
+			mu.Lock()
+			results[idx] = br
+			mu.Unlock()
+		}(i, id)
+	}
+
+	// Process source+path keys
+	offset := len(ids)
+	for i, keyObj := range keys {
+		wg.Add(1)
+		go func(idx int, source, path string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			key := fmt.Sprintf("%s:%s", source, path)
+			br := batchResult{Index: idx, Key: key}
+
+			_, obj, err := p.resolveFileID(ctx, "", source, path)
+			if err != nil {
+				br.Status = "error"
+				br.Error = err.Error()
+			} else {
+				br.Status = "found"
+				br.ID = obj.ID
+				br.Details = graphObjectToMap(obj)
+			}
+
+			mu.Lock()
+			results[idx] = br
+			mu.Unlock()
+		}(offset+i, getString(keyObj, "source"), getString(keyObj, "path"))
+	}
+
+	wg.Wait()
+
+	found := 0
+	notFound := 0
+	for _, r := range results {
+		if r.Status == "found" {
+			found++
+		} else {
+			notFound++
+		}
+	}
+
+	return textContent(map[string]interface{}{
+		"total":     totalItems,
+		"found":     found,
+		"not_found": notFound,
+		"results":   results,
+	}), nil
+}
+
+func (p *Provider) batchTag(args map[string]interface{}) (interface{}, error) {
+	ids := getStringArray(args, "ids")
+	tags := getStringArray(args, "tags")
+
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("ids array is required")
+	}
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("tags array is required")
+	}
+
+	ctx := context.Background()
+	results := make([]batchResult, len(ids))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, batchWorkers)
+
+	for i, id := range ids {
+		wg.Add(1)
+		go func(idx int, fileID string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			br := batchResult{Index: idx, ID: fileID}
+
+			_, err := p.client.Graph.UpdateObject(ctx, fileID, &graph.UpdateObjectRequest{
+				Labels: tags,
+			})
+			if err != nil {
+				br.Status = "error"
+				br.Error = err.Error()
+			} else {
+				br.Status = "tagged"
+			}
+
+			mu.Lock()
+			results[idx] = br
+			mu.Unlock()
+		}(i, id)
+	}
+
+	wg.Wait()
+
+	succeeded := 0
+	failed := 0
+	for _, r := range results {
+		if r.Status == "tagged" {
+			succeeded++
+		} else {
+			failed++
+		}
+	}
+
+	return textContent(map[string]interface{}{
+		"status":    "completed",
+		"total":     len(ids),
+		"succeeded": succeeded,
+		"failed":    failed,
+		"tags":      tags,
+		"results":   results,
+	}), nil
+}
+
+func (p *Provider) batchUntag(args map[string]interface{}) (interface{}, error) {
+	ids := getStringArray(args, "ids")
+	tagsToRemove := getStringArray(args, "tags")
+
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("ids array is required")
+	}
+	if len(tagsToRemove) == 0 {
+		return nil, fmt.Errorf("tags array is required")
+	}
+
+	removeSet := toSet(tagsToRemove)
+
+	ctx := context.Background()
+	results := make([]batchResult, len(ids))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, batchWorkers)
+
+	for i, id := range ids {
+		wg.Add(1)
+		go func(idx int, fileID string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			br := batchResult{Index: idx, ID: fileID}
+
+			// Get current labels
+			obj, err := p.client.Graph.GetObject(ctx, fileID)
+			if err != nil {
+				br.Status = "error"
+				br.Error = fmt.Sprintf("file not found: %v", err)
+				mu.Lock()
+				results[idx] = br
+				mu.Unlock()
+				return
+			}
+
+			// Filter out the tags to remove
+			var remaining []string
+			for _, l := range obj.Labels {
+				if !removeSet[l] {
+					remaining = append(remaining, l)
+				}
+			}
+
+			_, err = p.client.Graph.UpdateObject(ctx, fileID, &graph.UpdateObjectRequest{
+				Labels:        remaining,
+				ReplaceLabels: true,
+			})
+			if err != nil {
+				br.Status = "error"
+				br.Error = err.Error()
+			} else {
+				br.Status = "untagged"
+			}
+
+			mu.Lock()
+			results[idx] = br
+			mu.Unlock()
+		}(i, id)
+	}
+
+	wg.Wait()
+
+	succeeded := 0
+	failed := 0
+	for _, r := range results {
+		if r.Status == "untagged" {
+			succeeded++
+		} else {
+			failed++
+		}
+	}
+
+	return textContent(map[string]interface{}{
+		"status":    "completed",
+		"total":     len(ids),
+		"succeeded": succeeded,
+		"failed":    failed,
+		"removed":   tagsToRemove,
+		"results":   results,
+	}), nil
+}
+
+func (p *Provider) batchRemove(args map[string]interface{}) (interface{}, error) {
+	ids := getStringArray(args, "ids")
+
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("ids array is required")
+	}
+
+	ctx := context.Background()
+	results := make([]batchResult, len(ids))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, batchWorkers)
+
+	for i, id := range ids {
+		wg.Add(1)
+		go func(idx int, fileID string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			br := batchResult{Index: idx, ID: fileID}
+
+			if err := p.client.Graph.DeleteObject(ctx, fileID); err != nil {
+				br.Status = "error"
+				br.Error = err.Error()
+			} else {
+				br.Status = "removed"
+			}
+
+			mu.Lock()
+			results[idx] = br
+			mu.Unlock()
+		}(i, id)
+	}
+
+	wg.Wait()
+
+	succeeded := 0
+	failed := 0
+	for _, r := range results {
+		if r.Status == "removed" {
+			succeeded++
+		} else {
+			failed++
+		}
+	}
+
+	slog.Info("Batch remove completed", "succeeded", succeeded, "failed", failed, "total", len(ids))
+	return textContent(map[string]interface{}{
+		"status":    "completed",
+		"total":     len(ids),
+		"succeeded": succeeded,
+		"failed":    failed,
+		"results":   results,
+	}), nil
+}
+
+// --- Crawl Implementation ---
+
+// crawlFile holds metadata for a single discovered file.
+type crawlFile struct {
+	Path     string
+	Info     fs.FileInfo
+	RelDepth int
+}
+
+// mimeFromExtension returns a MIME type for common extensions, falling back to
+// Go's built-in mime.TypeByExtension.
+func mimeFromExtension(ext string) string {
+	// Common types that Go's mime package sometimes misses or gets wrong
+	overrides := map[string]string{
+		".pdf":  "application/pdf",
+		".doc":  "application/msword",
+		".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		".xls":  "application/vnd.ms-excel",
+		".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		".ppt":  "application/vnd.ms-powerpoint",
+		".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		".zip":  "application/zip",
+		".gz":   "application/gzip",
+		".tar":  "application/x-tar",
+		".dmg":  "application/x-apple-diskimage",
+		".heic": "image/heic",
+		".heif": "image/heif",
+		".webp": "image/webp",
+		".avif": "image/avif",
+		".svg":  "image/svg+xml",
+		".mp4":  "video/mp4",
+		".mov":  "video/quicktime",
+		".mkv":  "video/x-matroska",
+		".mp3":  "audio/mpeg",
+		".flac": "audio/flac",
+		".wav":  "audio/wav",
+		".m4a":  "audio/mp4",
+		".json": "application/json",
+		".yaml": "application/x-yaml",
+		".yml":  "application/x-yaml",
+		".toml": "application/toml",
+		".csv":  "text/csv",
+		".tsv":  "text/tab-separated-values",
+		".md":   "text/markdown",
+		".xml":  "application/xml",
+		".stl":  "model/stl",
+	}
+	if t, ok := overrides[strings.ToLower(ext)]; ok {
+		return t
+	}
+	if t := mime.TypeByExtension(ext); t != "" {
+		return t
+	}
+	return "application/octet-stream"
+}
+
+// categoryFromMIME returns a broad category based on MIME type.
+func categoryFromMIME(mimeType string) string {
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		return "image"
+	case strings.HasPrefix(mimeType, "video/"):
+		return "video"
+	case strings.HasPrefix(mimeType, "audio/"):
+		return "audio"
+	case strings.HasPrefix(mimeType, "text/"):
+		return "document"
+	case mimeType == "application/pdf",
+		strings.Contains(mimeType, "document"),
+		strings.Contains(mimeType, "spreadsheet"),
+		strings.Contains(mimeType, "presentation"),
+		mimeType == "application/msword",
+		mimeType == "application/vnd.ms-excel",
+		mimeType == "application/vnd.ms-powerpoint":
+		return "document"
+	case mimeType == "application/zip",
+		mimeType == "application/gzip",
+		mimeType == "application/x-tar",
+		mimeType == "application/x-apple-diskimage",
+		mimeType == "application/x-7z-compressed",
+		mimeType == "application/x-rar-compressed":
+		return "archive"
+	case mimeType == "application/json",
+		mimeType == "application/xml",
+		mimeType == "text/csv",
+		mimeType == "application/x-yaml",
+		mimeType == "application/toml":
+		return "data"
+	default:
+		return "other"
+	}
+}
+
+// hashFile computes SHA-256 of the full file and a partial hash of the first 64KB.
+func hashFile(path string) (fullHash, partialHash string, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", "", err
+	}
+	defer f.Close()
+
+	const partialSize = 64 * 1024
+
+	partialHasher := sha256.New()
+	fullHasher := sha256.New()
+
+	// Read first 64KB for partial hash, while also feeding into full hash
+	lr := io.LimitReader(f, partialSize)
+	n, err := io.Copy(io.MultiWriter(partialHasher, fullHasher), lr)
+	if err != nil {
+		return "", "", err
+	}
+	partialHash = hex.EncodeToString(partialHasher.Sum(nil))
+
+	// If file was <= 64KB, full hash equals partial hash
+	if n < partialSize {
+		return partialHash, partialHash, nil
+	}
+
+	// Continue reading rest for full hash
+	if _, err := io.Copy(fullHasher, f); err != nil {
+		return "", "", err
+	}
+	fullHash = hex.EncodeToString(fullHasher.Sum(nil))
+	return fullHash, partialHash, nil
+}
+
+func (p *Provider) crawl(args map[string]interface{}) (interface{}, error) {
+	rootPath := getString(args, "path")
+	if rootPath == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+
+	// Expand ~ to home directory
+	if strings.HasPrefix(rootPath, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			rootPath = filepath.Join(home, rootPath[2:])
+		}
+	}
+
+	// Resolve to absolute path
+	absRoot, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+
+	// Verify directory exists
+	info, err := os.Stat(absRoot)
+	if err != nil {
+		return nil, fmt.Errorf("path not accessible: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path is not a directory: %s", absRoot)
+	}
+
+	// Parse options
+	maxDepth := getInt(args, "max_depth", -1)
+	includeHidden := false
+	if b := getBool(args, "include_hidden"); b != nil {
+		includeHidden = *b
+	}
+	dryRun := false
+	if b := getBool(args, "dry_run"); b != nil {
+		dryRun = *b
+	}
+	tags := getStringArray(args, "tags")
+
+	var includeRe, excludeRe *regexp.Regexp
+	if pat := getString(args, "pattern"); pat != "" {
+		includeRe, err = regexp.Compile(pat)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pattern regexp: %w", err)
+		}
+	}
+	if pat := getString(args, "exclude_pattern"); pat != "" {
+		excludeRe, err = regexp.Compile(pat)
+		if err != nil {
+			return nil, fmt.Errorf("invalid exclude_pattern regexp: %w", err)
+		}
+	}
+
+	slog.Info("Starting crawl", "path", absRoot, "max_depth", maxDepth, "dry_run", dryRun)
+
+	// Phase 1: Walk the directory and collect matching files
+	var files []crawlFile
+	rootDepth := strings.Count(absRoot, string(filepath.Separator))
+
+	err = filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			slog.Warn("Crawl: error accessing path", "path", path, "error", err)
+			return nil // skip errors, continue crawling
+		}
+
+		name := d.Name()
+
+		// Skip hidden files/dirs unless requested
+		if !includeHidden && strings.HasPrefix(name, ".") && path != absRoot {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Check depth
+		if maxDepth >= 0 {
+			currentDepth := strings.Count(path, string(filepath.Separator)) - rootDepth
+			if d.IsDir() && currentDepth > maxDepth {
+				return filepath.SkipDir
+			}
+			if !d.IsDir() && currentDepth > maxDepth {
+				return nil
+			}
+		}
+
+		// Skip directories (we only register files)
+		if d.IsDir() {
+			return nil
+		}
+
+		// Apply include pattern
+		if includeRe != nil && !includeRe.MatchString(name) {
+			return nil
+		}
+
+		// Apply exclude pattern
+		if excludeRe != nil && excludeRe.MatchString(name) {
+			return nil
+		}
+
+		fi, err := d.Info()
+		if err != nil {
+			slog.Warn("Crawl: cannot stat file", "path", path, "error", err)
+			return nil
+		}
+
+		// Skip non-regular files (symlinks, devices, etc.)
+		if !fi.Mode().IsRegular() {
+			return nil
+		}
+
+		depth := strings.Count(path, string(filepath.Separator)) - rootDepth
+		files = append(files, crawlFile{Path: path, Info: fi, RelDepth: depth})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("crawl failed: %w", err)
+	}
+
+	slog.Info("Crawl: discovery complete", "files_found", len(files))
+
+	if dryRun {
+		// Return summary without registering
+		byCategory := map[string]int{}
+		byExtension := map[string]int{}
+		var totalSize int64
+		for _, f := range files {
+			ext := filepath.Ext(f.Info.Name())
+			mimeType := mimeFromExtension(ext)
+			cat := categoryFromMIME(mimeType)
+			byCategory[cat]++
+			if ext != "" {
+				byExtension[strings.ToLower(ext)]++
+			} else {
+				byExtension["(none)"]++
+			}
+			totalSize += f.Info.Size()
+		}
+		return textContent(map[string]interface{}{
+			"status":       "dry_run",
+			"path":         absRoot,
+			"total_found":  len(files),
+			"total_size":   totalSize,
+			"by_category":  byCategory,
+			"by_extension": byExtension,
+		}), nil
+	}
+
+	// Phase 2: Hash files and register in batches using concurrent workers
+	const crawlBatchSize = 50
+
+	type crawlResult struct {
+		Key    string `json:"key"`
+		Status string `json:"status"`
+		ID     string `json:"id,omitempty"`
+		Error  string `json:"error,omitempty"`
+	}
+
+	ctx := context.Background()
+	results := make([]crawlResult, len(files))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, batchWorkers)
+
+	for i, cf := range files {
+		wg.Add(1)
+		go func(idx int, cf crawlFile) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			key := fmt.Sprintf("local:%s", cf.Path)
+			cr := crawlResult{Key: key}
+
+			// Check if already registered
+			existResp, err := p.client.Graph.ListObjects(ctx, &graph.ListObjectsOptions{
+				Type:  "file",
+				Key:   key,
+				Limit: 1,
+			})
+			if err == nil && len(existResp.Items) > 0 {
+				cr.Status = "skipped"
+				cr.ID = existResp.Items[0].ID
+				mu.Lock()
+				results[idx] = cr
+				mu.Unlock()
+				return
+			}
+
+			// Compute hashes
+			fullHash, partialHash, err := hashFile(cf.Path)
+			if err != nil {
+				cr.Status = "error"
+				cr.Error = fmt.Sprintf("hash failed: %v", err)
+				mu.Lock()
+				results[idx] = cr
+				mu.Unlock()
+				return
+			}
+
+			// Build metadata
+			filename := cf.Info.Name()
+			ext := filepath.Ext(filename)
+			mimeType := mimeFromExtension(ext)
+			category := categoryFromMIME(mimeType)
+			extension := extractExtension(filename)
+
+			properties := map[string]interface{}{
+				"source":       "local",
+				"path":         cf.Path,
+				"filename":     filename,
+				"extension":    extension,
+				"content_hash": fullHash,
+				"partial_hash": partialHash,
+				"size":         cf.Info.Size(),
+				"mime_type":    mimeType,
+				"category":     category,
+				"modified_at":  cf.Info.ModTime().UTC().Format(time.RFC3339),
+			}
+
+			obj, err := p.client.Graph.CreateObject(ctx, &graph.CreateObjectRequest{
+				Type:       "file",
+				Key:        &key,
+				Status:     strPtr("active"),
+				Properties: properties,
+				Labels:     tags,
+			})
+			if err != nil {
+				cr.Status = "error"
+				cr.Error = err.Error()
+			} else {
+				cr.Status = "registered"
+				cr.ID = obj.ID
+			}
+
+			mu.Lock()
+			results[idx] = cr
+			mu.Unlock()
+		}(i, cf)
+	}
+
+	wg.Wait()
+
+	// Aggregate counts
+	registered := 0
+	skipped := 0
+	failed := 0
+	var errors []crawlResult
+	for _, r := range results {
+		switch r.Status {
+		case "registered":
+			registered++
+		case "skipped":
+			skipped++
+		case "error":
+			failed++
+			errors = append(errors, r)
+		}
+	}
+
+	slog.Info("Crawl completed",
+		"path", absRoot,
+		"total", len(files),
+		"registered", registered,
+		"skipped", skipped,
+		"failed", failed,
+	)
+
+	response := map[string]interface{}{
+		"status":     "completed",
+		"path":       absRoot,
+		"total":      len(files),
+		"registered": registered,
+		"skipped":    skipped,
+		"failed":     failed,
+	}
+	if len(errors) > 0 {
+		response["errors"] = errors
+	}
+
+	return textContent(response), nil
 }

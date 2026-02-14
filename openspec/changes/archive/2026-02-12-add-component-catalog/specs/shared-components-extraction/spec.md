@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Reusable components extracted into shared files
-General-purpose UI components currently defined inside domain-specific view files SHALL be extracted into separate files under a `Components/` directory, accessible to both the main DianeMenu target and the ComponentCatalog target.
+General-purpose UI components currently defined inside domain-specific view files SHALL be extracted into separate files under a `Components/` directory, accessible to both the main Diane target and the ComponentCatalog target.
 
 #### Scenario: DetailSection extracted
 - **WHEN** the project is built
@@ -39,14 +39,14 @@ Extracting components into separate files SHALL NOT change their API, appearance
 - **THEN** UsageView.swift compiles without changes because SummaryCard remains in the same module
 
 #### Scenario: Visual output unchanged
-- **WHEN** the main DianeMenu app is built and run after extraction
+- **WHEN** the main Diane app is built and run after extraction
 - **THEN** all views render identically to before the extraction
 
 ### Requirement: Both targets can access shared components
-The extracted component files SHALL be included in the build sources of both the DianeMenu main target and the ComponentCatalog target.
+The extracted component files SHALL be included in the build sources of both the Diane main target and the ComponentCatalog target.
 
 #### Scenario: Main target includes components
-- **WHEN** the DianeMenu target is built
+- **WHEN** the Diane target is built
 - **THEN** all extracted component files are compiled as part of the target
 
 #### Scenario: Catalog target includes components

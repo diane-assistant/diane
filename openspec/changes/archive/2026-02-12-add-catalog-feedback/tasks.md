@@ -1,6 +1,6 @@
 ## 1. GitHubIssueService
 
-- [x] 1.1 Create `GitHubIssueService.swift` in `DianeMenu/ComponentCatalog/` with a `createIssue(selector:component:category:state:comment:repo:)` async method that shells out to `gh issue create` via `Process`
+- [x] 1.1 Create `GitHubIssueService.swift` in `Diane/ComponentCatalog/` with a `createIssue(selector:component:category:state:comment:repo:)` async method that shells out to `gh issue create` via `Process`
 - [x] 1.2 Implement selector string generation: `"{CatalogItem.rawValue} [{preset.name}]"` (omit bracket suffix when no preset)
 - [x] 1.3 Implement structured issue body markdown template with Component, Category, State, and Comment sections
 - [x] 1.4 Implement issue title generation: `"[Catalog] {selector}: {first line truncated to 60 chars}"`
@@ -36,5 +36,5 @@
 ## 5. Build Verification
 
 - [x] 5.1 Build ComponentCatalog target — verify clean compilation
-- [x] 5.2 Build DianeMenu target — verify no regressions
+- [x] 5.2 Build Diane target — verify no regressions
 - [x] 5.3 Run full test suite — verify all tests pass

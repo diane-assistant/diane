@@ -21,15 +21,22 @@ Add to your `opencode.json`:
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "diane": {
-      "type": "local",
-      "command": ["~/.diane/bin/diane"]
+    "diane-personal": {
+      "type": "remote",
+      "url": "http://localhost:8765/mcp/sse?context=personal",
+      "oauth": false
     }
   }
 }
 ```
 
-**Note:** This spawns a new Diane process. If you need multiple AI tools to use Diane simultaneously, see [Multiple AI Clients](#multiple-ai-clients-multi-consumer-setup) below.
+Or install automatically with:
+
+```bash
+diane-ctl mcp install opencode
+```
+
+**Note:** This connects to a running Diane instance via SSE. Make sure Diane is running (via Diane or command line) before starting OpenCode.
 
 #### Claude Desktop
 
@@ -140,7 +147,7 @@ When using multiple AI tools (OpenCode, Claude Desktop, Cursor, etc.) simultaneo
 
 ### How It Works
 
-1. **First client** or the **DianeMenu app** starts Diane (via stdio or directly)
+1. **First client** or the **Diane app** starts Diane (via stdio or directly)
 2. **Additional clients** connect via HTTP to the already-running Diane instance
 3. All clients share the same Diane instance but get independent sessions
 
@@ -148,17 +155,17 @@ When using multiple AI tools (OpenCode, Claude Desktop, Cursor, etc.) simultaneo
 
 #### Option 1: All Clients via HTTP (Recommended)
 
-Start Diane once (via DianeMenu or command line), then configure all clients to use HTTP:
+Start Diane once (via Diane or command line), then configure all clients to use HTTP:
 
 **OpenCode** (`opencode.json`):
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "diane": {
+    "diane-personal": {
       "type": "remote",
-      "url": "http://localhost:8765/mcp",
-      "enabled": true
+      "url": "http://localhost:8765/mcp/sse?context=personal",
+      "oauth": false
     }
   }
 }
@@ -207,9 +214,10 @@ One primary client starts Diane via stdio, others connect via HTTP:
 ```json
 {
   "mcp": {
-    "diane": {
+    "diane-personal": {
       "type": "remote",
-      "url": "http://localhost:8765/mcp"
+      "url": "http://localhost:8765/mcp/sse?context=personal",
+      "oauth": false
     }
   }
 }
@@ -236,7 +244,7 @@ curl -X POST http://localhost:8765/mcp \
 | Issue | Solution |
 |-------|----------|
 | "Another instance of Diane is already running" | This is expected for stdio! Use HTTP transport instead. |
-| "Connection refused" on port 8765 | Diane is not running. Start it via DianeMenu or a primary stdio client. |
+| "Connection refused" on port 8765 | Diane is not running. Start it via Diane or a primary stdio client. |
 | Tools not appearing in secondary client | Ensure the client supports HTTP/remote MCP servers. Check client logs. |
 
 ---
@@ -248,26 +256,9 @@ Diane can connect to external MCP servers and expose their tools alongside its b
 - Adding authentication/headers to MCP connections
 - Using MCP servers that require SSE or HTTP transport
 
-### Configuration File
+### Configuration
 
-Create or edit `~/.diane/mcp-servers.json`:
-
-```json
-{
-  "servers": [
-    {
-      "name": "my-server",
-      "enabled": true,
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@some/mcp-server"],
-      "env": {
-        "API_KEY": "your-key"
-      }
-    }
-  ]
-}
-```
+MCP servers are configured through the Diane app UI or API. All configuration is stored in the SQLite database at `~/.diane/cron.db`.
 
 ### Supported Transport Types
 
@@ -385,7 +376,7 @@ Connect to an MCP server via Server-Sent Events transport.
 
 ### Reload Configuration
 
-After editing `~/.diane/mcp-servers.json`, reload without restarting:
+After adding or updating MCP server configuration, reload without restarting:
 
 ```bash
 diane-ctl reload
@@ -420,7 +411,7 @@ Builtin Diane tools (apple, google, weather, etc.) are not prefixed.
 
 ### Server shows disconnected
 
-Check the error message in the DianeMenu app or via:
+Check the error message in the Diane app or via:
 
 ```bash
 diane-ctl mcp-servers

@@ -10,13 +10,13 @@ Add the SnapshotTesting Swift package (~1.12.0) to the project and configure it 
 
 **WHEN** the project is opened in Xcode  
 **THEN** Package.swift or project settings must include SnapshotTesting ~1.12.0  
-**AND** the package must be linked to DianeMenuTests target  
+**AND** the package must be linked to DianeTests target  
 **AND** tests can import SnapshotTesting
 
 #### Scenario: Snapshot directory configured
 
 **WHEN** snapshot tests run  
-**THEN** snapshots must be saved to `DianeMenuTests/__Snapshots__/`  
+**THEN** snapshots must be saved to `DianeTests/__Snapshots__/`  
 **AND** the directory structure must match test class names  
 **AND** snapshots must be committed to version control
 

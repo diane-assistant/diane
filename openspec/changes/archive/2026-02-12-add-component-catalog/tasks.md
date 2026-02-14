@@ -6,26 +6,26 @@
 - [x] 1.4 Add injectable `init(viewModel:)` to SchedulerView
 - [x] 1.5 Add injectable `init(viewModel:)` to UsageView
 - [x] 1.6 Add injectable `init(viewModel:)` to ToolsBrowserView
-- [x] 1.7 Build DianeMenu target to verify all call sites (MainWindowView etc.) still compile with no-argument constructors
+- [x] 1.7 Build Diane target to verify all call sites (MainWindowView etc.) still compile with no-argument constructors
 - [x] 1.8 Run existing test suite (253 tests) to confirm no regressions
 
 ## 2. Shared Components Extraction
 
-- [x] 2.1 Create `DianeMenu/DianeMenu/Components/` directory
+- [x] 2.1 Create `Diane/Diane/Components/` directory
 - [x] 2.2 Extract `DetailSection` from MCPServersView.swift into `Components/DetailSection.swift`
 - [x] 2.3 Extract `InfoRow` from MCPServersView.swift into `Components/InfoRow.swift`
 - [x] 2.4 Extract `StringArrayEditor` from MCPServersView.swift into `Components/StringArrayEditor.swift`
 - [x] 2.5 Extract `KeyValueEditor` from MCPServersView.swift into `Components/KeyValueEditor.swift`
 - [x] 2.6 Extract `OAuthConfigEditor` from MCPServersView.swift into `Components/OAuthConfigEditor.swift`
 - [x] 2.7 Extract `SummaryCard` from UsageView.swift into `Components/SummaryCard.swift`
-- [x] 2.8 Add all 6 component files to the DianeMenu target in pbxproj (PBXFileReference + PBXBuildFile + PBXGroup entries)
+- [x] 2.8 Add all 6 component files to the Diane target in pbxproj (PBXFileReference + PBXBuildFile + PBXGroup entries)
 - [x] 2.9 Remove extracted component definitions from MCPServersView.swift and UsageView.swift
-- [x] 2.10 Build DianeMenu target to verify extraction preserves compilation
+- [x] 2.10 Build Diane target to verify extraction preserves compilation
 - [x] 2.11 Run full test suite (including snapshot tests) to verify visual output unchanged
 
 ## 3. ComponentCatalog Xcode Target Setup
 
-- [x] 3.1 Create `DianeMenu/ComponentCatalog/` directory for catalog-only source files
+- [x] 3.1 Create `Diane/ComponentCatalog/` directory for catalog-only source files
 - [x] 3.2 Create minimal `CatalogApp.swift` (SwiftUI App entry point with `@main`)
 - [x] 3.3 Add ComponentCatalog native target to pbxproj (PBXNativeTarget, XCBuildConfiguration Debug/Release, XCConfigurationList, product reference)
 - [x] 3.4 Add ComponentCatalog scheme or ensure the target is buildable
@@ -105,8 +105,8 @@
 
 ## 11. Final Integration and Verification
 
-- [x] 11.1 Build DianeMenu target — verify no regressions from view injection and component extraction
-- [x] 11.2 Run full DianeMenu test suite — verify all 253+ tests pass
+- [x] 11.1 Build Diane target — verify no regressions from view injection and component extraction
+- [x] 11.2 Run full Diane test suite — verify all 253+ tests pass
 - [x] 11.3 Build ComponentCatalog target — verify clean compilation
 - [ ] 11.4 Launch ComponentCatalog — verify sidebar lists all items, preview renders, controls respond
 - [ ] 11.5 Verify state preset switching works for all 7 ViewModel-backed views

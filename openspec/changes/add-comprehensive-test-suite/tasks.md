@@ -2,26 +2,26 @@
 
 ## 1. Test Infrastructure Setup
 
-- [x] 1.1 Create DianeMenuTests target in Xcode project (Unit Test Bundle)
-- [ ] 1.2 Create DianeMenuUITests target in Xcode project (UI Test Bundle)
+- [x] 1.1 Create DianeTests target in Xcode project (Unit Test Bundle)
+- [ ] 1.2 Create DianeUITests target in Xcode project (UI Test Bundle)
 - [ ] 1.3 Add ViewInspector (~0.9.0) dependency via Swift Package Manager
 - [ ] 1.4 Add SnapshotTesting (~1.12.0) dependency via Swift Package Manager
-- [ ] 1.5 Link ViewInspector to DianeMenuTests target
-- [ ] 1.6 Link SnapshotTesting to DianeMenuTests target
-- [ ] 1.7 Configure DianeMenu scheme to run DianeMenuTests with code coverage enabled
-- [ ] 1.8 Create separate scheme for DianeMenuUITests (or disable UI tests in main scheme)
+- [ ] 1.5 Link ViewInspector to DianeTests target
+- [ ] 1.6 Link SnapshotTesting to DianeTests target
+- [ ] 1.7 Configure Diane scheme to run DianeTests with code coverage enabled
+- [ ] 1.8 Create separate scheme for DianeUITests (or disable UI tests in main scheme)
 - [x] 1.9 Verify both test targets build successfully
 
 ## 2. Test Helpers and Fixtures
 
-- [x] 2.1 Create DianeMenuTests/TestHelpers/ directory
+- [x] 2.1 Create DianeTests/TestHelpers/ directory
 - [x] 2.2 Create TestFixtures.swift with sample MCPServerConfig factory functions
 - [ ] 2.3 Create AsyncTestHelpers.swift with async/await test utilities
 - [ ] 2.4 Create ViewTestHelpers.swift with SwiftUI view rendering utilities
-- [ ] 2.5 Create DianeMenuUITests/TestHelpers/ directory
+- [ ] 2.5 Create DianeUITests/TestHelpers/ directory
 - [ ] 2.6 Create XCUIElementHelpers.swift with UI test utility extensions
-- [ ] 2.7 Write DianeMenuTests/README.md with testing guide and examples
-- [ ] 2.8 Write DianeMenuUITests/README.md with UI testing guide
+- [ ] 2.7 Write DianeTests/README.md with testing guide and examples
+- [ ] 2.8 Write DianeUITests/README.md with UI testing guide
 
 ## 3. DianeClient Protocol Abstraction
 
@@ -36,7 +36,7 @@
 
 ## 4. MockDianeClient Implementation
 
-- [x] 4.1 Create MockDianeClient.swift in DianeMenuTests/TestHelpers/
+- [x] 4.1 Create MockDianeClient.swift in DianeTests/TestHelpers/
 - [x] 4.2 Implement MockDianeClient class conforming to DianeClientProtocol
 - [x] 4.3 Add configurable serverConfigs property for mock data
 - [x] 4.4 Add shouldThrowError property for error simulation
@@ -49,7 +49,7 @@
 
 ## 5. MCPServersViewModel Extraction
 
-- [x] 5.1 Create DianeMenu/ViewModels/ directory
+- [x] 5.1 Create Diane/ViewModels/ directory
 - [x] 5.2 Create MCPServersViewModel.swift with @Observable macro
 - [x] 5.3 Move servers array from MCPServersView to ViewModel
 - [x] 5.4 Move isLoading state from MCPServersView to ViewModel
@@ -73,7 +73,7 @@
 
 ## 7. Unit Tests for MCPServersViewModel
 
-- [x] 7.1 Create DianeMenuTests/UnitTests/ViewModels/ directory
+- [x] 7.1 Create DianeTests/UnitTests/ViewModels/ directory
 - [x] 7.2 Create MCPServersViewModelTests.swift
 - [x] 7.3 Test loadServers() sets isLoading true during operation and false after
 - [x] 7.4 Test loadServers() populates servers array on success
@@ -97,7 +97,7 @@
 
 ## 9. Integration Tests for DianeClient
 
-- [x] 9.1 Create DianeMenuTests/IntegrationTests/ directory
+- [x] 9.1 Create DianeTests/IntegrationTests/ directory
 - [x] 9.2 Create DianeClientProtocolTests.swift
 - [x] 9.3 Test getMCPServerConfigs() returns all servers from mock
 - [x] 9.4 Test getMCPServerConfigs() returns empty array when no servers
@@ -114,7 +114,7 @@
 
 ## 10. Snapshot Tests for MCPServersView
 
-- [x] 10.1 Create DianeMenuTests/SnapshotTests/ directory
+- [x] 10.1 Create DianeTests/SnapshotTests/ directory
 - [x] 10.2 Create MCPServersViewSnapshotTests.swift
 - [x] 10.3 Test snapshot of MCPServersView with empty state (no servers)
 - [x] 10.4 Test snapshot of MCPServersView with 3 sample servers
@@ -140,7 +140,7 @@
 
 ## 12. UI Tests for MCP Server Creation
 
-- [ ] 12.1 Create DianeMenuUITests/MCPServersUITests.swift
+- [ ] 12.1 Create DianeUITests/MCPServersUITests.swift
 - [ ] 12.2 Implement app launch with "UI-Testing" argument
 - [ ] 12.3 Test navigation to MCP Servers section
 - [ ] 12.4 Test opening create server sheet via "Add Server" button
@@ -177,7 +177,7 @@
 
 ## 16. Test Environment Configuration
 
-- [ ] 16.1 Update DianeMenuApp.swift to detect "UI-Testing" launch argument
+- [ ] 16.1 Update DianeApp.swift to detect "UI-Testing" launch argument
 - [ ] 16.2 Use MockDianeClient when app is launched in test mode
 - [ ] 16.3 Configure MockDianeClient with sample data for UI tests
 - [ ] 16.4 Ensure test environment uses isolated app container
@@ -198,8 +198,8 @@
 
 ## 18. Code Coverage Configuration
 
-- [x] 18.1 Enable code coverage in DianeMenu test scheme
-- [x] 18.2 Configure coverage to collect data for DianeMenu target
+- [x] 18.1 Enable code coverage in Diane test scheme
+- [x] 18.2 Configure coverage to collect data for Diane target
 - [ ] 18.3 Verify coverage reports appear in Xcode's coverage navigator
 - [ ] 18.4 Document target coverage thresholds (80% for ViewModels, 60% overall)
 - [ ] 18.5 Run full test suite and review coverage report

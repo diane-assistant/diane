@@ -1,11 +1,11 @@
 # Build artifacts
 dist/
+build/
 *.exe
-diane
-diane-ctl
-server/diane-ctl
+default.profraw
 
-# Go
+# Go binaries (but not Go source directories)
+server/diane-ctl
 *.test
 *.out
 
@@ -19,10 +19,11 @@ server/diane-ctl
 .DS_Store
 
 # Xcode
-DianeMenu/build/
+Diane/build/
 *.xcuserstate
 xcuserdata/
 DerivedData/
+*.xcworkspace/
 
 # Secrets (NEVER commit these)
 *.pem

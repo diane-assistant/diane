@@ -11,7 +11,7 @@ Add context-based MCP aggregation to Diane, allowing users to group MCP servers 
 3. Enable/disable individual tools per MCP per context
 4. Provide ready-to-copy connection instructions per context
 5. Migrate MCP configuration from JSON file to SQLite database
-6. Build UI in DianeMenu for context management
+6. Build UI in Diane for context management
 
 ---
 
@@ -413,11 +413,11 @@ func (s *MCPServer) listTools(session *Session) ([]Tool, error) {
 
 ---
 
-## Phase 6: DianeMenu UI
+## Phase 6: Diane UI
 
 ### 6.1 New Views
 
-**Files to create in `DianeMenu/DianeMenu/Views/`:**
+**Files to create in `Diane/Diane/Views/`:**
 
 | File | Description |
 |------|-------------|
@@ -431,7 +431,7 @@ func (s *MCPServer) listTools(session *Session) ([]Tool, error) {
 
 ### 6.2 New Models
 
-**Files to create in `DianeMenu/DianeMenu/Models/`:**
+**Files to create in `Diane/Diane/Models/`:**
 
 | File | Description |
 |------|-------------|
@@ -442,7 +442,7 @@ func (s *MCPServer) listTools(session *Session) ([]Tool, error) {
 
 ### 6.3 Update DianeClient
 
-**File:** `DianeMenu/DianeMenu/Services/DianeClient.swift`
+**File:** `Diane/Diane/Services/DianeClient.swift`
 
 Add methods:
 ```swift
@@ -530,10 +530,12 @@ func getConnectionInstructions(context: String) async throws -> ConnectionInstru
 │                                                │
 │  ┌──────────────────────────────────────────┐ │
 │  │ {                                        │ │
+│  │   "$schema": "https://opencode.ai/...",  │ │
 │  │   "mcp": {                               │ │
-│  │     "diane": {                           │ │
+│  │     "diane-personal": {                  │ │
 │  │       "type": "remote",                  │ │
-│  │       "url": "http://localhost:8765/...  │ │
+│  │       "url": "http://localhost:8765/...   │ │
+│  │       "oauth": false                     │ │
 │  │     }                                    │ │
 │  │   }                                      │ │
 │  │ }                                        │ │
@@ -663,7 +665,7 @@ func (db *DB) MigrateFromJSONIfNeeded(jsonPath string) error {
 6. Phase 5: Builtin tools context support
 
 ### Week 3: UI
-7. Phase 6: DianeMenu UI implementation
+7. Phase 6: Diane UI implementation
 8. Phase 7: Migration & backward compatibility
 
 ### Week 4: Polish
@@ -685,16 +687,16 @@ func (db *DB) MigrateFromJSONIfNeeded(jsonPath string) error {
 | `server/internal/api/mcp_servers_api.go` | MCP server API handlers |
 | `server/internal/api/contexts_api.go` | Context API handlers |
 | `server/internal/api/context_servers_api.go` | Context-server API handlers |
-| `DianeMenu/DianeMenu/Models/Context.swift` | Context model |
-| `DianeMenu/DianeMenu/Models/ContextServer.swift` | Context server model |
-| `DianeMenu/DianeMenu/Models/ContextTool.swift` | Tool model |
-| `DianeMenu/DianeMenu/Models/ConnectionInstructions.swift` | Connection model |
-| `DianeMenu/DianeMenu/Views/ContextsView.swift` | Main contexts view |
-| `DianeMenu/DianeMenu/Views/ContextDetailView.swift` | Context detail view |
-| `DianeMenu/DianeMenu/Views/ContextServerRowView.swift` | Server row view |
-| `DianeMenu/DianeMenu/Views/ContextToolRowView.swift` | Tool row view |
-| `DianeMenu/DianeMenu/Views/ConnectionInstructionsView.swift` | Instructions sheet |
-| `DianeMenu/DianeMenu/Views/AddContextSheet.swift` | Add context modal |
+| `Diane/Diane/Models/Context.swift` | Context model |
+| `Diane/Diane/Models/ContextServer.swift` | Context server model |
+| `Diane/Diane/Models/ContextTool.swift` | Tool model |
+| `Diane/Diane/Models/ConnectionInstructions.swift` | Connection model |
+| `Diane/Diane/Views/ContextsView.swift` | Main contexts view |
+| `Diane/Diane/Views/ContextDetailView.swift` | Context detail view |
+| `Diane/Diane/Views/ContextServerRowView.swift` | Server row view |
+| `Diane/Diane/Views/ContextToolRowView.swift` | Tool row view |
+| `Diane/Diane/Views/ConnectionInstructionsView.swift` | Instructions sheet |
+| `Diane/Diane/Views/AddContextSheet.swift` | Add context modal |
 
 ### Modified Files
 
@@ -705,14 +707,14 @@ func (db *DB) MigrateFromJSONIfNeeded(jsonPath string) error {
 | `server/internal/api/api.go` | Register new routes |
 | `server/mcp/server.go` | Context-aware tool listing/calling |
 | `server/cmd/diane-ctl/main.go` | Add import/export commands |
-| `DianeMenu/DianeMenu/Services/DianeClient.swift` | Add context API methods |
+| `Diane/Diane/Services/DianeClient.swift` | Add context API methods |
 | `MCP.md` | Document contexts feature |
 
 ---
 
 ## Success Criteria
 
-1. ✅ User can create/edit/delete contexts in DianeMenu
+1. ✅ User can create/edit/delete contexts in Diane
 2. ✅ User can enable/disable MCPs per context
 3. ✅ User can enable/disable individual tools per context
 4. ✅ Connection instructions show correct context URL

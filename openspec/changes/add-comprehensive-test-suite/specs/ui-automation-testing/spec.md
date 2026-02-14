@@ -5,7 +5,7 @@ The system SHALL use XCUITest framework to test user flows through the actual ap
 
 #### Scenario: Test launches the application
 - **WHEN** UI test suite runs
-- **THEN** it SHALL launch DianeMenu application in test mode
+- **THEN** it SHALL launch Diane application in test mode
 
 #### Scenario: Test navigates to MCP Servers section
 - **WHEN** test clicks "MCP Servers" navigation item

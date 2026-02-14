@@ -1,6 +1,6 @@
 ## Why
 
-The current DianeMenu application runs as a menu bar utility, but Diane's expanding functionality (MCPs, providers, configuration, monitoring) would be better served by a full-featured desktop application. A dedicated desktop app with standard window management would provide better discoverability, organization, and user experience as a professional tool that can be docked and managed like other native applications.
+The current Diane application runs as a menu bar utility, but Diane's expanding functionality (MCPs, providers, configuration, monitoring) would be better served by a full-featured desktop application. A dedicated desktop app with standard window management would provide better discoverability, organization, and user experience as a professional tool that can be docked and managed like other native applications.
 
 ## What Changes
 
@@ -25,7 +25,7 @@ The current DianeMenu application runs as a menu bar utility, but Diane's expand
 
 ## Impact
 
-- **DianeMenu code**: Significant refactor from menu bar app to full desktop application
+- **Diane code**: Significant refactor from menu bar app to full desktop application
 - **UI architecture**: New main window structure with navigation and content areas
 - **User experience**: Changed interaction model from dropdown menu to navigable desktop application
 - **Build process**: May need updated app bundle configuration for proper dock integration

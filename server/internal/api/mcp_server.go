@@ -82,6 +82,10 @@ func (s *MCPHTTPServer) Start() error {
 	mux.HandleFunc("/mcp/sse", s.handleSSE)         // SSE transport
 	mux.HandleFunc("/mcp/message", s.handleMessage) // SSE message endpoint
 
+	// Legacy aliases — some clients use /sse instead of /mcp/sse
+	mux.HandleFunc("/sse", s.handleSSE)
+	mux.HandleFunc("/message", s.handleMessage)
+
 	// Health check
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -205,8 +209,12 @@ func (s *MCPHTTPServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	// Create session with context
 	session := s.createSessionWithContext(contextName)
 
-	// Send endpoint event (include context in URL if present)
-	messageURL := fmt.Sprintf("/mcp/message?session=%s", session.id)
+	// Send endpoint event — use matching path prefix based on request path
+	messagePath := "/mcp/message"
+	if r.URL.Path == "/sse" {
+		messagePath = "/message"
+	}
+	messageURL := fmt.Sprintf("%s?session=%s", messagePath, session.id)
 	if contextName != "" {
 		messageURL += fmt.Sprintf("&context=%s", contextName)
 	}
@@ -221,7 +229,12 @@ func (s *MCPHTTPServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case event := <-session.eventChan:
-			fmt.Fprintf(w, "event: message\ndata: %s\n\n", string(event))
+			_, err := fmt.Fprintf(w, "event: message\ndata: %s\n\n", string(event))
+			if err != nil {
+				slog.Debug("SSE client write failed, closing session", "session", session.id, "error", err)
+				s.removeSession(session.id)
+				return
+			}
 			if ok {
 				flusher.Flush()
 			}
@@ -232,7 +245,12 @@ func (s *MCPHTTPServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-time.After(30 * time.Second):
 			// Send keepalive
-			fmt.Fprintf(w, ": keepalive\n\n")
+			_, err := fmt.Fprintf(w, ": keepalive\n\n")
+			if err != nil {
+				slog.Debug("SSE client keepalive failed, closing session", "session", session.id, "error", err)
+				s.removeSession(session.id)
+				return
+			}
 			if ok {
 				flusher.Flush()
 			}

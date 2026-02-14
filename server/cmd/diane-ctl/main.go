@@ -39,14 +39,11 @@ func main() {
 		}
 		fmt.Println("Diane is running")
 
+	case "doctor":
+		handleDoctorCommand(client)
+
 	case "mcp-servers":
-		servers, err := client.GetMCPServers()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		output, _ := json.MarshalIndent(servers, "", "  ")
-		fmt.Println(string(output))
+		handleMCPServersCommand(client)
 
 	case "reload":
 		if err := client.ReloadConfig(); err != nil {
@@ -74,6 +71,10 @@ func main() {
 	case "agent":
 		handleAgentCommand(client, os.Args[2:])
 
+	// MCP commands
+	case "mcp":
+		handleMCPCommand(client, os.Args[2:])
+
 	// Gallery commands
 	case "gallery":
 		handleGalleryCommand(client, os.Args[2:])
@@ -87,6 +88,451 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
+}
+
+func handleMCPServersCommand(client *api.Client) {
+	// Fetch both runtime status and full config
+	servers, err := client.GetMCPServers()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting server status: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Build a map of runtime status by name
+	statusMap := make(map[string]api.MCPServerStatus)
+	for _, s := range servers {
+		statusMap[s.Name] = s
+	}
+
+	// Try to get full configs from the database
+	configs, configErr := client.GetMCPServerConfigs()
+
+	if len(servers) == 0 && (configErr != nil || len(configs) == 0) {
+		fmt.Println("No MCP servers configured.")
+		return
+	}
+
+	fmt.Printf("MCP Servers (%d):\n", len(servers))
+
+	// If we have configs, display rich info merged with status
+	if configErr == nil && len(configs) > 0 {
+		// Build a set of names we've already shown via configs
+		shown := make(map[string]bool)
+
+		for _, cfg := range configs {
+			shown[cfg.Name] = true
+			status := statusMap[cfg.Name]
+			fmt.Println()
+			printServerDetail(cfg, status)
+		}
+
+		// Show any runtime-only servers not in configs (e.g. builtin)
+		for _, s := range servers {
+			if !shown[s.Name] {
+				fmt.Println()
+				printServerStatusOnly(s)
+			}
+		}
+	} else {
+		// Fallback: only runtime status available
+		for _, s := range servers {
+			fmt.Println()
+			printServerStatusOnly(s)
+		}
+	}
+	fmt.Println()
+}
+
+func printServerDetail(cfg api.MCPServerResponse, status api.MCPServerStatus) {
+	// Connection status
+	connStatus := "disconnected"
+	if status.Connected {
+		connStatus = "connected"
+	}
+	if status.Error != "" {
+		connStatus = "error"
+	}
+
+	enabledStr := "enabled"
+	if !cfg.Enabled {
+		enabledStr = "disabled"
+	}
+
+	fmt.Printf("  %-20s [%s] [%s] [%s]\n", cfg.Name, cfg.Type, enabledStr, connStatus)
+
+	if status.Error != "" {
+		fmt.Printf("                       Error: %s\n", status.Error)
+	}
+
+	if status.ToolCount > 0 {
+		fmt.Printf("                       Tools: %d\n", status.ToolCount)
+	}
+
+	// Type-specific config
+	if cfg.Type == "stdio" {
+		if cfg.Command != "" {
+			fmt.Printf("                       Command: %s\n", cfg.Command)
+		}
+		if len(cfg.Args) > 0 {
+			fmt.Printf("                       Args: %v\n", cfg.Args)
+		}
+	} else if cfg.Type == "sse" || cfg.Type == "http" {
+		if cfg.URL != "" {
+			fmt.Printf("                       URL: %s\n", cfg.URL)
+		}
+		if len(cfg.Headers) > 0 {
+			fmt.Printf("                       Headers:\n")
+			for k, v := range cfg.Headers {
+				fmt.Printf("                         %s: %s\n", k, v)
+			}
+		}
+	}
+
+	// Environment variables
+	if len(cfg.Env) > 0 {
+		fmt.Printf("                       Env:\n")
+		for k, v := range cfg.Env {
+			fmt.Printf("                         %s=%s\n", k, v)
+		}
+	}
+
+	// OAuth
+	if cfg.OAuth != nil {
+		oauthInfo := "configured"
+		if cfg.OAuth.Provider != "" {
+			oauthInfo = cfg.OAuth.Provider
+		}
+		if status.Authenticated {
+			oauthInfo += " (authenticated)"
+		} else if status.RequiresAuth {
+			oauthInfo += " (not authenticated)"
+		}
+		fmt.Printf("                       OAuth: %s\n", oauthInfo)
+	}
+}
+
+func printServerStatusOnly(s api.MCPServerStatus) {
+	connStatus := "disconnected"
+	if s.Connected {
+		connStatus = "connected"
+	}
+	if s.Error != "" {
+		connStatus = "error"
+	}
+
+	enabledStr := "enabled"
+	if !s.Enabled {
+		enabledStr = "disabled"
+	}
+
+	serverType := "unknown"
+	if s.Builtin {
+		serverType = "builtin"
+	}
+
+	fmt.Printf("  %-20s [%s] [%s] [%s]\n", s.Name, serverType, enabledStr, connStatus)
+
+	if s.Error != "" {
+		fmt.Printf("                       Error: %s\n", s.Error)
+	}
+
+	if s.ToolCount > 0 {
+		fmt.Printf("                       Tools: %d\n", s.ToolCount)
+	}
+
+	if s.RequiresAuth {
+		authStr := "not authenticated"
+		if s.Authenticated {
+			authStr = "authenticated"
+		}
+		fmt.Printf("                       OAuth: %s\n", authStr)
+	}
+}
+
+func handleMCPCommand(client *api.Client, args []string) {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: diane-ctl mcp <subcommand> [args...]\n")
+		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
+		fmt.Fprintf(os.Stderr, "  install opencode    Install Diane MCP config into OpenCode project\n")
+		os.Exit(1)
+	}
+
+	switch args[0] {
+	case "install":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: diane-ctl mcp install <target> [--context <name>]\n")
+			fmt.Fprintf(os.Stderr, "\nTargets:\n")
+			fmt.Fprintf(os.Stderr, "  opencode    Install Diane MCP config into OpenCode project\n")
+			os.Exit(1)
+		}
+		switch args[1] {
+		case "opencode":
+			// Parse --context flag from remaining args
+			contextName := ""
+			for i := 2; i < len(args); i++ {
+				if (args[i] == "--context" || args[i] == "-c") && i+1 < len(args) {
+					contextName = args[i+1]
+					i++
+				}
+			}
+			handleMCPInstallOpenCode(client, contextName)
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown install target: %s\n", args[1])
+			fmt.Fprintf(os.Stderr, "Available targets: opencode\n")
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown mcp subcommand: %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
+// resolveContext determines which context to use. If contextName is provided via
+// --context flag, it validates it against available contexts. Otherwise it fetches
+// the list from the API and lets the user pick (or uses default if only one exists).
+func resolveContext(client *api.Client, contextName string) string {
+	contexts, err := client.ListContexts()
+	if err != nil {
+		if contextName != "" {
+			// Can't validate but user explicitly chose, use it
+			return contextName
+		}
+		// Diane not running, fall back to "personal"
+		fmt.Println("Diane is not running, using default context: personal")
+		return "personal"
+	}
+
+	if len(contexts) == 0 {
+		if contextName != "" {
+			return contextName
+		}
+		return "personal"
+	}
+
+	// If user specified --context, validate it
+	if contextName != "" {
+		for _, c := range contexts {
+			if c.Name == contextName {
+				return contextName
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Context '%s' not found. Available contexts:\n", contextName)
+		for _, c := range contexts {
+			def := ""
+			if c.IsDefault {
+				def = " (default)"
+			}
+			fmt.Fprintf(os.Stderr, "  - %s%s\n", c.Name, def)
+		}
+		os.Exit(1)
+	}
+
+	// If only one context, use it
+	if len(contexts) == 1 {
+		return contexts[0].Name
+	}
+
+	// Multiple contexts: show list and ask user to pick with --context
+	fmt.Println("Multiple contexts available. Please specify one with --context:")
+	for _, c := range contexts {
+		def := ""
+		if c.IsDefault {
+			def = " (default)"
+		}
+		desc := ""
+		if c.Description != "" {
+			desc = " - " + c.Description
+		}
+		fmt.Printf("  - %s%s%s\n", c.Name, def, desc)
+	}
+	fmt.Println()
+	fmt.Println("Example:")
+	fmt.Println("  diane-ctl mcp install opencode --context personal")
+	os.Exit(1)
+	return "" // unreachable
+}
+
+func handleMCPInstallOpenCode(client *api.Client, contextFlag string) {
+	contextName := resolveContext(client, contextFlag)
+
+	// Look for existing opencode config in current directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: could not get current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	mcpKey := "diane-" + contextName
+	mcpURL := "http://localhost:8765/mcp/sse?context=" + contextName
+	dianeMCP := map[string]interface{}{
+		"type":  "remote",
+		"url":   mcpURL,
+		"oauth": false,
+	}
+
+	// Check for existing config files in order of preference
+	configFiles := []string{"opencode.json", "opencode.jsonc"}
+	var configPath string
+	for _, f := range configFiles {
+		candidate := filepath.Join(cwd, f)
+		if _, err := os.Stat(candidate); err == nil {
+			configPath = candidate
+			break
+		}
+	}
+
+	if configPath != "" {
+		// Read and update existing config
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", configPath, err)
+			os.Exit(1)
+		}
+
+		var config map[string]interface{}
+		if err := json.Unmarshal(data, &config); err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing %s: %v\n", configPath, err)
+			os.Exit(1)
+		}
+
+		// Get or create mcp section
+		mcpSection, ok := config["mcp"].(map[string]interface{})
+		if !ok {
+			mcpSection = make(map[string]interface{})
+		}
+
+		// Check if the exact key already exists with current config
+		if existing, exists := mcpSection[mcpKey]; exists {
+			if existingMap, ok := existing.(map[string]interface{}); ok {
+				existingURL, _ := existingMap["url"].(string)
+				if existingURL == mcpURL {
+					fmt.Printf("%s MCP config already up to date in %s\n", mcpKey, filepath.Base(configPath))
+					return
+				}
+			}
+		}
+
+		// Detect and upgrade old-style diane configs
+		upgraded := detectAndUpgradeOldConfig(mcpSection, mcpKey, dianeMCP)
+
+		if !upgraded {
+			// No old config found, just add the new one
+			if _, exists := mcpSection[mcpKey]; exists {
+				// Key exists but URL differs - update it
+				fmt.Printf("Updating %s MCP config in %s\n", mcpKey, filepath.Base(configPath))
+			} else {
+				fmt.Printf("Adding %s MCP config to %s\n", mcpKey, filepath.Base(configPath))
+			}
+			mcpSection[mcpKey] = dianeMCP
+		}
+
+		config["mcp"] = mcpSection
+
+		// Ensure $schema is present
+		if _, hasSchema := config["$schema"]; !hasSchema {
+			config["$schema"] = "https://opencode.ai/config.json"
+		}
+
+		// Write back
+		output, err := json.MarshalIndent(config, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error marshaling config: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := os.WriteFile(configPath, append(output, '\n'), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing %s: %v\n", configPath, err)
+			os.Exit(1)
+		}
+	} else {
+		// Create new opencode.json
+		configPath = filepath.Join(cwd, "opencode.json")
+		config := map[string]interface{}{
+			"$schema": "https://opencode.ai/config.json",
+			"mcp": map[string]interface{}{
+				mcpKey: dianeMCP,
+			},
+		}
+
+		output, err := json.MarshalIndent(config, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error marshaling config: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := os.WriteFile(configPath, append(output, '\n'), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing opencode.json: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Created opencode.json with %s MCP config\n", mcpKey)
+	}
+}
+
+// detectAndUpgradeOldConfig checks for old-style diane MCP configurations and
+// upgrades them to the new diane-{context} format. Returns true if an upgrade
+// was performed.
+//
+// Old configs it detects:
+//   - "diane" with type "local" and command pointing to diane binary (stdio mode)
+//   - "diane" with type "remote" pointing to /mcp (HTTP streamable without context)
+//   - "diane" with type "remote" pointing to /mcp/sse without context param
+//   - "diane-personal" or "diane-*" with outdated URL
+func detectAndUpgradeOldConfig(mcpSection map[string]interface{}, newKey string, newConfig map[string]interface{}) bool {
+	upgraded := false
+
+	// Check for old "diane" key (not "diane-*")
+	if old, exists := mcpSection["diane"]; exists {
+		oldMap, ok := old.(map[string]interface{})
+		if !ok {
+			return false
+		}
+
+		isOldConfig := false
+		oldType, _ := oldMap["type"].(string)
+		oldURL, _ := oldMap["url"].(string)
+
+		// Old stdio/local config: {"type": "local", "command": [...]}
+		if oldType == "local" || oldType == "" {
+			if _, hasCmd := oldMap["command"]; hasCmd {
+				isOldConfig = true
+			}
+		}
+
+		// Old HTTP streamable without context: url ends with /mcp (no ?context=)
+		if oldType == "remote" || oldType == "http" {
+			if oldURL != "" {
+				if oldURL == "http://localhost:8765/mcp" ||
+					oldURL == "http://localhost:8765/mcp/sse" ||
+					(len(oldURL) > 0 && !containsContextParam(oldURL)) {
+					isOldConfig = true
+				}
+			}
+		}
+
+		if isOldConfig {
+			fmt.Printf("Upgrading old 'diane' config to '%s' in %s format\n", newKey, "SSE+context")
+			delete(mcpSection, "diane")
+			mcpSection[newKey] = newConfig
+			upgraded = true
+		}
+	}
+
+	return upgraded
+}
+
+// containsContextParam checks if a URL contains a context= query parameter
+func containsContextParam(rawURL string) bool {
+	for _, s := range []string{"?context=", "&context="} {
+		if len(rawURL) > len(s) {
+			for i := 0; i <= len(rawURL)-len(s); i++ {
+				if rawURL[i:i+len(s)] == s {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func handleAgentsCommand(client *api.Client, args []string) {
@@ -597,20 +1043,26 @@ func handleInfoCommand(client *api.Client) {
   CONNECTING TO DIANE
 ══════════════════════════════════════════════════════════════════════════════`)
 
-	fmt.Printf(`
+	fmt.Print(`
   ── OpenCode ─────────────────────────────────────────────────────────────────
 
   Add to your opencode.json:
 
     {
+      "$schema": "https://opencode.ai/config.json",
       "mcp": {
-        "diane": {
-          "command": ["%s"]
+        "diane-personal": {
+          "type": "remote",
+          "url": "http://localhost:8765/mcp/sse?context=personal",
+          "oauth": false
         }
       }
     }
 
-`, dianeBin)
+  Or install automatically with:
+
+    diane-ctl mcp install opencode
+`)
 
 	fmt.Printf(`  ── Claude Desktop ───────────────────────────────────────────────────────────
 
@@ -643,7 +1095,7 @@ func handleInfoCommand(client *api.Client) {
 
 `, dianeBin)
 
-	fmt.Println(`  ── HTTP / Network Clients ───────────────────────────────────────────────────
+	fmt.Print(`  ── HTTP / Network Clients ───────────────────────────────────────────────────
 
   Diane exposes an HTTP Streamable MCP endpoint when running:
 
@@ -663,7 +1115,7 @@ func handleInfoCommand(client *api.Client) {
     }
 `)
 
-	fmt.Println(`══════════════════════════════════════════════════════════════════════════════
+	fmt.Print(`══════════════════════════════════════════════════════════════════════════════
   TESTING CONNECTION
 ══════════════════════════════════════════════════════════════════════════════
 
@@ -683,7 +1135,7 @@ func handleInfoCommand(client *api.Client) {
 ══════════════════════════════════════════════════════════════════════════════
 
   Documentation:    ~/.diane/MCP.md
-  MCP Servers:      ~/.diane/mcp-servers.json
+  Database:         ~/.diane/cron.db
   Logs:             ~/.diane/server.log
 
   Commands:
@@ -692,6 +1144,38 @@ func handleInfoCommand(client *api.Client) {
     diane-ctl agents        List configured ACP agents
     diane-ctl gallery       Browse installable agents
 `)
+
+}
+
+func handleDoctorCommand(client *api.Client) {
+	report, err := client.Doctor()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "\nDiane may not be running. Try: diane-ctl health\n")
+		os.Exit(1)
+	}
+
+	fmt.Println()
+	for _, check := range report.Checks {
+		var icon string
+		switch check.Status {
+		case "ok":
+			icon = "  ok"
+		case "warn":
+			icon = "warn"
+		case "fail":
+			icon = "FAIL"
+		}
+		fmt.Printf("  [%s]  %-18s %s\n", icon, check.Name, check.Message)
+	}
+	fmt.Println()
+
+	if report.Healthy {
+		fmt.Println("  All checks passed.")
+	} else {
+		fmt.Println("  Some checks failed.")
+		os.Exit(1)
+	}
 }
 
 func printUsage() {
@@ -704,9 +1188,15 @@ Commands:
   info           Show connection guide for AI tools
   status         Show full Diane status
   health         Check if Diane is running
+  doctor         Run diagnostic checks (daemon, MCP, SSE, database)
   mcp-servers    List all MCP servers and their status
   reload         Reload MCP configuration
   restart <name> Restart a specific MCP server
+
+MCP Commands:
+  mcp install opencode        Install Diane MCP config into OpenCode project
+                              Options:
+                                --context <name>  Context to use (default: auto-detect)
 
 OAuth Commands:
   auth                        List MCP servers with OAuth configured
@@ -737,6 +1227,8 @@ Agent Gallery (one-click install):
 
 Examples:
   diane-ctl info                                              # Show connection guide
+  diane-ctl mcp install opencode                              # Install MCP config in OpenCode project
+  diane-ctl mcp install opencode --context work               # Install with specific context
   diane-ctl auth login github                                 # Authenticate with GitHub MCP
   diane-ctl gallery                                           # Browse available agents
   diane-ctl gallery install gemini                            # Install Gemini CLI

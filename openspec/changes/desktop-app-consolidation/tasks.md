@@ -1,13 +1,13 @@
 ## 1. Project Setup and Structure
 
-- [x] 1.1 Create MainWindowView.swift file in DianeMenu/DianeMenu/Views/
+- [x] 1.1 Create MainWindowView.swift file in Diane/Diane/Views/
 - [x] 1.2 Create Section enum within MainWindowView for navigation sections
 - [x] 1.3 Add SF Symbol icon mapping for each section (tools, scheduler, agents, contexts, providers, usage, settings)
 - [x] 1.4 Verify Info.plist does not have LSUIElement set to YES (should be NO or omitted for dock icon)
 
 ## 2. Main Window Scene
 
-- [x] 2.1 Add Window scene to DianeMenuApp.swift with id "main" and title "Diane"
+- [x] 2.1 Add Window scene to DianeApp.swift with id "main" and title "Diane"
 - [x] 2.2 Set window default size to 1000x700 using .defaultSize() modifier
 - [x] 2.3 Add MainWindowView as the window's content with environment objects (statusMonitor, updateChecker)
 - [x] 2.4 Configure window to persist size and position using .setFrameAutosaveName or SceneStorage
@@ -63,7 +63,7 @@
 
 ## 8. Menu Bar Integration
 
-- [x] 8.1 Add openMainWindow() helper function in DianeMenuApp or shared utility
+- [x] 8.1 Add openMainWindow() helper function in DianeApp or shared utility
 - [x] 8.2 Update MenuBarView to simplify dropdown (keep status, MCP servers, critical controls)
 - [x] 8.3 Replace "Open Tools Browser", "Open Scheduler", etc. buttons with single "Open Diane" button
 - [x] 8.4 Make "Open Diane" button call openMainWindow() to activate main window

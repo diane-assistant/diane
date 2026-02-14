@@ -1,9 +1,9 @@
 ## Context
 
-DianeMenu is currently a SwiftUI menu bar application that uses `MenuBarExtra` to provide a dropdown interface. The app uses `WindowManager` to open separate auxiliary windows for different features (Tools Browser, Scheduler, Agents, Contexts, Providers, Usage). This approach creates a fragmented UX where each feature opens in its own disconnected window.
+Diane is currently a SwiftUI menu bar application that uses `MenuBarExtra` to provide a dropdown interface. The app uses `WindowManager` to open separate auxiliary windows for different features (Tools Browser, Scheduler, Agents, Contexts, Providers, Usage). This approach creates a fragmented UX where each feature opens in its own disconnected window.
 
 The app structure:
-- **DianeMenuApp**: Main app entry using `MenuBarExtra` with `.window` style
+- **DianeApp**: Main app entry using `MenuBarExtra` with `.window` style
 - **MenuBarView**: Primary dropdown menu showing status and launching auxiliary windows
 - **WindowManager**: Singleton managing NSWindow instances for each feature area
 - **Multiple Views**: ProvidersView, AgentsView, ContextsView, etc. - each designed as standalone windows
@@ -44,7 +44,7 @@ Current constraints:
 **Implementation**:
 ```swift
 @main
-struct DianeMenuApp: App {
+struct DianeApp: App {
     var body: some Scene {
         // Primary desktop window
         Window("Diane", id: "main") {
@@ -202,7 +202,7 @@ MenuBarExtra {
 ## Migration Plan
 
 **Phase 1: Create Main Window (Week 1)**
-1. Add `Window("Diane")` scene to DianeMenuApp
+1. Add `Window("Diane")` scene to DianeApp
 2. Create MainWindowView with NavigationSplitView structure
 3. Create Section enum and basic sidebar
 4. Test window appearance, dock icon, Cmd+Tab
