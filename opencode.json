@@ -1,17 +1,10 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "diane-personal": {
+    "diane-work": {
       "oauth": false,
       "type": "remote",
       "url": "http://localhost:8765/mcp/sse?context=work-diane"
-    },
-    "emergent": {
-      "headers": {
-        "X-API-Key": "emt_fcd894d773ed4d1ddcc94fd13c04f2477b58ea3e9d1edbdd86ab131667f3d530"
-      },
-      "type": "remote",
-      "url": "http://mcj-emergent:3002/api/mcp/sse/e567b7b3-f780-45fc-8a69-ef1f845d3243"
     }
   },
   "model": "github-copilot/claude-sonnet-4",
