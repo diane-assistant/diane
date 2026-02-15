@@ -684,6 +684,24 @@ func (t *SpecArtifact) createEntityRelationships(ctx context.Context, typeName, 
 		}
 	}
 
+	// Handle context_ids: create available_in (this Action → each Context)
+	if typeName == emergent.TypeAction {
+		if ctxIDs := getStringSlice(content, "context_ids"); len(ctxIDs) > 0 {
+			for _, ctxID := range ctxIDs {
+				created, err := t.ensureRelationship(ctx, emergent.RelAvailableIn, entityID, ctxID)
+				if err != nil {
+					results = append(results, fmt.Sprintf("available_in → %s failed: %v", ctxID, err))
+					continue
+				}
+				if created {
+					results = append(results, fmt.Sprintf("available_in → %s", ctxID))
+				} else {
+					results = append(results, fmt.Sprintf("available_in → %s (already exists)", ctxID))
+				}
+			}
+		}
+	}
+
 	// Handle api_ids: create exposes_api (this Service → each APIContract)
 	if typeName == emergent.TypeService {
 		if apiIDs := getStringSlice(content, "api_ids"); len(apiIDs) > 0 {
