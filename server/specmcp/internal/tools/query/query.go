@@ -177,6 +177,111 @@ func (t *GetAction) Execute(ctx context.Context, params json.RawMessage) (*mcp.T
 	return jsonResult(buildEntityResponse(obj, expanded))
 }
 
+// --- spec_get_data_model ---
+
+type getDataModelParams struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+type GetDataModel struct {
+	client *emergent.Client
+}
+
+func NewGetDataModel(client *emergent.Client) *GetDataModel {
+	return &GetDataModel{client: client}
+}
+
+func (t *GetDataModel) Name() string { return "spec_get_data_model" }
+func (t *GetDataModel) Description() string {
+	return "Get a DataModel with its service, related API contracts, patterns, and other models that reference it."
+}
+func (t *GetDataModel) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "DataModel entity ID"},
+    "name": {"type": "string", "description": "DataModel name (used if id not provided)"}
+  }
+}`)
+}
+
+func (t *GetDataModel) Execute(ctx context.Context, params json.RawMessage) (*mcp.ToolsCallResult, error) {
+	var p getDataModelParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return mcp.ErrorResult(fmt.Sprintf("invalid parameters: %v", err)), nil
+	}
+
+	obj, err := resolveEntity(ctx, t.client, emergent.TypeDataModel, p.ID, p.Name)
+	if err != nil {
+		return mcp.ErrorResult(err.Error()), nil
+	}
+
+	expanded, err := t.client.GetEntityWithRelationships(ctx, obj.ID, []string{
+		emergent.RelBelongsToService,
+		emergent.RelUsesModel,
+		emergent.RelUsesPattern,
+	}, 1)
+	if err != nil {
+		return nil, fmt.Errorf("expanding data model: %w", err)
+	}
+
+	return jsonResult(buildEntityResponse(obj, expanded))
+}
+
+// --- spec_get_service ---
+
+type getServiceParams struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+type GetService struct {
+	client *emergent.Client
+}
+
+func NewGetService(client *emergent.Client) *GetService {
+	return &GetService{client: client}
+}
+
+func (t *GetService) Name() string { return "spec_get_service" }
+func (t *GetService) Description() string {
+	return "Get a Service (backend subsystem/package) with its API contracts, data models, and patterns."
+}
+func (t *GetService) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "Service entity ID"},
+    "name": {"type": "string", "description": "Service name (used if id not provided)"}
+  }
+}`)
+}
+
+func (t *GetService) Execute(ctx context.Context, params json.RawMessage) (*mcp.ToolsCallResult, error) {
+	var p getServiceParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return mcp.ErrorResult(fmt.Sprintf("invalid parameters: %v", err)), nil
+	}
+
+	obj, err := resolveEntity(ctx, t.client, emergent.TypeService, p.ID, p.Name)
+	if err != nil {
+		return mcp.ErrorResult(err.Error()), nil
+	}
+
+	expanded, err := t.client.GetEntityWithRelationships(ctx, obj.ID, []string{
+		emergent.RelExposesAPI,
+		emergent.RelProvidesModel,
+		emergent.RelBelongsToService,
+		emergent.RelUsesPattern,
+	}, 1)
+	if err != nil {
+		return nil, fmt.Errorf("expanding service: %w", err)
+	}
+
+	return jsonResult(buildEntityResponse(obj, expanded))
+}
+
 // --- spec_get_scenario ---
 
 type getScenarioParams struct {

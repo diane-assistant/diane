@@ -35,7 +35,7 @@ func NewSpecArtifact(client *emergent.Client) *SpecArtifact {
 func (t *SpecArtifact) Name() string { return "spec_artifact" }
 
 func (t *SpecArtifact) Description() string {
-	return "Add an artifact to an existing change. Supports: spec (with requirements and scenarios), design, task, actor, pattern, test_case, api_contract, context, ui_component, action, scenario_step. Enforces workflow ordering guards: Proposal → Spec → Design → Tasks."
+	return "Add an artifact to an existing change. Supports: spec (with requirements and scenarios), design, task, actor, pattern, test_case, api_contract, context, ui_component, action, data_model, service, scenario_step. Enforces workflow ordering guards: Proposal → Spec → Design → Tasks."
 }
 
 func (t *SpecArtifact) InputSchema() json.RawMessage {
@@ -49,7 +49,7 @@ func (t *SpecArtifact) InputSchema() json.RawMessage {
     "artifact_type": {
       "type": "string",
       "description": "Type of artifact to add",
-      "enum": ["proposal", "spec", "design", "task", "actor", "coding_agent", "pattern", "test_case", "api_contract", "context", "ui_component", "action", "requirement", "scenario", "scenario_step", "constitution"]
+      "enum": ["proposal", "spec", "design", "task", "actor", "coding_agent", "pattern", "test_case", "api_contract", "context", "ui_component", "action", "data_model", "service", "requirement", "scenario", "scenario_step", "constitution"]
     },
     "content": {
       "type": "object",
@@ -124,13 +124,17 @@ func (t *SpecArtifact) Execute(ctx context.Context, params json.RawMessage) (*mc
 	case "test_case":
 		return t.addTestCase(ctx, p.Content)
 	case "api_contract":
-		return t.addAPIContract(ctx, p.Content)
+		return t.addGenericEntity(ctx, emergent.TypeAPIContract, p.Content, nil, "")
 	case "context":
 		return t.addGenericEntity(ctx, emergent.TypeContext, p.Content, nil, "")
 	case "ui_component":
 		return t.addGenericEntity(ctx, emergent.TypeUIComponent, p.Content, nil, "")
 	case "action":
 		return t.addGenericEntity(ctx, emergent.TypeAction, p.Content, nil, "")
+	case "data_model":
+		return t.addGenericEntity(ctx, emergent.TypeDataModel, p.Content, nil, "")
+	case "service":
+		return t.addGenericEntity(ctx, emergent.TypeService, p.Content, nil, "")
 	case "constitution":
 		return t.addConstitution(ctx, p.ChangeID, p.Content)
 	default:
@@ -457,38 +461,6 @@ func (t *SpecArtifact) addTestCase(ctx context.Context, content map[string]any) 
 	})
 }
 
-// addAPIContract creates an APIContract and optionally links it to a Spec.
-func (t *SpecArtifact) addAPIContract(ctx context.Context, content map[string]any) (*mcp.ToolsCallResult, error) {
-	props := map[string]any{
-		"name":        getString(content, "name"),
-		"format":      getString(content, "format"),
-		"version":     getString(content, "version"),
-		"file_path":   getString(content, "file_path"),
-		"base_url":    getString(content, "base_url"),
-		"description": getString(content, "description"),
-	}
-	key := getString(content, "name")
-
-	obj, err := t.client.CreateObject(ctx, emergent.TypeAPIContract, &key, props, getStringSlice(content, "tags"))
-	if err != nil {
-		return nil, fmt.Errorf("creating API contract: %w", err)
-	}
-
-	// Link to spec if provided
-	if specID := getString(content, "spec_id"); specID != "" {
-		if _, err := t.client.CreateRelationship(ctx, emergent.RelHasContract, specID, obj.ID, nil); err != nil {
-			return nil, fmt.Errorf("creating has_contract relationship: %w", err)
-		}
-	}
-
-	return jsonResult(map[string]any{
-		"type":    "api_contract",
-		"id":      obj.ID,
-		"name":    key,
-		"message": fmt.Sprintf("Created API contract %q", key),
-	})
-}
-
 // addConstitution creates a Constitution and links it to the Change via governed_by.
 func (t *SpecArtifact) addConstitution(ctx context.Context, changeID string, content map[string]any) (*mcp.ToolsCallResult, error) {
 	props := map[string]any{
@@ -545,6 +517,9 @@ func (t *SpecArtifact) addGenericEntity(ctx context.Context, typeName string, co
 	delete(props, "context_id")
 	delete(props, "parent_context_id")
 	delete(props, "component_ids")
+	delete(props, "service_id")
+	delete(props, "model_ids")
+	delete(props, "api_ids")
 
 	if labels == nil {
 		labels = getStringSlice(content, "tags")
@@ -676,6 +651,52 @@ func (t *SpecArtifact) createEntityRelationships(ctx context.Context, typeName, 
 					results = append(results, fmt.Sprintf("uses_component → %s", compID))
 				} else {
 					results = append(results, fmt.Sprintf("uses_component → %s (already exists)", compID))
+				}
+			}
+		}
+	}
+
+	// Handle service_id: create belongs_to_service (this entity → Service)
+	if serviceID := getString(content, "service_id"); serviceID != "" {
+		created, err := t.ensureRelationship(ctx, emergent.RelBelongsToService, entityID, serviceID)
+		if err != nil {
+			results = append(results, fmt.Sprintf("belongs_to_service → %s failed: %v", serviceID, err))
+		} else if created {
+			results = append(results, fmt.Sprintf("belongs_to_service → %s", serviceID))
+		} else {
+			results = append(results, fmt.Sprintf("belongs_to_service → %s (already exists)", serviceID))
+		}
+	}
+
+	// Handle model_ids: create uses_model (this entity → each DataModel)
+	if modelIDs := getStringSlice(content, "model_ids"); len(modelIDs) > 0 {
+		for _, modelID := range modelIDs {
+			created, err := t.ensureRelationship(ctx, emergent.RelUsesModel, entityID, modelID)
+			if err != nil {
+				results = append(results, fmt.Sprintf("uses_model → %s failed: %v", modelID, err))
+				continue
+			}
+			if created {
+				results = append(results, fmt.Sprintf("uses_model → %s", modelID))
+			} else {
+				results = append(results, fmt.Sprintf("uses_model → %s (already exists)", modelID))
+			}
+		}
+	}
+
+	// Handle api_ids: create exposes_api (this Service → each APIContract)
+	if typeName == emergent.TypeService {
+		if apiIDs := getStringSlice(content, "api_ids"); len(apiIDs) > 0 {
+			for _, apiID := range apiIDs {
+				created, err := t.ensureRelationship(ctx, emergent.RelExposesAPI, entityID, apiID)
+				if err != nil {
+					results = append(results, fmt.Sprintf("exposes_api → %s failed: %v", apiID, err))
+					continue
+				}
+				if created {
+					results = append(results, fmt.Sprintf("exposes_api → %s", apiID))
+				} else {
+					results = append(results, fmt.Sprintf("exposes_api → %s (already exists)", apiID))
 				}
 			}
 		}

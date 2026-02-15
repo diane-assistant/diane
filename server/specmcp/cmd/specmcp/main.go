@@ -94,6 +94,8 @@ func run() error {
 	registry.Register(query.NewGetContext(emClient))
 	registry.Register(query.NewGetComponent(emClient))
 	registry.Register(query.NewGetAction(emClient))
+	registry.Register(query.NewGetDataModel(emClient))
+	registry.Register(query.NewGetService(emClient))
 	registry.Register(query.NewGetScenario(emClient))
 	registry.Register(query.NewGetPatterns(emClient))
 	registry.Register(query.NewImpactAnalysis(emClient))

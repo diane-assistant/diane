@@ -21,6 +21,8 @@ const (
 	TypeContext      = "Context"
 	TypeUIComponent  = "UIComponent"
 	TypeAction       = "Action"
+	TypeDataModel    = "DataModel"
+	TypeService      = "Service"
 	TypeGraphSync    = "GraphSync"
 )
 
@@ -58,6 +60,10 @@ const (
 	RelHasContract        = "has_contract"
 	RelImplementsContract = "implements_contract"
 	RelOwnedBy            = "owned_by"
+	RelExposesAPI         = "exposes_api"
+	RelBelongsToService   = "belongs_to_service"
+	RelUsesModel          = "uses_model"
+	RelProvidesModel      = "provides_model"
 )
 
 // Status constants for Change and Task entities.
@@ -266,6 +272,32 @@ type Action struct {
 	Description  string   `json:"description,omitempty"`
 	HandlerPath  string   `json:"handler_path,omitempty"`
 	Tags         []string `json:"tags,omitempty"`
+}
+
+// DataModel represents a domain data type shared across the system.
+type DataModel struct {
+	ID          string   `json:"id,omitempty"`
+	Name        string   `json:"name"`
+	DisplayName string   `json:"display_name,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Platform    []string `json:"platform,omitempty"`    // e.g. ["go", "swift"]
+	FilePath    string   `json:"file_path,omitempty"`   // primary definition file
+	GoType      string   `json:"go_type,omitempty"`     // Go struct name if different from Name
+	SwiftType   string   `json:"swift_type,omitempty"`  // Swift struct name if different from Name
+	Fields      []string `json:"fields,omitempty"`      // key field names
+	Persistence string   `json:"persistence,omitempty"` // e.g. "sqlite", "memory", "none"
+	Tags        []string `json:"tags,omitempty"`
+}
+
+// Service represents a backend subsystem or package.
+type Service struct {
+	ID          string   `json:"id,omitempty"`
+	Name        string   `json:"name"`
+	DisplayName string   `json:"display_name,omitempty"`
+	Description string   `json:"description,omitempty"`
+	PackagePath string   `json:"package_path,omitempty"` // e.g. "server/internal/mcpproxy"
+	Visibility  string   `json:"visibility,omitempty"`   // "internal" or "public"
+	Tags        []string `json:"tags,omitempty"`
 }
 
 // GraphSync tracks synchronization state.

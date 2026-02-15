@@ -29,6 +29,8 @@ var defaultSearchTypes = []string{
 	emergent.TypeDesign,
 	emergent.TypeTestCase,
 	emergent.TypeAPIContract,
+	emergent.TypeDataModel,
+	emergent.TypeService,
 }
 
 type searchParams struct {
@@ -63,7 +65,7 @@ func (t *Search) InputSchema() json.RawMessage {
     "types": {
       "type": "array",
       "items": {"type": "string"},
-      "description": "Filter to specific entity types (e.g. ['Pattern', 'Context', 'UIComponent']). Valid types: Pattern, Context, UIComponent, Action, Change, Spec, Task, Actor, CodingAgent, Requirement, Scenario, Design, TestCase, APIContract"
+      "description": "Filter to specific entity types (e.g. ['Pattern', 'Context', 'UIComponent']). Valid types: Pattern, Context, UIComponent, Action, Change, Spec, Task, Actor, CodingAgent, Requirement, Scenario, Design, TestCase, APIContract, DataModel, Service"
     },
     "labels": {
       "type": "array",

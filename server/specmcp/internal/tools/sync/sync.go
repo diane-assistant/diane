@@ -126,7 +126,8 @@ func (t *GraphSummary) Execute(ctx context.Context, params json.RawMessage) (*mc
 		emergent.TypeDesign, emergent.TypeTask, emergent.TypeActor,
 		emergent.TypeCodingAgent, emergent.TypePattern, emergent.TypeConstitution,
 		emergent.TypeTestCase, emergent.TypeAPIContract, emergent.TypeContext,
-		emergent.TypeUIComponent, emergent.TypeAction, emergent.TypeGraphSync,
+		emergent.TypeUIComponent, emergent.TypeAction, emergent.TypeDataModel,
+		emergent.TypeService, emergent.TypeGraphSync,
 	}
 
 	counts := make(map[string]int)
