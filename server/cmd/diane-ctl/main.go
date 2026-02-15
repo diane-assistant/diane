@@ -254,14 +254,17 @@ func handleMCPCommand(client *api.Client, args []string) {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr, "Usage: diane-ctl mcp <subcommand> [args...]\n")
 		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
-		fmt.Fprintf(os.Stderr, "  add <name> <url>    Add a new remote MCP server\n")
-		fmt.Fprintf(os.Stderr, "  install opencode    Install Diane MCP config into OpenCode project\n")
+		fmt.Fprintf(os.Stderr, "  add <name> <url>         Add a new remote MCP server (http/sse)\n")
+		fmt.Fprintf(os.Stderr, "  add-stdio <name> <cmd>   Add a new stdio MCP server\n")
+		fmt.Fprintf(os.Stderr, "  install opencode         Install Diane MCP config into OpenCode project\n")
 		os.Exit(1)
 	}
 
 	switch args[0] {
 	case "add":
 		handleMCPAdd(client, args[1:])
+	case "add-stdio":
+		handleMCPAddStdio(client, args[1:])
 	case "install":
 		if len(args) < 2 {
 			fmt.Fprintf(os.Stderr, "Usage: diane-ctl mcp install <target> [--context <name>]\n")
@@ -403,6 +406,121 @@ func handleMCPAdd(client *api.Client, args []string) {
 				}
 			}
 			fmt.Printf("    %s: %s\n", k, displayValue)
+		}
+	}
+	fmt.Printf("  ID: %d\n", server.ID)
+	fmt.Printf("  Created: %s\n", server.CreatedAt)
+	fmt.Println()
+	fmt.Println("Run 'diane-ctl reload' to reload the configuration and start the server.")
+}
+
+// handleMCPAddStdio handles the 'mcp add-stdio' command to add a new stdio MCP server
+func handleMCPAddStdio(client *api.Client, args []string) {
+	if len(args) < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: diane-ctl mcp add-stdio <name> <command> [options]\n")
+		fmt.Fprintf(os.Stderr, "\nOptions:\n")
+		fmt.Fprintf(os.Stderr, "  --arg <value>               Add command argument (can be used multiple times)\n")
+		fmt.Fprintf(os.Stderr, "  --env <KEY>=<VALUE>          Set environment variable (can be used multiple times)\n")
+		fmt.Fprintf(os.Stderr, "  --enabled=<true/false>       Enable/disable server [default: true]\n")
+		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  diane-ctl mcp add-stdio specmcp /path/to/specmcp --env \"EMERGENT_TOKEN=emt_xxx\" --env \"EMERGENT_URL=http://localhost:3002\"\n")
+		fmt.Fprintf(os.Stderr, "  diane-ctl mcp add-stdio myserver /usr/bin/myserver --arg \"--verbose\" --arg \"--port=8080\"\n")
+		os.Exit(1)
+	}
+
+	name := args[0]
+	command := args[1]
+	envVars := make(map[string]string)
+	var cmdArgs []string
+	enabled := true
+
+	// Parse optional flags
+	for i := 2; i < len(args); i++ {
+		arg := args[i]
+
+		if arg == "--env" && i+1 < len(args) {
+			envArg := args[i+1]
+			i++
+			parts := strings.SplitN(envArg, "=", 2)
+			if len(parts) == 2 {
+				envVars[parts[0]] = parts[1]
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: Invalid env format '%s'. Use --env KEY=VALUE\n", envArg)
+				os.Exit(1)
+			}
+		} else if strings.HasPrefix(arg, "--env=") {
+			envArg := strings.TrimPrefix(arg, "--env=")
+			parts := strings.SplitN(envArg, "=", 2)
+			if len(parts) == 2 {
+				envVars[parts[0]] = parts[1]
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: Invalid env format '%s'. Use --env KEY=VALUE\n", envArg)
+				os.Exit(1)
+			}
+		} else if arg == "--arg" && i+1 < len(args) {
+			cmdArgs = append(cmdArgs, args[i+1])
+			i++
+		} else if strings.HasPrefix(arg, "--arg=") {
+			cmdArgs = append(cmdArgs, strings.TrimPrefix(arg, "--arg="))
+		} else if strings.HasPrefix(arg, "--enabled") {
+			var enabledArg string
+			if arg == "--enabled" && i+1 < len(args) {
+				enabledArg = args[i+1]
+				i++
+			} else if strings.HasPrefix(arg, "--enabled=") {
+				enabledArg = strings.TrimPrefix(arg, "--enabled=")
+			}
+
+			if enabledArg == "false" || enabledArg == "0" {
+				enabled = false
+			} else if enabledArg == "true" || enabledArg == "1" {
+				enabled = true
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: Invalid enabled value '%s'. Use true or false\n", enabledArg)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: Unknown option '%s'\n", arg)
+			os.Exit(1)
+		}
+	}
+
+	// Create the MCP server
+	req := api.CreateMCPServerRequest{
+		Name:    name,
+		Type:    "stdio",
+		Command: command,
+		Args:    cmdArgs,
+		Env:     envVars,
+		Enabled: &enabled,
+	}
+
+	server, err := client.CreateMCPServer(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("MCP server '%s' added successfully\n", server.Name)
+	fmt.Printf("  Type: %s\n", server.Type)
+	fmt.Printf("  Command: %s\n", server.Command)
+	if len(server.Args) > 0 {
+		fmt.Printf("  Args: %v\n", server.Args)
+	}
+	fmt.Printf("  Enabled: %t\n", server.Enabled)
+	if len(server.Env) > 0 {
+		fmt.Printf("  Env:\n")
+		for k, v := range server.Env {
+			// Mask tokens/keys for security
+			displayValue := v
+			if strings.Contains(strings.ToLower(k), "key") || strings.Contains(strings.ToLower(k), "token") || strings.Contains(strings.ToLower(k), "secret") {
+				if len(v) > 8 {
+					displayValue = v[:4] + "..." + v[len(v)-4:]
+				} else {
+					displayValue = "***"
+				}
+			}
+			fmt.Printf("    %s=%s\n", k, displayValue)
 		}
 	}
 	fmt.Printf("  ID: %d\n", server.ID)
@@ -1318,9 +1436,14 @@ Commands:
   restart <name> Restart a specific MCP server
 
 MCP Commands:
-  mcp install opencode        Install Diane MCP config into OpenCode project
-                              Options:
-                                --context <name>  Context to use (default: auto-detect)
+  mcp add <name> <url>          Add a new remote MCP server (http/sse)
+  mcp add-stdio <name> <cmd>    Add a new stdio MCP server
+                                Options:
+                                  --env <KEY>=<VALUE>   Set env var (repeatable)
+                                  --arg <value>         Add argument (repeatable)
+  mcp install opencode          Install Diane MCP config into OpenCode project
+                                Options:
+                                  --context <name>  Context to use (default: auto-detect)
 
 OAuth Commands:
   auth                        List MCP servers with OAuth configured
