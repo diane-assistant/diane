@@ -744,11 +744,16 @@ func buildEntityResponse(obj *graph.GraphObject, expanded *graph.GraphExpandResp
 	// Group related entities by relationship type
 	relationships := make(map[string][]map[string]any)
 	if expanded != nil && expanded.Edges != nil {
-		// Build node lookup from ExpandNode types
+		// Build node lookup from ExpandNode types.
+		// Index by both ID and CanonicalID so that edges referencing
+		// canonical IDs can resolve to the latest-version node.
 		nodeLookup := make(map[string]*graph.ExpandNode)
 		if expanded.Nodes != nil {
 			for _, node := range expanded.Nodes {
 				nodeLookup[node.ID] = node
+				if node.CanonicalID != "" && node.CanonicalID != node.ID {
+					nodeLookup[node.CanonicalID] = node
+				}
 			}
 		}
 
