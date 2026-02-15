@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/diane-assistant/diane/internal/acp"
@@ -253,11 +254,14 @@ func handleMCPCommand(client *api.Client, args []string) {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr, "Usage: diane-ctl mcp <subcommand> [args...]\n")
 		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
+		fmt.Fprintf(os.Stderr, "  add <name> <url>    Add a new remote MCP server\n")
 		fmt.Fprintf(os.Stderr, "  install opencode    Install Diane MCP config into OpenCode project\n")
 		os.Exit(1)
 	}
 
 	switch args[0] {
+	case "add":
+		handleMCPAdd(client, args[1:])
 	case "install":
 		if len(args) < 2 {
 			fmt.Fprintf(os.Stderr, "Usage: diane-ctl mcp install <target> [--context <name>]\n")
@@ -285,6 +289,126 @@ func handleMCPCommand(client *api.Client, args []string) {
 		fmt.Fprintf(os.Stderr, "Unknown mcp subcommand: %s\n", args[0])
 		os.Exit(1)
 	}
+}
+
+// handleMCPAdd handles the 'mcp add' command to add a new MCP server
+func handleMCPAdd(client *api.Client, args []string) {
+	if len(args) < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: diane-ctl mcp add <name> <url> [options]\n")
+		fmt.Fprintf(os.Stderr, "\nOptions:\n")
+		fmt.Fprintf(os.Stderr, "  --type <type>               Server type (http, sse) [default: http]\n")
+		fmt.Fprintf(os.Stderr, "  --header <key>=<value>      Add HTTP header (can be used multiple times)\n")
+		fmt.Fprintf(os.Stderr, "  --enabled=<true/false>      Enable/disable server [default: true]\n")
+		fmt.Fprintf(os.Stderr, "  --timeout <ms>              Request timeout in milliseconds [default: 30000]\n")
+		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  diane-ctl mcp add context7 https://mcp.context7.com/mcp --header \"CONTEXT7_API_KEY=your-key\"\n")
+		fmt.Fprintf(os.Stderr, "  diane-ctl mcp add github https://api.github.com/mcp --type sse\n")
+		os.Exit(1)
+	}
+
+	name := args[0]
+	url := args[1]
+	serverType := "http" // default type
+	headers := make(map[string]string)
+	enabled := true
+
+	// Parse optional flags
+	for i := 2; i < len(args); i++ {
+		arg := args[i]
+
+		if arg == "--type" && i+1 < len(args) {
+			serverType = args[i+1]
+			i++
+		} else if strings.HasPrefix(arg, "--header") {
+			var headerArg string
+			if arg == "--header" && i+1 < len(args) {
+				headerArg = args[i+1]
+				i++
+			} else if strings.HasPrefix(arg, "--header=") {
+				headerArg = strings.TrimPrefix(arg, "--header=")
+			}
+
+			if headerArg != "" {
+				parts := strings.SplitN(headerArg, "=", 2)
+				if len(parts) == 2 {
+					headers[parts[0]] = parts[1]
+				} else {
+					fmt.Fprintf(os.Stderr, "Error: Invalid header format '%s'. Use --header key=value\n", headerArg)
+					os.Exit(1)
+				}
+			}
+		} else if strings.HasPrefix(arg, "--enabled") {
+			var enabledArg string
+			if arg == "--enabled" && i+1 < len(args) {
+				enabledArg = args[i+1]
+				i++
+			} else if strings.HasPrefix(arg, "--enabled=") {
+				enabledArg = strings.TrimPrefix(arg, "--enabled=")
+			}
+
+			if enabledArg == "false" || enabledArg == "0" {
+				enabled = false
+			} else if enabledArg == "true" || enabledArg == "1" {
+				enabled = true
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: Invalid enabled value '%s'. Use true or false\n", enabledArg)
+				os.Exit(1)
+			}
+		} else if strings.HasPrefix(arg, "--timeout") {
+			// Handle timeout if needed in the future
+			if arg == "--timeout" && i+1 < len(args) {
+				i++ // skip the timeout value for now
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: Unknown option '%s'\n", arg)
+			os.Exit(1)
+		}
+	}
+
+	// Validate server type
+	if serverType != "http" && serverType != "sse" {
+		fmt.Fprintf(os.Stderr, "Error: Invalid server type '%s'. Must be 'http' or 'sse'\n", serverType)
+		os.Exit(1)
+	}
+
+	// Create the MCP server
+	req := api.CreateMCPServerRequest{
+		Name:    name,
+		Type:    serverType,
+		URL:     url,
+		Headers: headers,
+		Enabled: &enabled,
+	}
+
+	server, err := client.CreateMCPServer(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("MCP server '%s' added successfully\n", server.Name)
+	fmt.Printf("  Type: %s\n", server.Type)
+	fmt.Printf("  URL: %s\n", server.URL)
+	fmt.Printf("  Enabled: %t\n", server.Enabled)
+	if len(server.Headers) > 0 {
+		fmt.Printf("  Headers:\n")
+		for k, v := range server.Headers {
+			// Mask API keys for security
+			displayValue := v
+			if strings.Contains(strings.ToLower(k), "key") || strings.Contains(strings.ToLower(k), "token") {
+				if len(v) > 8 {
+					displayValue = v[:4] + "..." + v[len(v)-4:]
+				} else {
+					displayValue = "***"
+				}
+			}
+			fmt.Printf("    %s: %s\n", k, displayValue)
+		}
+	}
+	fmt.Printf("  ID: %d\n", server.ID)
+	fmt.Printf("  Created: %s\n", server.CreatedAt)
+	fmt.Println()
+	fmt.Println("Run 'diane-ctl reload' to reload the configuration and start the server.")
 }
 
 // resolveContext determines which context to use. If contextName is provided via

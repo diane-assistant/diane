@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/diane-assistant/diane/internal/acp"
+	"github.com/diane-assistant/diane/internal/db"
 )
 
 // Client is a client for the Diane API
@@ -509,6 +510,49 @@ func (c *Client) GetMCPServerConfigs() ([]MCPServerResponse, error) {
 	}
 
 	return configs, nil
+}
+
+// CreateMCPServerRequest represents a request to create an MCP server
+type CreateMCPServerRequest struct {
+	Name    string            `json:"name"`
+	Enabled *bool             `json:"enabled,omitempty"`
+	Type    string            `json:"type"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	OAuth   *db.OAuthConfig   `json:"oauth,omitempty"`
+}
+
+// CreateMCPServer creates a new MCP server
+func (c *Client) CreateMCPServer(req CreateMCPServerRequest) (*MCPServerResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	resp, err := c.httpClient.Post("http://unix/mcp-servers-config", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create MCP server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusConflict {
+		return nil, fmt.Errorf("server with name '%s' already exists", req.Name)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("create MCP server request failed: %d - %s", resp.StatusCode, string(body))
+	}
+
+	var server MCPServerResponse
+	if err := json.NewDecoder(resp.Body).Decode(&server); err != nil {
+		return nil, fmt.Errorf("failed to decode server response: %w", err)
+	}
+
+	return &server, nil
 }
 
 // ListOAuthServers returns all MCP servers with OAuth configuration

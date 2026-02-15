@@ -1,0 +1,15 @@
+# Build artifacts (root-level binaries only)
+/specmcp
+/seed
+/seed_bin
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
