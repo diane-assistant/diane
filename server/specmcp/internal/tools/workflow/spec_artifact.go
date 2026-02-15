@@ -35,7 +35,7 @@ func NewSpecArtifact(client *emergent.Client) *SpecArtifact {
 func (t *SpecArtifact) Name() string { return "spec_artifact" }
 
 func (t *SpecArtifact) Description() string {
-	return "Add an artifact to an existing change. Supports: spec (with requirements and scenarios), design, task, actor, pattern, test_case, api_contract, context, ui_component, action, data_model, service, scenario_step. Enforces workflow ordering guards: Proposal → Spec → Design → Tasks."
+	return "Add an artifact to an existing change. Supports: spec (with requirements and scenarios), design, task, actor, pattern, test_case, api_contract, context, ui_component, action, data_model, service, scenario_step. Enforces workflow ordering guards: Proposal → Spec → Design → Tasks. Automatically creates version-aware change tracking relationships (change_creates, change_modifies, change_references) for shared entities."
 }
 
 func (t *SpecArtifact) InputSchema() json.RawMessage {
@@ -116,25 +116,25 @@ func (t *SpecArtifact) Execute(ctx context.Context, params json.RawMessage) (*mc
 	case "scenario_step":
 		return t.addScenarioStep(ctx, p.Content)
 	case "actor":
-		return t.addGenericEntity(ctx, emergent.TypeActor, p.Content, nil, "")
+		return t.addGenericEntity(ctx, emergent.TypeActor, p.Content, nil, p.ChangeID)
 	case "coding_agent":
-		return t.addGenericEntity(ctx, emergent.TypeCodingAgent, p.Content, nil, "")
+		return t.addGenericEntity(ctx, emergent.TypeCodingAgent, p.Content, nil, p.ChangeID)
 	case "pattern":
-		return t.addGenericEntity(ctx, emergent.TypePattern, p.Content, nil, "")
+		return t.addGenericEntity(ctx, emergent.TypePattern, p.Content, nil, p.ChangeID)
 	case "test_case":
 		return t.addTestCase(ctx, p.Content)
 	case "api_contract":
-		return t.addGenericEntity(ctx, emergent.TypeAPIContract, p.Content, nil, "")
+		return t.addGenericEntity(ctx, emergent.TypeAPIContract, p.Content, nil, p.ChangeID)
 	case "context":
-		return t.addGenericEntity(ctx, emergent.TypeContext, p.Content, nil, "")
+		return t.addGenericEntity(ctx, emergent.TypeContext, p.Content, nil, p.ChangeID)
 	case "ui_component":
-		return t.addGenericEntity(ctx, emergent.TypeUIComponent, p.Content, nil, "")
+		return t.addGenericEntity(ctx, emergent.TypeUIComponent, p.Content, nil, p.ChangeID)
 	case "action":
-		return t.addGenericEntity(ctx, emergent.TypeAction, p.Content, nil, "")
+		return t.addGenericEntity(ctx, emergent.TypeAction, p.Content, nil, p.ChangeID)
 	case "data_model":
-		return t.addGenericEntity(ctx, emergent.TypeDataModel, p.Content, nil, "")
+		return t.addGenericEntity(ctx, emergent.TypeDataModel, p.Content, nil, p.ChangeID)
 	case "service":
-		return t.addGenericEntity(ctx, emergent.TypeService, p.Content, nil, "")
+		return t.addGenericEntity(ctx, emergent.TypeService, p.Content, nil, p.ChangeID)
 	case "constitution":
 		return t.addConstitution(ctx, p.ChangeID, p.Content)
 	default:
@@ -497,7 +497,15 @@ func (t *SpecArtifact) addConstitution(ctx context.Context, changeID string, con
 // If an entity with the same type+key already exists, it is updated in place.
 // PATCH now preserves relationships via canonical_id resolution (Emergent #22),
 // so updates are safe without dirty-checking.
-func (t *SpecArtifact) addGenericEntity(ctx context.Context, typeName string, content map[string]any, labels []string, _ string) (*mcp.ToolsCallResult, error) {
+//
+// When changeID is non-empty, a version-aware tracking relationship is created:
+//   - change_creates: entity was newly created by this call
+//   - change_modifies: entity already existed and was updated
+//   - change_references: entity already existed and properties were unchanged
+//
+// The relationship points to the version-specific object ID, providing a
+// point-in-time snapshot of the entity state the Change was designed against.
+func (t *SpecArtifact) addGenericEntity(ctx context.Context, typeName string, content map[string]any, labels []string, changeID string) (*mcp.ToolsCallResult, error) {
 	// Extract key from name field
 	key := getString(content, "name")
 	var keyPtr *string
@@ -517,6 +525,7 @@ func (t *SpecArtifact) addGenericEntity(ctx context.Context, typeName string, co
 	delete(props, "context_id")
 	delete(props, "parent_context_id")
 	delete(props, "component_ids")
+	delete(props, "context_ids")
 	delete(props, "service_id")
 	delete(props, "model_ids")
 	delete(props, "api_ids")
@@ -528,19 +537,29 @@ func (t *SpecArtifact) addGenericEntity(ctx context.Context, typeName string, co
 	// Dedup: check if entity with same type+key already exists
 	var obj *graph.GraphObject
 	action := "Created"
+	changeRelType := emergent.RelChangeCreates // default: new entity
 	if key != "" {
 		existing, err := t.client.FindByTypeAndKey(ctx, typeName, key)
 		if err != nil {
 			return nil, fmt.Errorf("checking for existing %s: %w", typeName, err)
 		}
 		if existing != nil {
-			// PATCH is safe now (canonical_id resolution preserves relationships),
-			// so always update to ensure properties are current.
+			// Entity exists — try to update it. UpdateObject returns the new version's ID.
 			obj, err = t.client.UpdateObject(ctx, existing.ID, props, labels)
 			if err != nil {
-				return nil, fmt.Errorf("updating %s: %w", typeName, err)
+				return nil, fmt.Errorf("updating existing %s %q: %w", typeName, key, err)
 			}
-			action = "Updated"
+			// The server creates a new version on every PATCH, even for no-ops.
+			// Use ChangeSummary to distinguish real updates from no-ops:
+			// - non-nil ChangeSummary → properties actually changed → modifies
+			// - nil ChangeSummary → no-op update → references
+			if obj.ChangeSummary != nil {
+				action = "Updated"
+				changeRelType = emergent.RelChangeModifies
+			} else {
+				action = "Unchanged"
+				changeRelType = emergent.RelChangeReferences
+			}
 		}
 	}
 
@@ -559,11 +578,25 @@ func (t *SpecArtifact) addGenericEntity(ctx context.Context, typeName string, co
 		relResults = append(relResults, fmt.Sprintf("relationship error: %v", err))
 	}
 
+	// Create version-aware change tracking relationship
+	if changeID != "" {
+		created, err := t.ensureRelationship(ctx, changeRelType, changeID, obj.ID)
+		if err != nil {
+			relResults = append(relResults, fmt.Sprintf("change tracking error: %v", err))
+		} else if created {
+			relResults = append(relResults, fmt.Sprintf("%s → %s (v%d)", changeRelType, key, obj.Version))
+		}
+	}
+
 	result := map[string]any{
 		"type":    typeName,
 		"id":      obj.ID,
 		"name":    key,
+		"version": obj.Version,
 		"message": fmt.Sprintf("%s %s %q", action, typeName, key),
+	}
+	if changeID != "" {
+		result["change_tracking"] = changeRelType
 	}
 	if len(relResults) > 0 {
 		result["relationships_created"] = relResults

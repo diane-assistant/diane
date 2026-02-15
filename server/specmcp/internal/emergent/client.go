@@ -88,7 +88,8 @@ func (c *Client) UpdateObject(ctx context.Context, id string, props map[string]a
 	}
 	if labels != nil {
 		req.Labels = labels
-		req.ReplaceLabels = true
+		replaceLabels := true
+		req.ReplaceLabels = &replaceLabels
 	}
 	obj, err := c.sdk.Graph.UpdateObject(ctx, id, req)
 	if err != nil {

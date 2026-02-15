@@ -663,7 +663,7 @@ func NewGetChange(client *emergent.Client) *GetChange {
 
 func (t *GetChange) Name() string { return "spec_get_change" }
 func (t *GetChange) Description() string {
-	return "Get a change with all its artifacts: proposal, specs, design, tasks, and constitution."
+	return "Get a change with all its artifacts: proposal, specs, design, tasks, constitution, and version-aware entity tracking (creates, modifies, references)."
 }
 func (t *GetChange) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
@@ -686,13 +686,16 @@ func (t *GetChange) Execute(ctx context.Context, params json.RawMessage) (*mcp.T
 		return mcp.ErrorResult(err.Error()), nil
 	}
 
-	// Expand to get all direct artifacts
+	// Expand to get all direct artifacts and change-tracked entities
 	expanded, err := t.client.GetEntityWithRelationships(ctx, obj.ID, []string{
 		emergent.RelHasProposal,
 		emergent.RelHasSpec,
 		emergent.RelHasDesign,
 		emergent.RelHasTask,
 		emergent.RelGovernedBy,
+		emergent.RelChangeCreates,
+		emergent.RelChangeModifies,
+		emergent.RelChangeReferences,
 	}, 1)
 	if err != nil {
 		return nil, fmt.Errorf("expanding change: %w", err)

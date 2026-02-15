@@ -64,6 +64,12 @@ const (
 	RelBelongsToService   = "belongs_to_service"
 	RelUsesModel          = "uses_model"
 	RelProvidesModel      = "provides_model"
+
+	// Change-scoped entity tracking: version-aware relationships from Changes
+	// to shared entities, recording exactly what state the Change was designed against.
+	RelChangeCreates    = "change_creates"    // Change introduced this entity (points to version-specific ID)
+	RelChangeModifies   = "change_modifies"   // Change updated this entity (points to new version's ID)
+	RelChangeReferences = "change_references" // Change used this entity as-is (points to current version's ID)
 )
 
 // Status constants for Change and Task entities.
