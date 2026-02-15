@@ -324,12 +324,25 @@ func (c *Client) ListTasks(ctx context.Context, changeID string) ([]*Task, error
 	if err != nil {
 		return nil, err
 	}
-	tasks := make([]*Task, 0, len(rels))
-	for _, rel := range rels {
-		t, err := c.GetTask(ctx, rel.DstID)
+	if len(rels) == 0 {
+		return nil, nil
+	}
+	// Batch-fetch all task objects
+	ids := make([]string, len(rels))
+	for i, rel := range rels {
+		ids[i] = rel.DstID
+	}
+	objs, err := c.GetObjects(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	tasks := make([]*Task, 0, len(objs))
+	for _, obj := range objs {
+		t, err := fromProps[Task](obj)
 		if err != nil {
 			return nil, err
 		}
+		t.ID = obj.ID
 		tasks = append(tasks, t)
 	}
 	return tasks, nil
@@ -363,15 +376,15 @@ func (c *Client) GetRelatedObjects(ctx context.Context, srcID, relType string) (
 	if err != nil {
 		return nil, err
 	}
-	objs := make([]*graph.GraphObject, 0, len(rels))
-	for _, rel := range rels {
-		obj, err := c.GetObject(ctx, rel.DstID)
-		if err != nil {
-			return nil, err
-		}
-		objs = append(objs, obj)
+	if len(rels) == 0 {
+		return nil, nil
 	}
-	return objs, nil
+	// Batch-fetch all destination objects
+	ids := make([]string, len(rels))
+	for i, rel := range rels {
+		ids[i] = rel.DstID
+	}
+	return c.GetObjects(ctx, ids)
 }
 
 // GetReverseRelatedObjects gets objects that point to the target via a specific relationship type.
@@ -384,15 +397,15 @@ func (c *Client) GetReverseRelatedObjects(ctx context.Context, dstID, relType st
 	if err != nil {
 		return nil, err
 	}
-	objs := make([]*graph.GraphObject, 0, len(rels))
-	for _, rel := range rels {
-		obj, err := c.GetObject(ctx, rel.SrcID)
-		if err != nil {
-			return nil, err
-		}
-		objs = append(objs, obj)
+	if len(rels) == 0 {
+		return nil, nil
 	}
-	return objs, nil
+	// Batch-fetch all source objects
+	ids := make([]string, len(rels))
+	for i, rel := range rels {
+		ids[i] = rel.SrcID
+	}
+	return c.GetObjects(ctx, ids)
 }
 
 // HasRelationship checks if a relationship of the given type exists between src and dst.

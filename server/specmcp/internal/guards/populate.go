@@ -11,45 +11,33 @@ import (
 // (constitution, patterns, contexts, components). Used for pre-change guards.
 func PopulateProjectState(ctx context.Context, client *emergent.Client, gctx *GuardContext) error {
 	// Check for constitution
-	constitutions, err := client.ListObjects(ctx, &graph.ListObjectsOptions{
-		Type:  emergent.TypeConstitution,
-		Limit: 1,
-	})
+	constCount, err := client.CountObjects(ctx, emergent.TypeConstitution)
 	if err != nil {
 		return err
 	}
-	gctx.HasConstitution = len(constitutions) > 0
+	gctx.HasConstitution = constCount > 0
 
-	// Check for patterns
-	patterns, err := client.ListObjects(ctx, &graph.ListObjectsOptions{
-		Type:  emergent.TypePattern,
-		Limit: 100,
-	})
+	// Count patterns
+	patternCount, err := client.CountObjects(ctx, emergent.TypePattern)
 	if err != nil {
 		return err
 	}
-	gctx.HasPatterns = len(patterns) > 0
-	gctx.PatternCount = len(patterns)
+	gctx.HasPatterns = patternCount > 0
+	gctx.PatternCount = patternCount
 
-	// Check for contexts
-	contexts, err := client.ListObjects(ctx, &graph.ListObjectsOptions{
-		Type:  emergent.TypeContext,
-		Limit: 100,
-	})
+	// Count contexts
+	contextCount, err := client.CountObjects(ctx, emergent.TypeContext)
 	if err != nil {
 		return err
 	}
-	gctx.ContextCount = len(contexts)
+	gctx.ContextCount = contextCount
 
-	// Check for components
-	components, err := client.ListObjects(ctx, &graph.ListObjectsOptions{
-		Type:  emergent.TypeUIComponent,
-		Limit: 100,
-	})
+	// Count components
+	componentCount, err := client.CountObjects(ctx, emergent.TypeUIComponent)
 	if err != nil {
 		return err
 	}
-	gctx.ComponentCount = len(components)
+	gctx.ComponentCount = componentCount
 
 	return nil
 }
@@ -111,16 +99,23 @@ func PopulateChangeState(ctx context.Context, client *emergent.Client, gctx *Gua
 	if gctx.TaskCount > 0 {
 		completed := 0
 		pending := 0
-		for _, rel := range taskRels {
-			task, err := client.GetTask(ctx, rel.DstID)
-			if err != nil {
-				return err
-			}
-			switch task.Status {
-			case emergent.StatusCompleted:
-				completed++
-			case emergent.StatusPending:
-				pending++
+		// Batch-fetch all task objects
+		taskIDs := make([]string, len(taskRels))
+		for i, rel := range taskRels {
+			taskIDs[i] = rel.DstID
+		}
+		taskObjs, err := client.GetObjects(ctx, taskIDs)
+		if err != nil {
+			return err
+		}
+		for _, obj := range taskObjs {
+			if obj.Properties != nil {
+				switch obj.Properties["status"] {
+				case emergent.StatusCompleted:
+					completed++
+				case emergent.StatusPending:
+					pending++
+				}
 			}
 		}
 		gctx.CompletedTasks = completed

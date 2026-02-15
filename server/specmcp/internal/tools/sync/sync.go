@@ -133,9 +133,7 @@ func (t *GraphSummary) Execute(ctx context.Context, params json.RawMessage) (*mc
 	total := 0
 
 	for _, typeName := range entityTypes {
-		count, err := t.client.CountObjects(ctx, &graph.ListObjectsOptions{
-			Type: typeName,
-		})
+		count, err := t.client.CountObjects(ctx, typeName)
 		if err != nil {
 			counts[typeName] = -1 // indicate error
 			continue

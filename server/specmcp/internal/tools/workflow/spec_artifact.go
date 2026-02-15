@@ -522,7 +522,9 @@ func (t *SpecArtifact) addConstitution(ctx context.Context, changeID string, con
 }
 
 // addGenericEntity creates or updates a generic entity with properties from content.
-// If an entity with the same type+key already exists, it is updated instead of duplicated.
+// If an entity with the same type+key already exists, it is updated in place.
+// PATCH now preserves relationships via canonical_id resolution (Emergent #22),
+// so updates are safe without dirty-checking.
 func (t *SpecArtifact) addGenericEntity(ctx context.Context, typeName string, content map[string]any, labels []string, _ string) (*mcp.ToolsCallResult, error) {
 	// Extract key from name field
 	key := getString(content, "name")
@@ -557,19 +559,13 @@ func (t *SpecArtifact) addGenericEntity(ctx context.Context, typeName string, co
 			return nil, fmt.Errorf("checking for existing %s: %w", typeName, err)
 		}
 		if existing != nil {
-			// Check if properties actually changed before updating.
-			// UpdateObject creates a new version with a new ID, which orphans
-			// existing relationships. So only update when necessary.
-			if propsChanged(existing.Properties, props) || labelsChanged(existing.Labels, labels) {
-				obj, err = t.client.UpdateObject(ctx, existing.ID, props, labels)
-				if err != nil {
-					return nil, fmt.Errorf("updating %s: %w", typeName, err)
-				}
-				action = "Updated"
-			} else {
-				obj = existing
-				action = "Unchanged"
+			// PATCH is safe now (canonical_id resolution preserves relationships),
+			// so always update to ensure properties are current.
+			obj, err = t.client.UpdateObject(ctx, existing.ID, props, labels)
+			if err != nil {
+				return nil, fmt.Errorf("updating %s: %w", typeName, err)
 			}
+			action = "Updated"
 		}
 	}
 
@@ -765,42 +761,4 @@ func jsonResult(v any) (*mcp.ToolsCallResult, error) {
 	return &mcp.ToolsCallResult{
 		Content: []mcp.ContentBlock{mcp.TextContent(string(b))},
 	}, nil
-}
-
-// propsChanged checks if the new properties differ from the existing ones.
-// Only compares keys present in newProps (ignoring extra keys in existing).
-func propsChanged(existing, newProps map[string]any) bool {
-	for k, newVal := range newProps {
-		existingVal, ok := existing[k]
-		if !ok {
-			return true
-		}
-		// Compare as JSON for reliable deep comparison
-		newJSON, _ := json.Marshal(newVal)
-		existJSON, _ := json.Marshal(existingVal)
-		if string(newJSON) != string(existJSON) {
-			return true
-		}
-	}
-	return false
-}
-
-// labelsChanged checks if the labels sets differ.
-func labelsChanged(existing, newLabels []string) bool {
-	if len(newLabels) == 0 {
-		return false // No labels specified, don't treat as changed
-	}
-	if len(existing) != len(newLabels) {
-		return true
-	}
-	set := make(map[string]bool, len(existing))
-	for _, l := range existing {
-		set[l] = true
-	}
-	for _, l := range newLabels {
-		if !set[l] {
-			return true
-		}
-	}
-	return false
 }

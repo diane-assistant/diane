@@ -69,6 +69,18 @@ func (c *Client) GetObject(ctx context.Context, id string) (*graph.GraphObject, 
 	return obj, nil
 }
 
+// GetObjects retrieves multiple graph objects by their IDs in a single request.
+func (c *Client) GetObjects(ctx context.Context, ids []string) ([]*graph.GraphObject, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	objs, err := c.sdk.Graph.GetObjects(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("getting objects: %w", err)
+	}
+	return objs, nil
+}
+
 // UpdateObject updates a graph object's properties and/or labels.
 func (c *Client) UpdateObject(ctx context.Context, id string, props map[string]any, labels []string) (*graph.GraphObject, error) {
 	req := &graph.UpdateObjectRequest{
@@ -102,17 +114,32 @@ func (c *Client) ListObjects(ctx context.Context, opts *graph.ListObjectsOptions
 	return resp.Items, nil
 }
 
-// CountObjects returns the total count of objects matching the given options.
-// It uses Limit=1 to minimize data transfer and reads the Total field from the response.
-func (c *Client) CountObjects(ctx context.Context, opts *graph.ListObjectsOptions) (int, error) {
-	// Clone opts and set limit to 1 — we only need the Total field
-	countOpts := *opts
-	countOpts.Limit = 1
-	resp, err := c.sdk.Graph.ListObjects(ctx, &countOpts)
+// CountObjects returns the total count of objects matching the given type and filters.
+// Uses the native SDK CountObjects endpoint (server-side count, no data transfer).
+func (c *Client) CountObjects(ctx context.Context, typeName string) (int, error) {
+	count, err := c.sdk.Graph.CountObjects(ctx, &graph.CountObjectsOptions{
+		Type: typeName,
+	})
 	if err != nil {
 		return 0, fmt.Errorf("counting objects: %w", err)
 	}
-	return resp.Total, nil
+	return count, nil
+}
+
+// UpsertObject creates or updates a graph object by (type, key).
+// If an object with the same type and key exists, it is updated; otherwise created.
+func (c *Client) UpsertObject(ctx context.Context, typeName string, key *string, props map[string]any, labels []string) (*graph.GraphObject, error) {
+	obj, err := c.sdk.Graph.UpsertObject(ctx, &graph.CreateObjectRequest{
+		Type:       typeName,
+		Key:        key,
+		Properties: props,
+		Labels:     labels,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("upserting %s object: %w", typeName, err)
+	}
+	c.logger.Debug("upserted object", "type", typeName, "id", obj.ID, "key", key)
+	return obj, nil
 }
 
 // FindByTypeAndKey finds a single object by type and key.
@@ -160,47 +187,19 @@ func (c *Client) CreateRelationship(ctx context.Context, relType, srcID, dstID s
 }
 
 // ListRelationships lists relationships with filtering options.
-// Works around Emergent server v0.8.8 bug where the response uses "data" instead
-// of "items" (which the SDK expects). We call the SDK, and if Items is empty but
-// Total > 0 or the raw response contains "data", we fall back to raw HTTP parsing.
 func (c *Client) ListRelationships(ctx context.Context, opts *graph.ListRelationshipsOptions) ([]*graph.GraphRelationship, error) {
 	resp, err := c.sdk.Graph.ListRelationships(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("listing relationships: %w", err)
 	}
-	// If the SDK found items, return them
-	if len(resp.Items) > 0 {
-		return resp.Items, nil
-	}
-	// Work around "data" vs "items" mismatch: use GetObjectEdges as fallback
-	// when we have both src_id and dst_id (the typical ensureRelationship case).
-	if opts.SrcID != "" {
-		edges, err := c.sdk.Graph.GetObjectEdges(ctx, opts.SrcID)
-		if err != nil {
-			c.logger.Debug("fallback GetObjectEdges failed", "error", err)
-			return resp.Items, nil // Return empty rather than error
-		}
-		var matched []*graph.GraphRelationship
-		for _, rel := range edges.Outgoing {
-			if opts.Type != "" && rel.Type != opts.Type {
-				continue
-			}
-			if opts.DstID != "" && rel.DstID != opts.DstID {
-				continue
-			}
-			matched = append(matched, rel)
-			if opts.Limit > 0 && len(matched) >= opts.Limit {
-				break
-			}
-		}
-		return matched, nil
-	}
 	return resp.Items, nil
 }
 
 // GetObjectEdges returns all incoming and outgoing relationships for an object.
-func (c *Client) GetObjectEdges(ctx context.Context, objectID string) (*graph.GetObjectEdgesResponse, error) {
-	edges, err := c.sdk.Graph.GetObjectEdges(ctx, objectID)
+// Pass nil for opts to get all edges without filtering; use GetObjectEdgesOptions
+// to filter by type or direction.
+func (c *Client) GetObjectEdges(ctx context.Context, objectID string, opts *graph.GetObjectEdgesOptions) (*graph.GetObjectEdgesResponse, error) {
+	edges, err := c.sdk.Graph.GetObjectEdges(ctx, objectID, opts)
 	if err != nil {
 		return nil, fmt.Errorf("getting edges for %s: %w", objectID, err)
 	}
