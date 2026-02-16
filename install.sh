@@ -77,7 +77,18 @@ detect_platform() {
     esac
 
     PLATFORM="${OS}-${ARCH}"
-    info "Detected platform: ${PLATFORM}"
+    # info "Detected platform: ${PLATFORM}"
+}
+
+# Check for Arch Linux / Pacman
+is_arch_linux() {
+    if [ -f "/etc/arch-release" ] || [ -f "/etc/manjaro-release" ]; then
+        return 0
+    fi
+    if command -v pacman >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
 }
 
 # Get latest version from GitHub releases
@@ -93,83 +104,107 @@ get_latest_version() {
     echo "$LATEST"
 }
 
-# Get installed version by querying the binary
-get_installed_version() {
-    INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
-    BINARY_PATH="${INSTALL_DIR}/bin/diane"
-    OLD_BINARY_PATH="${INSTALL_DIR}/bin/diane-mcp"
+# Install using Pacman (Arch Linux)
+install_arch() {
+    VERSION="${DIANE_VERSION:-$(get_latest_version)}"
+    # Strip 'v' prefix if present for PKGBUILD versioning compatibility
+    CLEAN_VERSION="${VERSION#v}"
     
-    # Check new binary first, then fall back to old name
-    if [ ! -x "$BINARY_PATH" ]; then
-        if [ -x "$OLD_BINARY_PATH" ]; then
-            BINARY_PATH="$OLD_BINARY_PATH"
-        else
-            echo ""
-            return
-        fi
-    fi
-    
-    # Send MCP initialize request and extract version from response
-    # The server responds with serverInfo.version in the initialize response
-    # Version is returned with 'v' prefix (e.g., v1.0.1), possibly with git suffix
-    INSTALLED=$(echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"installer","version":"1.0.0"}}}' | \
-        timeout 2 "$BINARY_PATH" 2>/dev/null | \
-        grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"//;s/"//;s/-.*//')
-    
-    # INSTALLED now contains version like "v1.0.1" (stripped git suffix like "-1-gabcdef")
-    echo "$INSTALLED"
-}
+    info "Arch Linux detected. Preparing to install Diane ${VERSION}..."
 
-# Check if upgrade is needed
-check_version() {
-    INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
-    BINARY_PATH="${INSTALL_DIR}/bin/diane"
-    OLD_BINARY_PATH="${INSTALL_DIR}/bin/diane-mcp"
+    # Check dependencies
+    if ! command -v makepkg >/dev/null 2>&1; then
+        error "makepkg not found. Please install 'base-devel' group: sudo pacman -S base-devel"
+    fi
+
+    TMP_DIR=$(mktemp -d)
+    trap "rm -rf ${TMP_DIR}" EXIT
     
-    # Check if either binary exists
-    if [ ! -x "$BINARY_PATH" ] && [ ! -x "$OLD_BINARY_PATH" ]; then
-        return 0  # Not installed, proceed with installation
+    info "Downloading package resources..."
+    
+    # Download helper files from the repo
+    BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/pkg/arch"
+    
+    # We download service and config to include in the package
+    curl -fsSL "${BASE_URL}/diane.service" -o "${TMP_DIR}/diane.service" || error "Failed to download diane.service"
+    curl -fsSL "${BASE_URL}/diane.config.json" -o "${TMP_DIR}/diane.config.json" || error "Failed to download diane.config.json"
+    
+    cd "${TMP_DIR}"
+
+    # Generate a PKGBUILD that uses the remote binaries
+    cat > PKGBUILD <<EOF
+# Maintainer: Diane <diane@diane-assistant.com>
+pkgname=diane
+pkgver=${CLEAN_VERSION}
+pkgrel=1
+pkgdesc="Diane AI assistant - MCP server and control utility"
+arch=('x86_64' 'aarch64')
+url="https://github.com/${GITHUB_REPO}"
+license=('MIT')
+depends=('glibc')
+makedepends=()
+backup=('etc/diane/config.json')
+source_x86_64=("https://github.com/${GITHUB_REPO}/releases/download/v\${pkgver}/diane-linux-amd64.tar.gz")
+source_aarch64=("https://github.com/${GITHUB_REPO}/releases/download/v\${pkgver}/diane-linux-arm64.tar.gz")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+    # Binaries are in the root of the tarball
+    install -Dm755 "\${srcdir}/diane" "\${pkgdir}/usr/bin/diane"
+    
+    if [ -f "\${srcdir}/acp-server" ]; then
+        install -Dm755 "\${srcdir}/acp-server" "\${pkgdir}/usr/bin/acp-server"
+    fi
+
+    # Service file
+    install -Dm644 "${TMP_DIR}/diane.service" "\${pkgdir}/usr/lib/systemd/system/diane.service"
+    
+    # Config file
+    install -Dm644 "${TMP_DIR}/diane.config.json" "\${pkgdir}/etc/diane/config.json"
+    
+    # Data directory
+    install -dm755 "\${pkgdir}/var/lib/diane"
+}
+EOF
+
+    info "Building package..."
+    # -s: Install missing dependencies
+    # --noconfirm: Non-interactive
+    makepkg -s --noconfirm
+    
+    PKG_FILE=$(ls diane-*.pkg.tar.zst | head -1)
+    if [ -z "$PKG_FILE" ]; then
+        error "Package creation failed"
     fi
     
-    INSTALLED_VERSION=$(get_installed_version)
-    
-    if [ -z "$INSTALLED_VERSION" ]; then
-    info "DIANE is installed but version could not be determined. Reinstalling..."
-        return 0
-    fi
-    
-    # If specific version requested, compare with that
-    if [ -n "$DIANE_VERSION" ]; then
-        TARGET_VERSION="$DIANE_VERSION"
+    info "Installing ${PKG_FILE}..."
+    if command -v sudo >/dev/null 2>&1; then
+        sudo pacman -U --noconfirm "${PKG_FILE}"
     else
-        TARGET_VERSION="$VERSION"
+        su -c "pacman -U --noconfirm ${PKG_FILE}"
     fi
     
-    if [ "$INSTALLED_VERSION" = "$TARGET_VERSION" ]; then
-        # Check if we need to migrate from old binary name
-        if [ -x "$OLD_BINARY_PATH" ] && [ ! -x "$BINARY_PATH" ]; then
-            info "Migrating from diane-mcp to diane..."
-            return 0
-        fi
-        success "DIANE ${INSTALLED_VERSION} is already installed and up to date"
-        exit 0
-    fi
+    success "Diane installed successfully via Pacman!"
     
-    info "${MUTED}Installed version:${NC} ${INSTALLED_VERSION}"
-    info "${MUTED}Available version:${NC} ${TARGET_VERSION}"
-    info "Upgrading..."
-    return 0
+    # Post-install info
+    echo ""
+    info "Service installed at /usr/lib/systemd/system/diane.service"
+    info "Config installed at /etc/diane/config.json"
+    echo ""
+    info "To enable and start the service:"
+    echo "  sudo systemctl enable --now diane"
+    echo ""
 }
 
-# Download and install
-install() {
+# Generic Download and install (macOS, non-Arch Linux)
+install_generic() {
     INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
     VERSION="${DIANE_VERSION:-$(get_latest_version)}"
     
-    # Check if already up to date
-    check_version
+    detect_platform
     
-    info "Installing DIANE ${VERSION}..."
+    info "Installing DIANE ${VERSION} to ${INSTALL_DIR}..."
     
     # Create installation directory
     mkdir -p "${INSTALL_DIR}/bin"
@@ -189,32 +224,10 @@ install() {
     
     curl -fsSL "${DOWNLOAD_URL}" -o "${TMP_DIR}/diane.tar.gz" || error "Download failed. Check if version ${VERSION} exists."
     
-    # Verify checksum if available
-    CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
-    if curl -fsSL "${CHECKSUM_URL}" -o "${TMP_DIR}/diane.tar.gz.sha256" 2>/dev/null; then
-        info "Verifying checksum..."
-        cd "${TMP_DIR}"
-        if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum -c diane.tar.gz.sha256 || error "Checksum verification failed!"
-        elif command -v shasum >/dev/null 2>&1; then
-            shasum -a 256 -c diane.tar.gz.sha256 || error "Checksum verification failed!"
-        else
-            warn "No sha256sum or shasum available, skipping checksum verification"
-        fi
-        cd - >/dev/null
-    fi
-    
     # Extract
     tar -xzf "${TMP_DIR}/diane.tar.gz" -C "${TMP_DIR}"
     
-    # Clean up old binary name if exists (migration from diane-mcp to diane)
-    OLD_BINARY_PATH="${INSTALL_DIR}/bin/diane-mcp"
-    if [ -f "$OLD_BINARY_PATH" ]; then
-        info "Removing old binary (diane-mcp)..."
-        rm -f "$OLD_BINARY_PATH"
-    fi
-    
-    # Install binary (handle both old 'diane-mcp' and new 'diane' tarball formats)
+    # Install binary
     if [ -f "${TMP_DIR}/diane" ]; then
         mv "${TMP_DIR}/diane" "${INSTALL_DIR}/bin/diane"
     elif [ -f "${TMP_DIR}/diane-mcp" ]; then
@@ -226,7 +239,7 @@ install() {
     
     success "DIANE installed to ${INSTALL_DIR}/bin/diane"
     
-    # Check if bin is in PATH
+    # Path warning
     case ":${PATH}:" in
         *":${INSTALL_DIR}/bin:"*)
             ;;
@@ -234,82 +247,71 @@ install() {
             echo ""
             warn "Add ${INSTALL_DIR}/bin to your PATH:"
             echo ""
-            echo "  # Add to ~/.bashrc or ~/.zshrc:"
             echo "  export PATH=\"\${HOME}/.diane/bin:\${PATH}\""
             echo ""
             ;;
     esac
-    
-    # Print version
-    echo ""
-    success "Installation complete!"
-    echo ""
-    echo "  Version: ${VERSION}"
-    echo "  Binary:  ${INSTALL_DIR}/bin/diane"
-    echo ""
-    echo "Directory structure:"
-    echo "  ${INSTALL_DIR}/"
-    echo "  ├── bin/          # diane binary"
-    echo "  ├── secrets/      # API keys and config files"
-    echo "  ├── tools/        # Helper scripts (actualbudget-cli.mjs, etc.)"
-    echo "  ├── data/         # Persistent data"
-    echo "  └── logs/         # Log files"
-    echo ""
-    echo "Next steps:"
-    echo "  1. Configure your AI client to use: ${INSTALL_DIR}/bin/diane"
-    echo "  2. Copy secrets to: ${INSTALL_DIR}/secrets/"
-    echo "  3. Run: diane --help"
-    echo ""
-}
-
-# Upgrade (alias for install with version check)
-upgrade() {
-    install
 }
 
 # Uninstall
 uninstall() {
-    INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
+    detect_platform
     
-    if [ ! -d "${INSTALL_DIR}" ]; then
-        error "DIANE is not installed at ${INSTALL_DIR}"
+    if [ "$OS" = "linux" ] && is_arch_linux; then
+        info "Uninstalling via pacman..."
+        if command -v sudo >/dev/null 2>&1; then
+            sudo pacman -Rns diane
+        else
+            su -c "pacman -Rns diane"
+        fi
+        success "Uninstalled."
+    else
+        INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
+        if [ ! -d "${INSTALL_DIR}" ]; then
+            error "DIANE is not installed at ${INSTALL_DIR}"
+        fi
+        
+        info "Uninstalling from ${INSTALL_DIR}..."
+        rm -rf "${INSTALL_DIR}/bin/diane"
+        rm -rf "${INSTALL_DIR}/bin/diane-mcp"
+        
+        success "Binaries removed."
+        warn "Data directory preserved at ${INSTALL_DIR}/data"
+        echo "  To remove completely: rm -rf ${INSTALL_DIR}"
     fi
-    
-    info "Uninstalling DIANE from ${INSTALL_DIR}..."
-    
-    # Remove both old and new binary names
-    rm -f "${INSTALL_DIR}/bin/diane"
-    rm -f "${INSTALL_DIR}/bin/diane-mcp"
-    
-    success "DIANE uninstalled"
-    warn "Data directory preserved at ${INSTALL_DIR}/data"
-    echo "  To remove completely: rm -rf ${INSTALL_DIR}"
 }
 
-# Show version
 version() {
-    INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
-    INSTALLED_VERSION=$(get_installed_version)
-    
-    if [ -n "$INSTALLED_VERSION" ]; then
-        echo "DIANE ${INSTALLED_VERSION}"
-        echo "Installed at: ${INSTALL_DIR}/bin/diane"
+    detect_platform
+    if [ "$OS" = "linux" ] && is_arch_linux; then
+        if pacman -Qi diane >/dev/null 2>&1; then
+            pacman -Qi diane | grep Version
+        else
+            echo "diane is not installed via pacman"
+        fi
     else
-        echo "DIANE is not installed"
-        echo "Run: curl -fsSL https://raw.githubusercontent.com/diane-assistant/diane/main/install.sh | sh"
+        INSTALL_DIR="${DIANE_DIR:-$DEFAULT_INSTALL_DIR}"
+        if [ -x "${INSTALL_DIR}/bin/diane" ]; then
+            "${INSTALL_DIR}/bin/diane" version
+        else
+            echo "diane is not installed at ${INSTALL_DIR}/bin/diane"
+        fi
     fi
 }
 
 # Main
 main() {
-    case "${1:-install}" in
-        install)
-            detect_platform
-            install
-            ;;
-        upgrade)
-            detect_platform
-            upgrade
+    CMD="${1:-install}"
+    detect_platform
+    
+    case "$CMD" in
+        install|upgrade)
+            # Check for Arch
+            if [ "$OS" = "linux" ] && is_arch_linux; then
+                install_arch
+            else
+                install_generic
+            fi
             ;;
         uninstall)
             uninstall
@@ -317,32 +319,17 @@ main() {
         version)
             version
             ;;
-        --version|-v)
-            echo "DIANE Installer v1.1.0"
-            ;;
         --help|-h)
             echo "DIANE Installer"
-            echo ""
-            echo "Usage: $0 [command]"
-            echo ""
-            echo "Commands:"
-            echo "  install     Install or upgrade DIANE (default)"
-            echo "  upgrade     Upgrade to latest version (same as install)"
-            echo "  uninstall   Remove DIANE"
-            echo "  version     Show installed version"
-            echo ""
-            echo "Environment variables:"
-            echo "  DIANE_VERSION  Specific version to install (default: latest)"
-            echo "  DIANE_DIR      Installation directory (default: ~/.diane)"
-            echo ""
-            echo "Examples:"
-            echo "  curl -fsSL https://raw.githubusercontent.com/diane-assistant/diane/main/install.sh | sh"
-            echo "  DIANE_VERSION=v1.0.0 ./install.sh"
-            echo "  ./install.sh upgrade"
-            echo "  ./install.sh uninstall"
+            echo "Usage: $0 [install|upgrade|uninstall|version]"
             ;;
         *)
-            error "Unknown command: $1. Use --help for usage."
+            # If no argument or unknown, default to install
+            if [ "$OS" = "linux" ] && is_arch_linux; then
+                install_arch
+            else
+                install_generic
+            fi
             ;;
     esac
 }

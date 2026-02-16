@@ -10,6 +10,15 @@ curl -fsSL https://raw.githubusercontent.com/diane-assistant/diane/main/install.
 
 Works on macOS and Linux. The installer auto-detects your platform and installs to `~/.diane/bin/`.
 
+**Arch Linux Users:**
+The installation script will automatically detect Arch Linux and use `pacman` to install Diane as a system package (including systemd service).
+
+```bash
+# Requires base-devel for building the package
+sudo pacman -S base-devel
+curl -fsSL https://raw.githubusercontent.com/diane-assistant/diane/main/install.sh | sh
+```
+
 ---
 
 ## What can Diane do?
