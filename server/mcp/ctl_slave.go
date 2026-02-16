@@ -233,10 +233,10 @@ func ctlSlavePair(masterURL string) {
 	fmt.Println("--------------------------------------------------")
 	fmt.Printf("PAIRING CODE: %s\n", pairResp.PairingCode)
 	fmt.Println("--------------------------------------------------")
-	fmt.Println("\nPlease go to the master server and approve this request:")
-	fmt.Printf("  diane slave approve %s %s\n", hostname, pairResp.PairingCode)
-	fmt.Println("\nPlease go to the master server and approve this request:")
-	fmt.Printf("  diane slave approve %s %s\n", hostname, pairResp.PairingCode)
+	fmt.Println("\nOn the master server, run:")
+	fmt.Printf("  diane slave approve\n")
+	fmt.Println("\nThis will show pending requests. Verify the code matches")
+	fmt.Println("and confirm to approve.")
 	fmt.Println("\nWaiting for approval... (Press Ctrl+C to cancel)")
 
 	// 4. Poll for approval
