@@ -245,6 +245,20 @@ class DianeHTTPClient: DianeClientProtocol {
         let data = try await request("/resources")
         return try decode([ResourceInfo].self, from: data)
     }
+    
+    func getPromptContent(server: String, name: String) async throws -> PromptContentResponse {
+        let encodedServer = server.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? server
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        let data = try await request("/prompts/get?server=\(encodedServer)&name=\(encodedName)")
+        return try decode(PromptContentResponse.self, from: data)
+    }
+    
+    func getResourceContent(server: String, uri: String) async throws -> ResourceContentResponse {
+        let encodedServer = server.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? server
+        let encodedURI = uri.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? uri
+        let data = try await request("/resources/read?server=\(encodedServer)&uri=\(encodedURI)")
+        return try decode(ResourceContentResponse.self, from: data)
+    }
 
     // MARK: - OAuth (read-only: no login/poll)
 

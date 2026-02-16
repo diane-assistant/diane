@@ -184,6 +184,16 @@ struct MCPServersView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     
+                    if server.isBuiltin {
+                        Text("Built-in")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.blue.opacity(0.7))
+                            .cornerRadius(3)
+                    }
+                    
                     Text("•")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
@@ -290,24 +300,26 @@ struct MCPServersView: View {
                     
                     Spacer()
                     
-                    HStack(spacing: 8) {
-                        Button {
-                            Task { await viewModel.duplicateServer(server) }
-                        } label: {
-                            Label("Duplicate", systemImage: "doc.on.doc")
-                        }
-                        
-                        Button {
-                            viewModel.editingServer = server
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
-                        }
-                        
-                        Button(role: .destructive) {
-                            viewModel.serverToDelete = server
-                            viewModel.showDeleteConfirm = true
-                        } label: {
-                            Label("Delete", systemImage: "trash")
+                    if !server.isBuiltin {
+                        HStack(spacing: 8) {
+                            Button {
+                                Task { await viewModel.duplicateServer(server) }
+                            } label: {
+                                Label("Duplicate", systemImage: "doc.on.doc")
+                            }
+                            
+                            Button {
+                                viewModel.editingServer = server
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            
+                            Button(role: .destructive) {
+                                viewModel.serverToDelete = server
+                                viewModel.showDeleteConfirm = true
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
                     }
                 }
@@ -321,49 +333,55 @@ struct MCPServersView: View {
                 
                 // Configuration details
                 Group {
+                    // Type section (always visible)
                     DetailSection(title: "Type") {
                         InfoRow(label: "Type", value: serverTypeDisplayName(server.type))
                         InfoRow(label: "Description", value: serverTypeDescription(server.type))
                     }
                     
-                    if server.type == "stdio" {
-                        stdioConfigSection(server)
-                    } else if server.type == "sse" || server.type == "http" {
-                        networkConfigSection(server)
-                    }
-                    
-                    if let env = server.env, !env.isEmpty {
-                        DetailSection(title: "Environment Variables") {
-                            VStack(alignment: .leading, spacing: 4) {
-                                ForEach(Array(env.keys.sorted()), id: \.self) { key in
-                                    HStack {
-                                        Text(key)
-                                            .font(.system(.caption, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                        Text("=")
-                                            .foregroundStyle(.tertiary)
-                                        Text(env[key] ?? "")
-                                            .font(.system(.caption, design: .monospaced))
+                    // Config sections (hidden for builtins)
+                    if !server.isBuiltin {
+                        if server.type == "stdio" {
+                            stdioConfigSection(server)
+                        } else if server.type == "sse" || server.type == "http" {
+                            networkConfigSection(server)
+                        }
+                        
+                        if let env = server.env, !env.isEmpty {
+                            DetailSection(title: "Environment Variables") {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(Array(env.keys.sorted()), id: \.self) { key in
+                                        HStack {
+                                            Text(key)
+                                                .font(.system(.caption, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                            Text("=")
+                                                .foregroundStyle(.tertiary)
+                                            Text(env[key] ?? "")
+                                                .font(.system(.caption, design: .monospaced))
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    
-                    if server.oauth != nil {
-                        DetailSection(title: "OAuth Configuration") {
-                            InfoRow(label: "Provider", value: server.oauth?.provider ?? "Not specified")
-                            if let scopes = server.oauth?.scopes, !scopes.isEmpty {
-                                InfoRow(label: "Scopes", value: scopes.joined(separator: ", "))
+                        
+                        if server.oauth != nil {
+                            DetailSection(title: "OAuth Configuration") {
+                                InfoRow(label: "Provider", value: server.oauth?.provider ?? "Not specified")
+                                if let scopes = server.oauth?.scopes, !scopes.isEmpty {
+                                    InfoRow(label: "Scopes", value: scopes.joined(separator: ", "))
+                                }
                             }
                         }
                     }
                 }
                 
-                // Metadata
-                DetailSection(title: "Metadata") {
-                    InfoRow(label: "Created", value: formatDate(server.createdAt))
-                    InfoRow(label: "Updated", value: formatDate(server.updatedAt))
+                // Metadata (hidden for builtins as they are static)
+                if !server.isBuiltin {
+                    DetailSection(title: "Metadata") {
+                        InfoRow(label: "Created", value: formatDate(server.createdAt))
+                        InfoRow(label: "Updated", value: formatDate(server.updatedAt))
+                    }
                 }
             }
             .padding(20)
@@ -705,120 +723,134 @@ struct CapabilitiesSection: View {
                 }
                 .padding(.vertical, 8)
             } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    // Show all prompts (no filtering by server)
-                    let allPrompts = prompts
-                    let allResources = resources
-                    let allTools = tools
-                    
-                    // Debug logging to file
-                    let _ = {
-                        let logPath = "/tmp/diane-capabilities-debug.log"
-                        let timestamp = Date().formatted()
-                        let logEntry = """
-                        [\(timestamp)] CapabilitiesSection Debug (NO FILTERING):
-                          Viewing serverName: '\(serverName)'
-                          Total loaded: tools=\(tools.count), prompts=\(prompts.count), resources=\(resources.count)
-                          Showing all capabilities without server filtering
+                ScrollViewReader { proxy in
+                    VStack(alignment: .leading, spacing: 12) {
+                        // Filter by selected server
+                        let filteredPrompts = prompts.filter { $0.server == serverName }
+                        let filteredResources = resources.filter { $0.server == serverName }
+                        let filteredTools = tools.filter { $0.server == serverName }
                         
-                        """
-                        if let fileHandle = FileHandle(forWritingAtPath: logPath) {
-                            fileHandle.seekToEndOfFile()
-                            if let data = logEntry.data(using: .utf8) {
-                                fileHandle.write(data)
-                            }
-                            fileHandle.closeFile()
-                        } else {
-                            try? logEntry.write(toFile: logPath, atomically: true, encoding: .utf8)
-                        }
-                    }()
-                    
-                    if !allPrompts.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "text.bubble.fill")
-                                    .foregroundStyle(.purple)
-                                    .font(.caption)
-                                Text("Prompts")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Text("(\(allPrompts.count))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                ForEach(allPrompts) { prompt in
-                                    CapabilityItemRow(name: prompt.name, description: prompt.description, color: .purple)
+                        // Summary Badges
+                        if !filteredPrompts.isEmpty || !filteredResources.isEmpty || !filteredTools.isEmpty {
+                            HStack(spacing: 12) {
+                                if !filteredTools.isEmpty {
+                                    Button {
+                                        withAnimation { proxy.scrollTo("tools", anchor: .top) }
+                                    } label: {
+                                        CapabilityBadge(icon: "wrench.fill", label: "Tools", count: filteredTools.count, color: .blue)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                if !filteredResources.isEmpty {
+                                    Button {
+                                        withAnimation { proxy.scrollTo("resources", anchor: .top) }
+                                    } label: {
+                                        CapabilityBadge(icon: "doc.fill", label: "Resources", count: filteredResources.count, color: .green)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                if !filteredPrompts.isEmpty {
+                                    Button {
+                                        withAnimation { proxy.scrollTo("prompts", anchor: .top) }
+                                    } label: {
+                                        CapabilityBadge(icon: "text.bubble.fill", label: "Prompts", count: filteredPrompts.count, color: .purple)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.purple.opacity(0.05))
-                            .cornerRadius(6)
+                            .padding(.bottom, 8)
                         }
-                    }
-                    
-                    // Resources section
-                    if !filteredResources.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "doc.fill")
-                                    .foregroundStyle(.green)
-                                    .font(.caption)
-                                Text("Resources")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Text("(\(filteredResources.count))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                ForEach(filteredResources) { resource in
-                                    ResourceItemRow(resource: resource)
+                        
+                        if !filteredPrompts.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "text.bubble.fill")
+                                        .foregroundStyle(.purple)
+                                        .font(.caption)
+                                    Text("Prompts")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                    Text("(\(filteredPrompts.count))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.green.opacity(0.05))
-                            .cornerRadius(6)
-                        }
-                    }
-                    
-                    // Tools section
-                    if !filteredTools.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "wrench.fill")
-                                    .foregroundStyle(.blue)
-                                    .font(.caption)
-                                Text("Tools")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Text("(\(filteredTools.count))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                ForEach(filteredTools) { tool in
-                                    CapabilityItemRow(name: tool.name, description: tool.description, color: .blue)
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(filteredPrompts) { prompt in
+                                        PromptItemRow(prompt: prompt, serverName: serverName)
+                                    }
                                 }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.purple.opacity(0.05))
+                                .cornerRadius(6)
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.blue.opacity(0.05))
-                            .cornerRadius(6)
+                            .id("prompts")
                         }
-                    }
-                    
-                    // Show empty state if nothing is available
-                    if allPrompts.isEmpty && filteredResources.isEmpty && filteredTools.isEmpty {
-                        Text("No capabilities available for this server")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 8)
+                        
+                        // Resources section
+                        if !filteredResources.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "doc.fill")
+                                        .foregroundStyle(.green)
+                                        .font(.caption)
+                                    Text("Resources")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                    Text("(\(filteredResources.count))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(filteredResources) { resource in
+                                        ResourceItemRow(resource: resource, serverName: serverName)
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.green.opacity(0.05))
+                                .cornerRadius(6)
+                            }
+                            .id("resources")
+                        }
+                        
+                        // Tools section
+                        if !filteredTools.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "wrench.fill")
+                                        .foregroundStyle(.blue)
+                                        .font(.caption)
+                                    Text("Tools")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                    Text("(\(filteredTools.count))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(filteredTools) { tool in
+                                        ToolItemRow(tool: tool)
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.blue.opacity(0.05))
+                                .cornerRadius(6)
+                            }
+                            .id("tools")
+                        }
+                        
+                        // Show empty state if nothing is available
+                        if filteredPrompts.isEmpty && filteredResources.isEmpty && filteredTools.isEmpty {
+                            Text("No capabilities available for this server")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 8)
+                        }
                     }
                 }
             }
@@ -848,55 +880,210 @@ struct CapabilitiesSection: View {
     }
 }
 
-struct CapabilityItemRow: View {
-    let name: String
-    let description: String
-    let color: Color
+// MARK: - Prompt Item Row (with full content preview)
+
+struct PromptItemRow: View {
+    let prompt: PromptInfo
+    let serverName: String
+    @EnvironmentObject var statusMonitor: StatusMonitor
+    @State private var isExpanded = false
+    @State private var isHovering = false
+    @State private var contentResponse: PromptContentResponse?
+    @State private var isLoadingContent = false
+    @State private var loadError: String?
+    
+    private func toggleExpanded() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            isExpanded.toggle()
+        }
+        if isExpanded && contentResponse == nil && !isLoadingContent {
+            Task { await loadContent() }
+        }
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(prompt.name)
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.medium)
+                
+                Spacer()
+                
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { toggleExpanded() }
+            
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    // Description
+                    if !prompt.description.isEmpty {
+                        Text(prompt.description)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    // Arguments
+                    if let args = prompt.arguments, !args.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Arguments:")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                            ForEach(args) { arg in
+                                HStack(spacing: 4) {
+                                    Text(arg.name)
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundStyle(.purple)
+                                    if arg.required == true {
+                                        Text("(required)")
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.orange)
+                                    }
+                                    if let desc = arg.description, !desc.isEmpty {
+                                        Text("- \(desc)")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Full content
+                    if isLoadingContent {
+                        HStack(spacing: 4) {
+                            ProgressView()
+                                .scaleEffect(0.5)
+                            Text("Loading content...")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if let error = loadError {
+                        Text("Error: \(error)")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    } else if let response = contentResponse, let messages = response.messages {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Prompt Messages:")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                            ForEach(Array(messages.enumerated()), id: \.offset) { _, msg in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(msg.role.uppercased())
+                                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(msg.role == "user" ? .blue : .green)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(msg.role == "user" ? Color.blue.opacity(0.1) : Color.green.opacity(0.1))
+                                        .cornerRadius(2)
+                                    
+                                    Text(msg.content.text)
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundStyle(.primary)
+                                        .textSelection(.enabled)
+                                        .padding(6)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+                                        .cornerRadius(4)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isHovering ? Color.purple.opacity(0.1) : Color.clear)
+        .cornerRadius(4)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+    }
+    
+    private func loadContent() async {
+        guard let client = statusMonitor.configuredClient else { return }
+        isLoadingContent = true
+        loadError = nil
+        do {
+            // Strip server prefix from prompt name if present
+            let actualName: String
+            let prefix = serverName + "_"
+            if prompt.name.hasPrefix(prefix) {
+                actualName = String(prompt.name.dropFirst(prefix.count))
+            } else {
+                actualName = prompt.name
+            }
+            contentResponse = try await client.getPromptContent(server: serverName, name: actualName)
+        } catch {
+            loadError = error.localizedDescription
+        }
+        isLoadingContent = false
+    }
+}
+
+// MARK: - Tool Item Row (with inputSchema preview)
+
+struct ToolItemRow: View {
+    let tool: ToolInfo
     @State private var isExpanded = false
     @State private var isHovering = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(name)
+                Text(tool.name)
                     .font(.system(.caption, design: .monospaced))
                     .fontWeight(.medium)
                 
                 Spacer()
                 
-                if isHovering {
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(name, forType: .string)
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Copy name")
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isExpanded.toggle()
                 }
-                
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption2)
-                }
-                .buttonStyle(.plain)
             }
             
             if isExpanded {
-                Text(description)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 6) {
+                    // Description
+                    if !tool.description.isEmpty {
+                        Text(tool.description)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    // Input Schema
+                    if let schema = tool.inputSchema {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Parameters:")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                            
+                            SchemaPropertiesView(schema: schema)
+                        }
+                    }
+                }
+                .padding(.top, 2)
             }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(isHovering ? color.opacity(0.1) : Color.clear)
+        .background(isHovering ? Color.blue.opacity(0.1) : Color.clear)
         .cornerRadius(4)
         .onHover { hovering in
             isHovering = hovering
@@ -904,10 +1091,84 @@ struct CapabilityItemRow: View {
     }
 }
 
+// MARK: - Schema Properties View (renders inputSchema)
+
+struct SchemaPropertiesView: View {
+    let schema: JSONValue
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if case .object(let obj) = schema,
+               case .object(let props)? = obj["properties"] {
+                let requiredNames = extractRequired(from: obj["required"])
+                ForEach(Array(props.keys.sorted()), id: \.self) { key in
+                    if let propValue = props[key], case .object(let prop) = propValue {
+                        HStack(alignment: .top, spacing: 4) {
+                            Text(key)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(.blue)
+                            
+                            if let type = prop["type"] {
+                                Text("(\(type.prettyDescription.replacingOccurrences(of: "\"", with: "")))")
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            
+                            if requiredNames.contains(key) {
+                                Text("required")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.orange)
+                            }
+                            
+                            if let desc = prop["description"], case .string(let d) = desc {
+                                Text("- \(d)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Fallback: show raw schema
+                Text(schema.prettyDescription)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+    
+    private func extractRequired(from value: JSONValue?) -> Set<String> {
+        guard let value = value, case .array(let arr) = value else { return [] }
+        var names = Set<String>()
+        for item in arr {
+            if case .string(let s) = item {
+                names.insert(s)
+            }
+        }
+        return names
+    }
+}
+
 struct ResourceItemRow: View {
     let resource: ResourceInfo
+    let serverName: String
+    @EnvironmentObject var statusMonitor: StatusMonitor
     @State private var isExpanded = false
     @State private var isHovering = false
+    @State private var contentResponse: ResourceContentResponse?
+    @State private var isLoadingContent = false
+    @State private var loadError: String?
+    
+    private func toggleExpanded() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            isExpanded.toggle()
+        }
+        if isExpanded && contentResponse == nil && !isLoadingContent {
+            Task { await loadContent() }
+        }
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -918,52 +1179,86 @@ struct ResourceItemRow: View {
                 
                 Spacer()
                 
-                if isHovering {
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(resource.uri, forType: .string)
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Copy URI")
-                }
-                
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption2)
-                }
-                .buttonStyle(.plain)
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
+            .contentShape(Rectangle())
+            .onTapGesture { toggleExpanded() }
             
             if isExpanded {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(resource.description)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    
-                    HStack(spacing: 4) {
-                        Text("URI:")
+                VStack(alignment: .leading, spacing: 6) {
+                    // Description
+                    if !resource.description.isEmpty {
+                        Text(resource.description)
                             .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                        Text(resource.uri)
-                            .font(.system(.caption2, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
                     
-                    if let mimeType = resource.mimeType, !mimeType.isEmpty {
+                    // Metadata
+                    HStack(spacing: 8) {
                         HStack(spacing: 4) {
-                            Text("Type:")
+                            Text("URI:")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
-                            Text(mimeType)
+                            Text(resource.uri)
                                 .font(.system(.caption2, design: .monospaced))
                                 .foregroundStyle(.secondary)
+                        }
+                        
+                        if let mimeType = resource.mimeType, !mimeType.isEmpty {
+                            HStack(spacing: 4) {
+                                Text("Type:")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                Text(mimeType)
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    
+                    // Full content
+                    if isLoadingContent {
+                        HStack(spacing: 4) {
+                            ProgressView()
+                                .scaleEffect(0.5)
+                            Text("Loading content...")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if let error = loadError {
+                        Text("Error: \(error)")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    } else if let response = contentResponse, let contents = response.contents, !contents.isEmpty {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Content:")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                            
+                            ForEach(Array(contents.enumerated()), id: \.offset) { _, item in
+                                if let text = item.text, !text.isEmpty {
+                                    ScrollView {
+                                        Text(text)
+                                            .font(.system(.caption2, design: .monospaced))
+                                            .foregroundStyle(.primary)
+                                            .textSelection(.enabled)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .frame(maxHeight: 300)
+                                    .padding(6)
+                                    .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+                                    .cornerRadius(4)
+                                } else if item.blob != nil {
+                                    Text("[Binary content]")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .italic()
+                                }
+                            }
                         }
                     }
                 }
@@ -977,6 +1272,18 @@ struct ResourceItemRow: View {
         .onHover { hovering in
             isHovering = hovering
         }
+    }
+    
+    private func loadContent() async {
+        guard let client = statusMonitor.configuredClient else { return }
+        isLoadingContent = true
+        loadError = nil
+        do {
+            contentResponse = try await client.getResourceContent(server: serverName, uri: resource.uri)
+        } catch {
+            loadError = error.localizedDescription
+        }
+        isLoadingContent = false
     }
 }
 

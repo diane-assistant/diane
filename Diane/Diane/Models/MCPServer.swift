@@ -29,6 +29,11 @@ struct MCPServer: Codable, Identifiable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
+    
+    /// Whether this server is a built-in provider
+    var isBuiltin: Bool {
+        type == "builtin"
+    }
 }
 
 /// OAuth configuration for an MCP server

@@ -81,6 +81,12 @@ protocol DianeClientProtocol {
     
     /// Get all resources
     func getResources() async throws -> [ResourceInfo]
+    
+    /// Get full content of a specific prompt
+    func getPromptContent(server: String, name: String) async throws -> PromptContentResponse
+    
+    /// Read full content of a specific resource
+    func getResourceContent(server: String, uri: String) async throws -> ResourceContentResponse
 
     // MARK: - OAuth
 

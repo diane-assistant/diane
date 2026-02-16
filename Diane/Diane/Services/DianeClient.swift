@@ -277,6 +277,20 @@ class DianeClient: DianeClientProtocol {
         return try JSONDecoder().decode([ResourceInfo].self, from: data)
     }
     
+    func getPromptContent(server: String, name: String) async throws -> PromptContentResponse {
+        let encodedServer = server.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? server
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        let data = try await request("/prompts/get?server=\(encodedServer)&name=\(encodedName)")
+        return try JSONDecoder().decode(PromptContentResponse.self, from: data)
+    }
+    
+    func getResourceContent(server: String, uri: String) async throws -> ResourceContentResponse {
+        let encodedServer = server.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? server
+        let encodedURI = uri.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? uri
+        let data = try await request("/resources/read?server=\(encodedServer)&uri=\(encodedURI)")
+        return try JSONDecoder().decode(ResourceContentResponse.self, from: data)
+    }
+    
     /// Reload configuration
     func reloadConfig() async throws {
         _ = try await request("/reload", method: "POST")

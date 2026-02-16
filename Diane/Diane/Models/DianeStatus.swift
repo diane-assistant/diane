@@ -6,6 +6,21 @@ struct ToolInfo: Codable, Identifiable {
     let description: String
     let server: String
     let builtin: Bool
+    let inputSchema: JSONValue?
+    
+    var id: String { name }
+    
+    enum CodingKeys: String, CodingKey {
+        case name, description, server, builtin
+        case inputSchema = "input_schema"
+    }
+}
+
+/// A prompt argument
+struct PromptArgument: Codable, Identifiable {
+    let name: String
+    let description: String?
+    let required: Bool?
     
     var id: String { name }
 }
@@ -16,8 +31,97 @@ struct PromptInfo: Codable, Identifiable {
     let description: String
     let server: String
     let builtin: Bool
+    let arguments: [PromptArgument]?
     
     var id: String { name }
+}
+
+/// A message in a prompt response
+struct PromptMessage: Codable {
+    let role: String
+    let content: PromptMessageContent
+}
+
+/// Content of a prompt message
+struct PromptMessageContent: Codable {
+    let type: String
+    let text: String
+}
+
+/// Response from /prompts/get endpoint
+struct PromptContentResponse: Codable {
+    let description: String?
+    let messages: [PromptMessage]?
+}
+
+/// A resource content item from /resources/read
+struct ResourceContentItem: Codable {
+    let uri: String?
+    let mimeType: String?
+    let text: String?
+    let blob: String?
+}
+
+/// Response from /resources/read endpoint
+struct ResourceContentResponse: Codable {
+    let contents: [ResourceContentItem]?
+}
+
+/// A type-erased JSON value for handling arbitrary JSON (like inputSchema)
+enum JSONValue: Codable, Equatable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let str = try? container.decode(String.self) {
+            self = .string(str)
+        } else if let num = try? container.decode(Double.self) {
+            self = .number(num)
+        } else if let b = try? container.decode(Bool.self) {
+            self = .bool(b)
+        } else if let obj = try? container.decode([String: JSONValue].self) {
+            self = .object(obj)
+        } else if let arr = try? container.decode([JSONValue].self) {
+            self = .array(arr)
+        } else if container.decodeNil() {
+            self = .null
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode JSONValue")
+        }
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let s): try container.encode(s)
+        case .number(let n): try container.encode(n)
+        case .bool(let b): try container.encode(b)
+        case .object(let o): try container.encode(o)
+        case .array(let a): try container.encode(a)
+        case .null: try container.encodeNil()
+        }
+    }
+    
+    /// Pretty-print JSON value for display
+    var prettyDescription: String {
+        switch self {
+        case .string(let s): return "\"\(s)\""
+        case .number(let n):
+            if n == n.rounded() && n < 1e15 { return String(Int(n)) }
+            return String(n)
+        case .bool(let b): return b ? "true" : "false"
+        case .null: return "null"
+        case .array(let arr): return "[\(arr.map { $0.prettyDescription }.joined(separator: ", "))]"
+        case .object(let obj):
+            let pairs = obj.sorted(by: { $0.key < $1.key }).map { "\"\($0.key)\": \($0.value.prettyDescription)" }
+            return "{\(pairs.joined(separator: ", "))}"
+        }
+    }
 }
 
 /// Information about a resource
