@@ -18,6 +18,7 @@ import (
 	"github.com/diane-assistant/diane/internal/config"
 	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/models"
+	"github.com/diane-assistant/diane/internal/pairing"
 )
 
 // MCPServerStatus represents the status of an MCP server
@@ -155,6 +156,7 @@ type Server struct {
 	contextsAPI    *ContextsAPI
 	providersAPI   *ProvidersAPI
 	mcpServersAPI  *MCPServersAPI
+	pairLimiter    *pairing.RateLimiter // rate limiter for pairing attempts
 }
 
 // NewServer creates a new API server
@@ -222,14 +224,20 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 		contextsAPI:    contextsAPI,
 		providersAPI:   providersAPI,
 		mcpServersAPI:  mcpServersAPI,
+		pairLimiter:    pairing.NewRateLimiter(),
 	}, nil
 }
 
 // readOnlyMiddleware wraps a handler to reject non-GET/HEAD requests with 405.
 // This is used on the TCP HTTP listener when no API key is configured,
 // enforcing read-only access from remote clients.
+// The /pair endpoint is exempt to allow pairing without auth.
 func readOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/pair" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "Method not allowed (read-only listener)", http.StatusMethodNotAllowed)
@@ -242,8 +250,15 @@ func readOnlyMiddleware(next http.Handler) http.Handler {
 // apiKeyAuthMiddleware wraps a handler to require a valid API key.
 // The key must be provided via the Authorization header as "Bearer <key>".
 // When an API key is configured, all HTTP methods are allowed (full access).
+// The /pair endpoint is exempt from auth to allow pairing code exchange.
 func apiKeyAuthMiddleware(apiKey string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Allow pairing endpoint without auth
+		if r.URL.Path == "/pair" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		auth := r.Header.Get("Authorization")
 		if auth == "" {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="diane"`)
@@ -299,6 +314,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/gallery/", s.handleGalleryAction)
 	mux.HandleFunc("/auth", s.handleAuth)
 	mux.HandleFunc("/auth/", s.handleAuthAction)
+	mux.HandleFunc("/pair", s.handlePair)
 
 	// Register Contexts API routes
 	if s.contextsAPI != nil {
@@ -1357,10 +1373,69 @@ func (s *Server) handleAuthAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		json.NewEncoder(w).Encode(map[string]string{"status": "logged_out"})
-
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Unknown action: " + action})
 	}
+}
+
+// handlePair handles pairing code exchange.
+// POST /pair with {"code": "123456"} validates the time-based pairing code
+// and returns the API key if valid. This endpoint bypasses auth middleware
+// and is rate-limited to prevent brute-force attacks.
+func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	// Pairing requires an API key to be configured on the server
+	if s.httpAPIKey == "" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Pairing not available (no API key configured)"})
+		return
+	}
+
+	// Rate limiting
+	clientIP := pairing.ClientIP(r)
+	if !s.pairLimiter.Allow(clientIP) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Too many pairing attempts. Try again later."})
+		return
+	}
+
+	// Parse request body
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+		return
+	}
+
+	if body.Code == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Pairing code is required"})
+		return
+	}
+
+	// Validate the code
+	if !pairing.ValidateCode(s.httpAPIKey, body.Code) {
+		// Record failed attempt for rate limiting
+		s.pairLimiter.Record(clientIP)
+		slog.Info("Pairing code rejected", "ip", clientIP)
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid or expired pairing code"})
+		return
+	}
+
+	// Success — return the API key
+	slog.Info("Pairing successful", "ip", clientIP)
+	json.NewEncoder(w).Encode(map[string]string{
+		"api_key": s.httpAPIKey,
+	})
 }

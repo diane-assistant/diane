@@ -2,6 +2,7 @@ import SwiftUI
 
 /// First-launch screen for macOS where users choose how to connect to Diane.
 /// Options: Local (Unix socket, auto-start daemon) or Remote (HTTP to a remote server).
+/// Remote supports pairing code (recommended) or manual API key entry.
 struct MacServerSetupView: View {
     @Bindable var config: ServerConfiguration
     var onConfigured: () -> Void
@@ -12,8 +13,15 @@ struct MacServerSetupView: View {
     @State private var hostInput: String = ""
     @State private var portInput: String = "9090"
     @State private var apiKeyInput: String = ""
+    @State private var pairingCodeInput: String = ""
+    @State private var authMethod: AuthMethod = .pairingCode
     @State private var isTesting = false
     @State private var testResult: TestResult?
+    
+    enum AuthMethod: String, CaseIterable {
+        case pairingCode = "Pairing Code"
+        case apiKey = "API Key"
+    }
     
     enum TestResult {
         case success
@@ -88,6 +96,7 @@ struct MacServerSetupView: View {
             }
             if !config.apiKey.isEmpty {
                 apiKeyInput = config.apiKey
+                authMethod = .apiKey
             }
         }
     }
@@ -135,6 +144,7 @@ struct MacServerSetupView: View {
     
     private var remoteConfigForm: some View {
         VStack(spacing: 12) {
+            // Host and port
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Host")
@@ -155,20 +165,46 @@ struct MacServerSetupView: View {
                 }
             }
             
-            VStack(alignment: .leading, spacing: 4) {
-                Text("API Key (optional)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                SecureField("Leave empty if not required", text: $apiKeyInput)
-                    .textFieldStyle(.roundedBorder)
+            // Auth method picker
+            Picker("Authentication", selection: $authMethod) {
+                ForEach(AuthMethod.allCases, id: \.self) { method in
+                    Text(method.rawValue).tag(method)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: authMethod) { _, _ in
+                testResult = nil
             }
             
-            Text("Connects over plain HTTP — use Tailscale or a VPN for secure access")
+            // Auth fields based on method
+            if authMethod == .pairingCode {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Pairing Code")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("Run 'diane pair' on your server", text: $pairingCodeInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                    Text("Run diane pair on your server to get a 6-digit code")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("API Key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    SecureField("Leave empty if not required", text: $apiKeyInput)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            
+            Text("Connects over plain HTTP \u{2014} use Tailscale or a VPN for secure access")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
             
             // Connect button
-            Button(action: testRemoteConnection) {
+            Button(action: connectRemote) {
                 HStack {
                     if isTesting {
                         ProgressView()
@@ -181,7 +217,7 @@ struct MacServerSetupView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(hostInput.trimmingCharacters(in: .whitespaces).isEmpty || isTesting)
+            .disabled(connectButtonDisabled)
             
             // Result message
             if let result = testResult {
@@ -200,6 +236,16 @@ struct MacServerSetupView: View {
         .padding(.horizontal, 16)
     }
     
+    private var connectButtonDisabled: Bool {
+        if isTesting { return true }
+        if hostInput.trimmingCharacters(in: .whitespaces).isEmpty { return true }
+        if authMethod == .pairingCode {
+            let code = pairingCodeInput.replacingOccurrences(of: " ", with: "")
+            if code.isEmpty { return true }
+        }
+        return false
+    }
+    
     // MARK: - Actions
     
     private func configureLocal() {
@@ -207,6 +253,106 @@ struct MacServerSetupView: View {
         onConfigured()
     }
     
+    private func connectRemote() {
+        if authMethod == .pairingCode {
+            pairWithCode()
+        } else {
+            testRemoteConnection()
+        }
+    }
+    
+    /// Pair using a time-based code: POST /pair with the code, receive the API key.
+    private func pairWithCode() {
+        let host = hostInput.trimmingCharacters(in: .whitespaces)
+        guard !host.isEmpty else { return }
+        
+        let port = Int(portInput) ?? 9090
+        let code = pairingCodeInput.replacingOccurrences(of: " ", with: "")
+        
+        guard !code.isEmpty else {
+            testResult = .failure("Enter the pairing code from 'diane pair'")
+            return
+        }
+        
+        guard let baseURL = URL(string: "http://\(host):\(port)") else {
+            testResult = .failure("Invalid address")
+            return
+        }
+        
+        isTesting = true
+        testResult = nil
+        
+        Task {
+            do {
+                // Step 1: Exchange pairing code for API key
+                let pairURL = baseURL.appendingPathComponent("pair")
+                var request = URLRequest(url: pairURL)
+                request.httpMethod = "POST"
+                request.timeoutInterval = 10
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                
+                let body = ["code": code]
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                
+                let (data, response) = try await URLSession.shared.data(for: request)
+                
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    testResult = .failure("Invalid response from server")
+                    isTesting = false
+                    return
+                }
+                
+                if httpResponse.statusCode == 200 {
+                    // Parse the API key from response
+                    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+                          let apiKey = json["api_key"], !apiKey.isEmpty else {
+                        testResult = .failure("Server returned invalid pairing response")
+                        isTesting = false
+                        return
+                    }
+                    
+                    // Step 2: Verify the API key works with a health check
+                    var healthRequest = URLRequest(url: baseURL.appendingPathComponent("health"))
+                    healthRequest.httpMethod = "GET"
+                    healthRequest.timeoutInterval = 10
+                    healthRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                    
+                    let (_, healthResponse) = try await URLSession.shared.data(for: healthRequest)
+                    
+                    if let healthHTTP = healthResponse as? HTTPURLResponse,
+                       (200...299).contains(healthHTTP.statusCode) {
+                        config.setRemote(host: host, port: port, apiKey: apiKey)
+                        testResult = .success
+                        
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        onConfigured()
+                    } else {
+                        testResult = .failure("Pairing succeeded but health check failed")
+                    }
+                } else if httpResponse.statusCode == 401 {
+                    testResult = .failure("Invalid or expired pairing code. Run 'diane pair' again.")
+                } else if httpResponse.statusCode == 429 {
+                    testResult = .failure("Too many attempts. Wait a moment and try again.")
+                } else if httpResponse.statusCode == 503 {
+                    testResult = .failure("Pairing not available (no API key configured on server)")
+                } else {
+                    // Try to parse error message
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+                       let errorMsg = json["error"] {
+                        testResult = .failure(errorMsg)
+                    } else {
+                        testResult = .failure("Server returned status \(httpResponse.statusCode)")
+                    }
+                }
+            } catch let error as NSError {
+                handleConnectionError(error, host: host, port: Int(portInput) ?? 9090)
+            }
+            
+            isTesting = false
+        }
+    }
+    
+    /// Direct connection with an API key (existing flow).
     private func testRemoteConnection() {
         let host = hostInput.trimmingCharacters(in: .whitespaces)
         guard !host.isEmpty else { return }
@@ -224,7 +370,6 @@ struct MacServerSetupView: View {
         Task {
             let key = apiKeyInput.trimmingCharacters(in: .whitespaces)
             
-            // Use a direct health check with error details instead of the simple bool
             do {
                 var request = URLRequest(url: url.appendingPathComponent("health"))
                 request.httpMethod = "GET"
@@ -240,7 +385,6 @@ struct MacServerSetupView: View {
                         config.setRemote(host: host, port: port, apiKey: key)
                         testResult = .success
                         
-                        // Small delay so user sees success before transition
                         try? await Task.sleep(nanoseconds: 500_000_000)
                         onConfigured()
                     } else if httpResponse.statusCode == 401 {
@@ -254,25 +398,29 @@ struct MacServerSetupView: View {
                     testResult = .failure("Invalid response from server")
                 }
             } catch let error as NSError {
-                if error.domain == NSURLErrorDomain {
-                    switch error.code {
-                    case NSURLErrorTimedOut:
-                        testResult = .failure("Connection timed out. Check host and port.")
-                    case NSURLErrorCannotConnectToHost:
-                        testResult = .failure("Cannot connect to \(host):\(port). Is the server running?")
-                    case NSURLErrorCannotFindHost:
-                        testResult = .failure("Cannot resolve hostname '\(host)'")
-                    case NSURLErrorAppTransportSecurityRequiresSecureConnection:
-                        testResult = .failure("App Transport Security blocked the request. Plain HTTP is not allowed.")
-                    default:
-                        testResult = .failure("Connection error: \(error.localizedDescription)")
-                    }
-                } else {
-                    testResult = .failure("Error: \(error.localizedDescription)")
-                }
+                handleConnectionError(error, host: host, port: port)
             }
             
             isTesting = false
+        }
+    }
+    
+    private func handleConnectionError(_ error: NSError, host: String, port: Int) {
+        if error.domain == NSURLErrorDomain {
+            switch error.code {
+            case NSURLErrorTimedOut:
+                testResult = .failure("Connection timed out. Check host and port.")
+            case NSURLErrorCannotConnectToHost:
+                testResult = .failure("Cannot connect to \(host):\(port). Is the server running?")
+            case NSURLErrorCannotFindHost:
+                testResult = .failure("Cannot resolve hostname '\(host)'")
+            case NSURLErrorAppTransportSecurityRequiresSecureConnection:
+                testResult = .failure("App Transport Security blocked the request. Plain HTTP is not allowed.")
+            default:
+                testResult = .failure("Connection error: \(error.localizedDescription)")
+            }
+        } else {
+            testResult = .failure("Error: \(error.localizedDescription)")
         }
     }
 }

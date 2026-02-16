@@ -14,6 +14,8 @@ import (
 
 	"github.com/diane-assistant/diane/internal/acp"
 	"github.com/diane-assistant/diane/internal/api"
+	"github.com/diane-assistant/diane/internal/config"
+	"github.com/diane-assistant/diane/internal/pairing"
 )
 
 // runCTLCommand dispatches a control subcommand. Returns true if the command
@@ -94,6 +96,9 @@ func runCTLCommand(args []string) bool {
 
 	case "auth":
 		ctlHandleAuthCommand(client, args[2:])
+
+	case "pair":
+		ctlHandlePairCommand()
 
 	case "help", "--help", "-h":
 		ctlPrintUsage()
@@ -1330,6 +1335,30 @@ func ctlHandleInfoCommand(client *api.Client) {
 `)
 }
 
+func ctlHandlePairCommand() {
+	// Load config to get the API key
+	cfg := config.Load()
+
+	if cfg.HTTP.APIKey == "" {
+		fmt.Fprintf(os.Stderr, "Error: No API key configured.\n")
+		fmt.Fprintf(os.Stderr, "Pairing requires an API key in your config (http.api_key).\n")
+		fmt.Fprintf(os.Stderr, "\nTo set one, add to your config file:\n")
+		fmt.Fprintf(os.Stderr, "  {\"http\": {\"port\": 9090, \"api_key\": \"your-secret-key\"}}\n")
+		os.Exit(1)
+	}
+
+	code := pairing.GenerateCode(cfg.HTTP.APIKey)
+	remaining := pairing.TimeRemaining()
+
+	fmt.Println()
+	fmt.Printf("  Pairing code:  %s\n", pairing.FormatCode(code))
+	fmt.Printf("  Expires in:    %d seconds\n", remaining)
+	fmt.Println()
+	fmt.Println("  Enter this code in the Diane app to connect.")
+	fmt.Println("  The code refreshes every 30 seconds.")
+	fmt.Println()
+}
+
 func ctlHandleDoctorCommand(client *api.Client) {
 	report, err := client.Doctor()
 	if err != nil {
@@ -1380,6 +1409,7 @@ Control Commands:
   mcp-servers        List all MCP servers and their status
   reload             Reload MCP configuration
   restart <name>     Restart a specific MCP server
+  pair               Show a time-based pairing code for connecting apps
   version            Show version
 
 MCP Commands:
@@ -1423,6 +1453,7 @@ Examples:
   diane                                                # Show help
   diane serve                                          # Start as daemon
   diane info                                           # Show connection guide
+  diane pair                                           # Show pairing code for app setup
   diane mcp install opencode                           # Install MCP config in OpenCode project
   diane mcp install opencode --context work            # Install with specific context
   diane auth login github                              # Authenticate with GitHub MCP
