@@ -127,11 +127,12 @@ func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
 
 	// Jobs tools are always available (built into the server)
 	servers = append(servers, api.MCPServerStatus{
-		Name:      "jobs",
-		Enabled:   true,
-		Connected: true,
-		ToolCount: 9, // job_list, job_add, job_enable, job_disable, job_delete, job_pause, job_resume, job_logs, server_status
-		Builtin:   true,
+		Name:        "jobs",
+		Enabled:     true,
+		Connected:   true,
+		ToolCount:   9, // job_list, job_add, job_enable, job_disable, job_delete, job_pause, job_resume, job_logs, server_status
+		PromptCount: 3, // jobs_create_scheduled_task, jobs_review_schedules, jobs_troubleshoot_failures
+		Builtin:     true,
 	})
 
 	// Add builtin providers as MCP servers
@@ -146,12 +147,22 @@ func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
 	}
 
 	if googleProvider != nil {
+		promptCount := 0
+		if pp, ok := interface{}(googleProvider).(tools.PromptProvider); ok {
+			promptCount = len(pp.Prompts())
+		}
+		resourceCount := 0
+		if rp, ok := interface{}(googleProvider).(tools.ResourceProvider); ok {
+			resourceCount = len(rp.Resources())
+		}
 		servers = append(servers, api.MCPServerStatus{
-			Name:      "google",
-			Enabled:   true,
-			Connected: true,
-			ToolCount: len(googleProvider.Tools()),
-			Builtin:   true,
+			Name:          "google",
+			Enabled:       true,
+			Connected:     true,
+			ToolCount:     len(googleProvider.Tools()),
+			PromptCount:   promptCount,
+			ResourceCount: resourceCount,
+			Builtin:       true,
 		})
 	}
 
@@ -166,12 +177,17 @@ func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
 	}
 
 	if notificationsProvider != nil {
+		promptCount := 0
+		if pp, ok := interface{}(notificationsProvider).(tools.PromptProvider); ok {
+			promptCount = len(pp.Prompts())
+		}
 		servers = append(servers, api.MCPServerStatus{
-			Name:      "discord",
-			Enabled:   true,
-			Connected: true,
-			ToolCount: len(notificationsProvider.Tools()),
-			Builtin:   true,
+			Name:        "discord",
+			Enabled:     true,
+			Connected:   true,
+			ToolCount:   len(notificationsProvider.Tools()),
+			PromptCount: promptCount,
+			Builtin:     true,
 		})
 	}
 
@@ -216,12 +232,17 @@ func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
 	}
 
 	if downloadsProvider != nil {
+		resourceCount := 0
+		if rp, ok := interface{}(downloadsProvider).(tools.ResourceProvider); ok {
+			resourceCount = len(rp.Resources())
+		}
 		servers = append(servers, api.MCPServerStatus{
-			Name:      "downloads",
-			Enabled:   true,
-			Connected: true,
-			ToolCount: len(downloadsProvider.Tools()),
-			Builtin:   true,
+			Name:          "downloads",
+			Enabled:       true,
+			Connected:     true,
+			ToolCount:     len(downloadsProvider.Tools()),
+			ResourceCount: resourceCount,
+			Builtin:       true,
 		})
 	}
 
@@ -244,6 +265,8 @@ func (d *DianeStatusProvider) getAllMCPServers() []api.MCPServerStatus {
 				Enabled:       s.Enabled,
 				Connected:     s.Connected,
 				ToolCount:     s.ToolCount,
+				PromptCount:   s.PromptCount,
+				ResourceCount: s.ResourceCount,
 				Error:         s.Error,
 				Builtin:       false,
 				RequiresAuth:  s.RequiresAuth,
@@ -2612,6 +2635,16 @@ func listPrompts() MCPResponse {
 		prompts = append(prompts, prompt)
 	}
 
+	// Add prompts from external MCP servers via proxy
+	if proxy != nil {
+		externalPrompts, err := proxy.ListAllPrompts()
+		if err == nil {
+			prompts = append(prompts, externalPrompts...)
+		} else {
+			slog.Warn("Failed to list external prompts", "error", err)
+		}
+	}
+
 	return MCPResponse{
 		Result: map[string]interface{}{
 			"prompts": prompts,
@@ -2676,6 +2709,16 @@ func getPrompt(params json.RawMessage) MCPResponse {
 	// Try built-in jobs prompts
 	if messages := getJobsPrompt(req.Name, req.Arguments); messages != nil {
 		return convertMessages(messages)
+	}
+
+	// Try external MCP servers via proxy (if name has server prefix)
+	if proxy != nil {
+		result, err := proxy.GetPrompt(req.Name, req.Arguments)
+		if err == nil {
+			return MCPResponse{
+				Result: result,
+			}
+		}
 	}
 
 	return MCPResponse{
@@ -2838,6 +2881,16 @@ func listResources() MCPResponse {
 		}
 	}
 
+	// Add resources from external MCP servers via proxy
+	if proxy != nil {
+		externalResources, err := proxy.ListAllResources()
+		if err == nil {
+			resources = append(resources, externalResources...)
+		} else {
+			slog.Warn("Failed to list external resources", "error", err)
+		}
+	}
+
 	return MCPResponse{
 		Result: map[string]interface{}{
 			"resources": resources,
@@ -2895,6 +2948,16 @@ func readResource(params json.RawMessage) MCPResponse {
 						},
 					},
 				}
+			}
+		}
+	}
+
+	// Try external MCP servers via proxy
+	if proxy != nil {
+		result, err := proxy.ReadResource(req.URI)
+		if err == nil {
+			return MCPResponse{
+				Result: result,
 			}
 		}
 	}

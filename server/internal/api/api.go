@@ -27,6 +27,8 @@ type MCPServerStatus struct {
 	Enabled       bool   `json:"enabled"`
 	Connected     bool   `json:"connected"`
 	ToolCount     int    `json:"tool_count"`
+	PromptCount   int    `json:"prompt_count"`
+	ResourceCount int    `json:"resource_count"`
 	Error         string `json:"error,omitempty"`
 	Builtin       bool   `json:"builtin,omitempty"`
 	RequiresAuth  bool   `json:"requires_auth,omitempty"`
