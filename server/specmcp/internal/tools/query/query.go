@@ -67,7 +67,7 @@ func (t *GetContext) Execute(ctx context.Context, params json.RawMessage) (*mcp.
 		return nil, fmt.Errorf("expanding context: %w", err)
 	}
 
-	return jsonResult(buildEntityResponse(obj, expanded))
+	return mcp.JSONResult(buildEntityResponse(obj, expanded))
 }
 
 // --- spec_get_component ---
@@ -120,7 +120,7 @@ func (t *GetComponent) Execute(ctx context.Context, params json.RawMessage) (*mc
 		return nil, fmt.Errorf("expanding component: %w", err)
 	}
 
-	return jsonResult(buildEntityResponse(obj, expanded))
+	return mcp.JSONResult(buildEntityResponse(obj, expanded))
 }
 
 // --- spec_get_action ---
@@ -174,7 +174,7 @@ func (t *GetAction) Execute(ctx context.Context, params json.RawMessage) (*mcp.T
 		return nil, fmt.Errorf("expanding action: %w", err)
 	}
 
-	return jsonResult(buildEntityResponse(obj, expanded))
+	return mcp.JSONResult(buildEntityResponse(obj, expanded))
 }
 
 // --- spec_get_data_model ---
@@ -226,7 +226,7 @@ func (t *GetDataModel) Execute(ctx context.Context, params json.RawMessage) (*mc
 		return nil, fmt.Errorf("expanding data model: %w", err)
 	}
 
-	return jsonResult(buildEntityResponse(obj, expanded))
+	return mcp.JSONResult(buildEntityResponse(obj, expanded))
 }
 
 // --- spec_get_service ---
@@ -279,7 +279,7 @@ func (t *GetService) Execute(ctx context.Context, params json.RawMessage) (*mcp.
 		return nil, fmt.Errorf("expanding service: %w", err)
 	}
 
-	return jsonResult(buildEntityResponse(obj, expanded))
+	return mcp.JSONResult(buildEntityResponse(obj, expanded))
 }
 
 // --- spec_get_scenario ---
@@ -333,7 +333,7 @@ func (t *GetScenario) Execute(ctx context.Context, params json.RawMessage) (*mcp
 		return nil, fmt.Errorf("expanding scenario: %w", err)
 	}
 
-	return jsonResult(buildEntityResponse(obj, expanded))
+	return mcp.JSONResult(buildEntityResponse(obj, expanded))
 }
 
 // --- spec_get_patterns ---
@@ -428,7 +428,7 @@ func (t *GetPatterns) Execute(ctx context.Context, params json.RawMessage) (*mcp
 		patterns = append(patterns, p)
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"patterns": patterns,
 		"count":    len(patterns),
 	})
@@ -567,7 +567,7 @@ func (t *ImpactAnalysis) Execute(ctx context.Context, params json.RawMessage) (*
 		rootName = *root.Key
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"entity": map[string]any{
 			"id":   p.EntityID,
 			"type": root.Type,
@@ -640,7 +640,7 @@ func (t *ListChanges) Execute(ctx context.Context, params json.RawMessage) (*mcp
 		})
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"changes": results,
 		"count":   len(results),
 	})
@@ -701,7 +701,7 @@ func (t *GetChange) Execute(ctx context.Context, params json.RawMessage) (*mcp.T
 		return nil, fmt.Errorf("expanding change: %w", err)
 	}
 
-	return jsonResult(buildEntityResponse(obj, expanded))
+	return mcp.JSONResult(buildEntityResponse(obj, expanded))
 }
 
 // --- Shared helpers ---
@@ -839,14 +839,4 @@ func countEdges(expanded *graph.GraphExpandResponse) int {
 		return 0
 	}
 	return len(expanded.Edges)
-}
-
-func jsonResult(v any) (*mcp.ToolsCallResult, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("marshaling result: %w", err)
-	}
-	return &mcp.ToolsCallResult{
-		Content: []mcp.ContentBlock{mcp.TextContent(string(b))},
-	}, nil
 }

@@ -208,11 +208,21 @@ func (t *SpecVerify) checkCorrectness(ctx context.Context, changeID string, gctx
 		return issues // Can't check correctness without specs
 	}
 
-	// Get specs and their requirements
-	specRels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
-		Type:  emergent.RelHasSpec,
-		SrcID: changeID,
-		Limit: 100,
+	// Use ExpandGraph to batch-fetch the entire spec→requirement→scenario tree
+	// and task→implements relationships in a single call
+	expandResp, err := t.client.ExpandGraph(ctx, &graph.GraphExpandRequest{
+		RootIDs:   []string{changeID},
+		Direction: "outgoing",
+		MaxDepth:  4, // change→spec→requirement→scenario, change→task→implements
+		MaxNodes:  500,
+		MaxEdges:  1000,
+		RelationshipTypes: []string{
+			emergent.RelHasSpec,
+			emergent.RelHasRequirement,
+			emergent.RelHasScenario,
+			emergent.RelHasTask,
+			emergent.RelImplements,
+		},
 	})
 	if err != nil {
 		issues = append(issues, verifyIssue{
@@ -223,29 +233,47 @@ func (t *SpecVerify) checkCorrectness(ctx context.Context, changeID string, gctx
 		return issues
 	}
 
+	// Build node map and edge index from expand response
+	nodeIdx := emergent.NewNodeIndex(expandResp.Nodes)
+
+	// Normalize edge IDs so lookups in edgesBySrcAndType use consistent keys
+	emergent.CanonicalizeEdgeIDs(expandResp.Edges, nodeIdx)
+
+	// Resolve the changeID to the node's primary ID (in case the caller
+	// passed a canonical ID that differs from the node's version ID)
+	resolvedChangeID := changeID
+	if node, ok := nodeIdx[changeID]; ok {
+		resolvedChangeID = node.ID
+	}
+
+	nodeMap := make(map[string]*graph.ExpandNode)
+	for _, node := range expandResp.Nodes {
+		nodeMap[node.ID] = node
+	}
+
+	// Index edges by type and source
+	edgesBySrcAndType := make(map[string]map[string][]string) // srcID → type → []dstIDs
+	for _, edge := range expandResp.Edges {
+		if edgesBySrcAndType[edge.SrcID] == nil {
+			edgesBySrcAndType[edge.SrcID] = make(map[string][]string)
+		}
+		edgesBySrcAndType[edge.SrcID][edge.Type] = append(edgesBySrcAndType[edge.SrcID][edge.Type], edge.DstID)
+	}
+
+	// Find specs (change → has_spec → spec)
+	specIDs := edgesBySrcAndType[resolvedChangeID][emergent.RelHasSpec]
+
 	totalRequirements := 0
 	requirementsWithScenarios := 0
 
-	for _, specRel := range specRels {
-		// Get requirements for this spec
-		reqRels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
-			Type:  emergent.RelHasRequirement,
-			SrcID: specRel.DstID,
-			Limit: 100,
-		})
-		if err != nil {
-			continue
-		}
-
-		if len(reqRels) == 0 {
-			// Get spec details for the message
-			specObj, err := t.client.GetObject(ctx, specRel.DstID)
-			if err != nil {
-				continue
-			}
+	for _, specID := range specIDs {
+		reqIDs := edgesBySrcAndType[specID][emergent.RelHasRequirement]
+		if len(reqIDs) == 0 {
 			name := ""
-			if n, ok := specObj.Properties["name"].(string); ok {
-				name = n
+			if node, ok := nodeMap[specID]; ok && node.Properties != nil {
+				if n, ok := node.Properties["name"].(string); ok {
+					name = n
+				}
 			}
 			issues = append(issues, verifyIssue{
 				Dimension: "correctness",
@@ -256,19 +284,10 @@ func (t *SpecVerify) checkCorrectness(ctx context.Context, changeID string, gctx
 			continue
 		}
 
-		for _, reqRel := range reqRels {
+		for _, reqID := range reqIDs {
 			totalRequirements++
-
-			// Check if requirement has scenarios
-			scenRels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
-				Type:  emergent.RelHasScenario,
-				SrcID: reqRel.DstID,
-				Limit: 1,
-			})
-			if err != nil {
-				continue
-			}
-			if len(scenRels) > 0 {
+			scenIDs := edgesBySrcAndType[reqID][emergent.RelHasScenario]
+			if len(scenIDs) > 0 {
 				requirementsWithScenarios++
 			}
 		}
@@ -289,34 +308,21 @@ func (t *SpecVerify) checkCorrectness(ctx context.Context, changeID string, gctx
 
 	// Check that tasks implement something
 	if gctx.HasTasks {
-		taskRels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
-			Type:  emergent.RelHasTask,
-			SrcID: changeID,
-			Limit: 200,
-		})
-		if err == nil {
-			orphanTasks := 0
-			for _, taskRel := range taskRels {
-				implRels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
-					Type:  emergent.RelImplements,
-					SrcID: taskRel.DstID,
-					Limit: 1,
-				})
-				if err != nil {
-					continue
-				}
-				if len(implRels) == 0 {
-					orphanTasks++
-				}
+		taskIDs := edgesBySrcAndType[resolvedChangeID][emergent.RelHasTask]
+		orphanTasks := 0
+		for _, taskID := range taskIDs {
+			implIDs := edgesBySrcAndType[taskID][emergent.RelImplements]
+			if len(implIDs) == 0 {
+				orphanTasks++
 			}
-			if orphanTasks > 0 {
-				issues = append(issues, verifyIssue{
-					Dimension: "correctness",
-					Severity:  "SUGGESTION",
-					Message:   fmt.Sprintf("%d tasks have no 'implements' relationship. Linking tasks to requirements or specs improves traceability.", orphanTasks),
-					Remedy:    "Add 'implements' field when creating tasks to link them to requirements or specs.",
-				})
-			}
+		}
+		if orphanTasks > 0 {
+			issues = append(issues, verifyIssue{
+				Dimension: "correctness",
+				Severity:  "SUGGESTION",
+				Message:   fmt.Sprintf("%d tasks have no 'implements' relationship. Linking tasks to requirements or specs improves traceability.", orphanTasks),
+				Remedy:    "Add 'implements' field when creating tasks to link them to requirements or specs.",
+			})
 		}
 	}
 

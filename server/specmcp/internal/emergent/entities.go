@@ -41,25 +41,6 @@ func fromProps[T any](obj *graph.GraphObject) (*T, error) {
 	return &v, nil
 }
 
-// setID sets the ID field on a typed entity using JSON.
-func setID[T any](entity *T, id string) {
-	// Use reflection-free approach: marshal, inject id, unmarshal
-	b, err := json.Marshal(entity)
-	if err != nil {
-		return
-	}
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
-		return
-	}
-	m["id"] = id
-	b, err = json.Marshal(m)
-	if err != nil {
-		return
-	}
-	json.Unmarshal(b, entity) //nolint:errcheck
-}
-
 // strPtr returns a pointer to a string.
 func strPtr(s string) *string {
 	return &s
@@ -279,6 +260,7 @@ func (c *Client) CreateTask(ctx context.Context, changeID string, t *Task) (*Tas
 		return nil, err
 	}
 	result.ID = obj.ID
+	result.CanonicalID = obj.CanonicalID
 	return result, nil
 }
 
@@ -293,6 +275,7 @@ func (c *Client) GetTask(ctx context.Context, id string) (*Task, error) {
 		return nil, err
 	}
 	result.ID = obj.ID
+	result.CanonicalID = obj.CanonicalID
 	return result, nil
 }
 
@@ -311,6 +294,7 @@ func (c *Client) UpdateTaskStatus(ctx context.Context, taskID, status string, pr
 		return nil, err
 	}
 	result.ID = obj.ID
+	result.CanonicalID = obj.CanonicalID
 	return result, nil
 }
 
@@ -343,6 +327,7 @@ func (c *Client) ListTasks(ctx context.Context, changeID string) ([]*Task, error
 			return nil, err
 		}
 		t.ID = obj.ID
+		t.CanonicalID = obj.CanonicalID
 		tasks = append(tasks, t)
 	}
 	return tasks, nil

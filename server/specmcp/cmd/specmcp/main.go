@@ -114,6 +114,7 @@ func run() error {
 	registry.Register(patterns.NewSeedPatterns(emClient))
 
 	// Register constitution tools
+	registry.Register(constitution.NewCreateConstitution(emClient))
 	registry.Register(constitution.NewValidateConstitution(emClient))
 
 	// Register sync tools

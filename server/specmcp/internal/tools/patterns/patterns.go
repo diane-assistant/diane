@@ -90,28 +90,21 @@ func (t *SuggestPatterns) Execute(ctx context.Context, params json.RawMessage) (
 		return nil, fmt.Errorf("listing same-type entities: %w", err)
 	}
 
-	// Count pattern usage across similar entities
+	// Count pattern usage across similar entities using batch edge lookups
 	patternUsage := make(map[string]int)
-	patternInfo := make(map[string]*graph.GraphObject)
 	for _, entity := range sameTypeEntities {
 		if entity.ID == p.EntityID {
 			continue
 		}
-		rels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
-			Type:  emergent.RelUsesPattern,
-			SrcID: entity.ID,
-			Limit: 20,
+		edges, err := t.client.GetObjectEdges(ctx, entity.ID, &graph.GetObjectEdgesOptions{
+			Types:     []string{emergent.RelUsesPattern},
+			Direction: "outgoing",
 		})
 		if err != nil {
 			continue
 		}
-		for _, rel := range rels {
+		for _, rel := range edges.Outgoing {
 			patternUsage[rel.DstID]++
-			if _, ok := patternInfo[rel.DstID]; !ok {
-				if pObj, err := t.client.GetObject(ctx, rel.DstID); err == nil {
-					patternInfo[rel.DstID] = pObj
-				}
-			}
 		}
 	}
 
@@ -122,23 +115,37 @@ func (t *SuggestPatterns) Execute(ctx context.Context, params json.RawMessage) (
 	})
 	if err == nil {
 		for _, c := range constitutions {
-			reqRels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
-				Type:  emergent.RelRequiresPattern,
-				SrcID: c.ID,
-				Limit: 50,
+			edges, err := t.client.GetObjectEdges(ctx, c.ID, &graph.GetObjectEdgesOptions{
+				Types:     []string{emergent.RelRequiresPattern},
+				Direction: "outgoing",
 			})
 			if err != nil {
 				continue
 			}
-			for _, rel := range reqRels {
+			for _, rel := range edges.Outgoing {
 				patternUsage[rel.DstID] += 10 // boost required patterns
-				if _, ok := patternInfo[rel.DstID]; !ok {
-					if pObj, err := t.client.GetObject(ctx, rel.DstID); err == nil {
-						patternInfo[rel.DstID] = pObj
-					}
-				}
 			}
 		}
+	}
+
+	// Batch-fetch all discovered pattern objects in a single call.
+	// Use ObjectIndex for dual-indexed lookup (ID/CanonicalID) to handle
+	// the case where GetObjectEdges returns a different ID variant than GetObjects.
+	patternIDs := make([]string, 0, len(patternUsage))
+	for pid := range patternUsage {
+		if !usedPatterns[pid] {
+			patternIDs = append(patternIDs, pid)
+		}
+	}
+	var patternIdx emergent.ObjectIndex
+	if len(patternIDs) > 0 {
+		objs, err := t.client.GetObjects(ctx, patternIDs)
+		if err == nil {
+			patternIdx = emergent.NewObjectIndex(objs)
+		}
+	}
+	if patternIdx == nil {
+		patternIdx = make(emergent.ObjectIndex)
 	}
 
 	// Build suggestions, excluding already-used patterns
@@ -147,7 +154,7 @@ func (t *SuggestPatterns) Execute(ctx context.Context, params json.RawMessage) (
 		if usedPatterns[patternID] {
 			continue
 		}
-		info := patternInfo[patternID]
+		info := patternIdx[patternID]
 		if info == nil {
 			continue
 		}
@@ -173,7 +180,7 @@ func (t *SuggestPatterns) Execute(ctx context.Context, params json.RawMessage) (
 		suggestions = append(suggestions, entry)
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"entity_id":     p.EntityID,
 		"entity_type":   entityType,
 		"suggestions":   suggestions,
@@ -263,15 +270,5 @@ func (t *ApplyPattern) Execute(ctx context.Context, params json.RawMessage) (*mc
 		}
 	}
 
-	return jsonResult(result)
-}
-
-func jsonResult(v any) (*mcp.ToolsCallResult, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("marshaling result: %w", err)
-	}
-	return &mcp.ToolsCallResult{
-		Content: []mcp.ContentBlock{mcp.TextContent(string(b))},
-	}, nil
+	return mcp.JSONResult(result)
 }

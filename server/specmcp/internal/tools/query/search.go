@@ -114,7 +114,7 @@ func (t *Search) Execute(ctx context.Context, params json.RawMessage) (*mcp.Tool
 		for _, item := range resp.Data {
 			results = append(results, buildSearchResult(item.Object, item.Score))
 		}
-		return jsonResult(map[string]any{
+		return mcp.JSONResult(map[string]any{
 			"results": results,
 			"total":   resp.Total,
 			"count":   len(results),
@@ -152,17 +152,21 @@ func (t *Search) fallbackSearch(ctx context.Context, queryStr string, types, lab
 
 		// If query looks like a single word, try using the "contains" property filter
 		// on name field first for efficiency
+		usedNameFilter := false
 		if len(queryTerms) == 1 {
 			opts.PropertyFilters = []graph.PropertyFilter{
 				{Path: "name", Op: "contains", Value: queryLower},
 			}
+			usedNameFilter = true
 		}
 
 		objs, err := t.client.ListObjects(ctx, opts)
 		if err != nil {
 			// If property filter fails (some backends don't support 'contains'),
-			// retry without it
+			// retry without it — this unfiltered fetch covers all fields,
+			// so no second fetch is needed
 			opts.PropertyFilters = nil
+			usedNameFilter = false
 			objs, err = t.client.ListObjects(ctx, opts)
 			if err != nil {
 				continue // skip this type on error
@@ -178,9 +182,9 @@ func (t *Search) fallbackSearch(ctx context.Context, queryStr string, types, lab
 			}
 		}
 
-		// If we used the name filter and got results, also try without it
-		// to catch matches in other fields
-		if len(queryTerms) == 1 && len(results) < limit {
+		// Only do a second unfiltered fetch if we used the name filter AND
+		// still need more results to reach the limit
+		if usedNameFilter && len(results) < limit {
 			opts.PropertyFilters = nil
 			objs2, err := t.client.ListObjects(ctx, opts)
 			if err == nil {
@@ -205,7 +209,7 @@ func (t *Search) fallbackSearch(ctx context.Context, queryStr string, types, lab
 		}
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"results": results,
 		"total":   len(results),
 		"count":   len(results),

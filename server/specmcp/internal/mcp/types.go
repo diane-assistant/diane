@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 )
 
 // JSON-RPC 2.0 types
@@ -121,6 +122,17 @@ func ErrorResult(msg string) *ToolsCallResult {
 		Content: []ContentBlock{TextContent(msg)},
 		IsError: true,
 	}
+}
+
+// JSONResult marshals v as indented JSON and wraps it in a ToolsCallResult.
+func JSONResult(v any) (*ToolsCallResult, error) {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshaling result: %w", err)
+	}
+	return &ToolsCallResult{
+		Content: []ContentBlock{TextContent(string(b))},
+	}, nil
 }
 
 // --- Prompts ---

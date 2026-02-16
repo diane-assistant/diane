@@ -153,6 +153,7 @@ type Design struct {
 // Task represents an implementation task.
 type Task struct {
 	ID                 string     `json:"id,omitempty"`
+	CanonicalID        string     `json:"-"` // From GraphObject.CanonicalID; not a property
 	Number             string     `json:"number"`
 	Description        string     `json:"description"`
 	TaskType           string     `json:"task_type,omitempty"`

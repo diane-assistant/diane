@@ -64,7 +64,7 @@ func (t *ValidateConstitution) Execute(ctx context.Context, params json.RawMessa
 		return nil, fmt.Errorf("looking up constitution: %w", err)
 	}
 	if len(constitutionRels) == 0 {
-		return jsonResult(map[string]any{
+		return mcp.JSONResult(map[string]any{
 			"change_id": p.ChangeID,
 			"status":    "no_constitution",
 			"message":   "No constitution governs this change. Add one with spec_artifact.",
@@ -161,7 +161,7 @@ func (t *ValidateConstitution) Execute(ctx context.Context, params json.RawMessa
 		status = "violations_found"
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"change_id": p.ChangeID,
 		"constitution": map[string]any{
 			"id":                 constitutionID,
@@ -179,6 +179,8 @@ func (t *ValidateConstitution) Execute(ctx context.Context, params json.RawMessa
 }
 
 // getRelatedPatterns returns a map of pattern ID → name for patterns linked via relType.
+// Keys are the objects' primary IDs (from GetObjects) rather than relationship DstIDs
+// to avoid ID mismatch when comparing against getUsedPatterns results.
 func (t *ValidateConstitution) getRelatedPatterns(ctx context.Context, srcID, relType string) (map[string]string, error) {
 	rels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
 		Type:  relType,
@@ -188,17 +190,30 @@ func (t *ValidateConstitution) getRelatedPatterns(ctx context.Context, srcID, re
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]string)
-	for _, rel := range rels {
-		obj, err := t.client.GetObject(ctx, rel.DstID)
-		if err != nil {
-			continue
-		}
+	if len(rels) == 0 {
+		return make(map[string]string), nil
+	}
+	// Batch-fetch all pattern objects
+	ids := make([]string, len(rels))
+	for i, rel := range rels {
+		ids[i] = rel.DstID
+	}
+	objs, err := t.client.GetObjects(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(objs))
+	for _, obj := range objs {
 		name := ""
 		if obj.Key != nil {
 			name = *obj.Key
 		}
-		result[rel.DstID] = name
+		// Key by obj.ID (the server-resolved primary ID)
+		result[obj.ID] = name
+		// Also key by CanonicalID if different, for cross-call consistency
+		if obj.CanonicalID != "" && obj.CanonicalID != obj.ID {
+			result[obj.CanonicalID] = name
+		}
 	}
 	return result, nil
 }
@@ -257,6 +272,8 @@ func (t *ValidateConstitution) collectPatternEntities(ctx context.Context, chang
 }
 
 // getUsedPatterns returns the IDs of patterns applied to an entity.
+// Returns resolved object IDs (from GetObjects) rather than raw relationship DstIDs
+// to ensure consistency with getRelatedPatterns lookups.
 func (t *ValidateConstitution) getUsedPatterns(ctx context.Context, entityID string) ([]string, error) {
 	rels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
 		Type:  emergent.RelUsesPattern,
@@ -266,19 +283,25 @@ func (t *ValidateConstitution) getUsedPatterns(ctx context.Context, entityID str
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]string, 0, len(rels))
-	for _, rel := range rels {
-		ids = append(ids, rel.DstID)
+	if len(rels) == 0 {
+		return nil, nil
+	}
+	// Batch-fetch pattern objects to get their resolved IDs
+	relIDs := make([]string, len(rels))
+	for i, rel := range rels {
+		relIDs[i] = rel.DstID
+	}
+	objs, err := t.client.GetObjects(ctx, relIDs)
+	if err != nil {
+		// Fall back to raw DstIDs if GetObjects fails
+		return relIDs, nil
+	}
+	ids := make([]string, 0, len(objs)*2)
+	for _, obj := range objs {
+		ids = append(ids, obj.ID)
+		if obj.CanonicalID != "" && obj.CanonicalID != obj.ID {
+			ids = append(ids, obj.CanonicalID)
+		}
 	}
 	return ids, nil
-}
-
-func jsonResult(v any) (*mcp.ToolsCallResult, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("marshaling result: %w", err)
-	}
-	return &mcp.ToolsCallResult{
-		Content: []mcp.ContentBlock{mcp.TextContent(string(b))},
-	}, nil
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/diane-assistant/diane/server/specmcp/internal/emergent"
@@ -62,7 +63,7 @@ func (t *SyncStatus) Execute(ctx context.Context, params json.RawMessage) (*mcp.
 	}
 
 	if len(objs) == 0 {
-		return jsonResult(map[string]any{
+		return mcp.JSONResult(map[string]any{
 			"status":  "never_synced",
 			"message": "No sync records found. Run spec_sync to synchronize.",
 		})
@@ -80,7 +81,7 @@ func (t *SyncStatus) Execute(ctx context.Context, params json.RawMessage) (*mcp.
 		result["status"] = syncObj.Properties["status"]
 	}
 
-	return jsonResult(result)
+	return mcp.JSONResult(result)
 }
 
 // --- spec_graph_summary ---
@@ -130,17 +131,34 @@ func (t *GraphSummary) Execute(ctx context.Context, params json.RawMessage) (*mc
 		emergent.TypeService, emergent.TypeGraphSync,
 	}
 
-	counts := make(map[string]int)
-	total := 0
+	// Fetch all entity counts in parallel
+	type countResult struct {
+		typeName string
+		count    int
+	}
+	results := make([]countResult, len(entityTypes))
+	var wg sync.WaitGroup
+	wg.Add(len(entityTypes))
+	for i, typeName := range entityTypes {
+		go func(idx int, tn string) {
+			defer wg.Done()
+			count, err := t.client.CountObjects(ctx, tn)
+			if err != nil {
+				results[idx] = countResult{typeName: tn, count: -1}
+				return
+			}
+			results[idx] = countResult{typeName: tn, count: count}
+		}(i, typeName)
+	}
+	wg.Wait()
 
-	for _, typeName := range entityTypes {
-		count, err := t.client.CountObjects(ctx, typeName)
-		if err != nil {
-			counts[typeName] = -1 // indicate error
-			continue
+	counts := make(map[string]int, len(entityTypes))
+	total := 0
+	for _, r := range results {
+		counts[r.typeName] = r.count
+		if r.count > 0 {
+			total += r.count
 		}
-		counts[typeName] = count
-		total += count
 	}
 
 	// Get active changes for a quick status overview
@@ -166,7 +184,7 @@ func (t *GraphSummary) Execute(ctx context.Context, params json.RawMessage) (*mc
 		}
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"entity_counts":  counts,
 		"total_entities": total,
 		"changes":        activeChanges,
@@ -222,7 +240,7 @@ func (t *Sync) Execute(ctx context.Context, params json.RawMessage) (*mcp.ToolsC
 	now := time.Now()
 
 	if p.DryRun {
-		return jsonResult(map[string]any{
+		return mcp.JSONResult(map[string]any{
 			"dry_run":       true,
 			"commit":        p.Commit,
 			"would_sync_at": now.Format(time.RFC3339),
@@ -245,21 +263,11 @@ func (t *Sync) Execute(ctx context.Context, params json.RawMessage) (*mcp.ToolsC
 		return nil, fmt.Errorf("creating sync record: %w", err)
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"id":        obj.ID,
 		"commit":    p.Commit,
 		"synced_at": now.Format(time.RFC3339),
 		"status":    "synced",
 		"message":   "Sync point recorded",
 	})
-}
-
-func jsonResult(v any) (*mcp.ToolsCallResult, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("marshaling result: %w", err)
-	}
-	return &mcp.ToolsCallResult{
-		Content: []mcp.ContentBlock{mcp.TextContent(string(b))},
-	}, nil
 }

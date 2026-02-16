@@ -163,7 +163,7 @@ func (t *SpecArtifact) addProposal(ctx context.Context, changeID string, content
 		return nil, fmt.Errorf("creating proposal: %w", err)
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"type":    "proposal",
 		"id":      proposal.ID,
 		"message": "Created proposal",
@@ -246,7 +246,7 @@ func (t *SpecArtifact) addSpec(ctx context.Context, changeID string, content map
 		result["requirements"] = reqResults
 	}
 
-	return jsonResult(result)
+	return mcp.JSONResult(result)
 }
 
 // addDesign creates a Design for the change (1:1, rejects duplicates).
@@ -270,7 +270,7 @@ func (t *SpecArtifact) addDesign(ctx context.Context, changeID string, content m
 		return nil, fmt.Errorf("creating design: %w", err)
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"type":    "design",
 		"id":      design.ID,
 		"message": "Created design",
@@ -326,7 +326,7 @@ func (t *SpecArtifact) addTask(ctx context.Context, changeID string, content map
 		}
 	}
 
-	return jsonResult(result)
+	return mcp.JSONResult(result)
 }
 
 // addRequirement creates a Requirement linked to a Spec (spec_id in content).
@@ -347,7 +347,7 @@ func (t *SpecArtifact) addRequirement(ctx context.Context, content map[string]an
 		return nil, fmt.Errorf("creating requirement: %w", err)
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"type":    "requirement",
 		"id":      req.ID,
 		"name":    req.Name,
@@ -374,7 +374,7 @@ func (t *SpecArtifact) addScenario(ctx context.Context, content map[string]any) 
 		return nil, fmt.Errorf("creating scenario: %w", err)
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"type":    "scenario",
 		"id":      scen.ID,
 		"name":    scen.Name,
@@ -419,7 +419,7 @@ func (t *SpecArtifact) addScenarioStep(ctx context.Context, content map[string]a
 		}
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"type":    "scenario_step",
 		"id":      obj.ID,
 		"message": "Created scenario step",
@@ -453,7 +453,7 @@ func (t *SpecArtifact) addTestCase(ctx context.Context, content map[string]any) 
 		}
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"type":    "test_case",
 		"id":      obj.ID,
 		"name":    key,
@@ -485,7 +485,7 @@ func (t *SpecArtifact) addConstitution(ctx context.Context, changeID string, con
 		return nil, fmt.Errorf("creating governed_by relationship: %w", err)
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"type":    "constitution",
 		"id":      obj.ID,
 		"name":    key,
@@ -602,7 +602,7 @@ func (t *SpecArtifact) addGenericEntity(ctx context.Context, typeName string, co
 		result["relationships_created"] = relResults
 	}
 
-	return jsonResult(result)
+	return mcp.JSONResult(result)
 }
 
 // createEntityRelationships creates relationships specified in content fields:
@@ -613,8 +613,112 @@ func (t *SpecArtifact) addGenericEntity(ctx context.Context, typeName string, co
 //
 // Relationships are deduplicated: if a relationship with the same type+src+dst
 // already exists, it is skipped rather than creating a duplicate.
+// Uses a single GetObjectEdges call to pre-fetch existing relationships for batch dedup.
 func (t *SpecArtifact) createEntityRelationships(ctx context.Context, typeName, entityID string, content map[string]any) ([]string, error) {
 	var results []string
+
+	// Pre-fetch all existing outgoing edges for this entity to batch dedup checks.
+	// We dual-index by both the raw edge DstID and the resolved object ID to handle
+	// the Emergent ID/CanonicalID mismatch: GetObjectEdges may return a different ID
+	// variant than FindByTypeAndKey or GetObject for the same entity.
+	existingEdges := make(map[string]map[string]bool) // relType → set of dstIDs (dual-indexed)
+	edges, err := t.client.GetObjectEdges(ctx, entityID, &graph.GetObjectEdgesOptions{
+		Direction: "outgoing",
+	})
+	if err == nil {
+		// Collect all unique destination IDs to resolve their canonical forms
+		dstIDSet := make(map[string]bool)
+		for _, rel := range edges.Outgoing {
+			dstIDSet[rel.DstID] = true
+		}
+		dstIDs := make([]string, 0, len(dstIDSet))
+		for id := range dstIDSet {
+			dstIDs = append(dstIDs, id)
+		}
+		// Resolve destination objects to get both ID variants
+		resolvedDstIdx := make(emergent.ObjectIndex)
+		if len(dstIDs) > 0 {
+			if dstObjs, err := t.client.GetObjects(ctx, dstIDs); err == nil {
+				resolvedDstIdx = emergent.NewObjectIndex(dstObjs)
+			}
+		}
+		for _, rel := range edges.Outgoing {
+			if existingEdges[rel.Type] == nil {
+				existingEdges[rel.Type] = make(map[string]bool)
+			}
+			existingEdges[rel.Type][rel.DstID] = true
+			// Also index by the resolved object's ID and CanonicalID
+			if obj := resolvedDstIdx[rel.DstID]; obj != nil {
+				existingEdges[rel.Type][obj.ID] = true
+				if obj.CanonicalID != "" {
+					existingEdges[rel.Type][obj.CanonicalID] = true
+				}
+			}
+		}
+	}
+	// Also fetch incoming edges for reverse relationships (e.g., uses_component ← context)
+	incomingEdges := make(map[string]map[string]bool) // relType → set of srcIDs (dual-indexed)
+	inEdges, err := t.client.GetObjectEdges(ctx, entityID, &graph.GetObjectEdgesOptions{
+		Direction: "incoming",
+	})
+	if err == nil {
+		// Collect all unique source IDs to resolve their canonical forms
+		srcIDSet := make(map[string]bool)
+		for _, rel := range inEdges.Incoming {
+			srcIDSet[rel.SrcID] = true
+		}
+		srcIDs := make([]string, 0, len(srcIDSet))
+		for id := range srcIDSet {
+			srcIDs = append(srcIDs, id)
+		}
+		// Resolve source objects to get both ID variants
+		resolvedSrcIdx := make(emergent.ObjectIndex)
+		if len(srcIDs) > 0 {
+			if srcObjs, err := t.client.GetObjects(ctx, srcIDs); err == nil {
+				resolvedSrcIdx = emergent.NewObjectIndex(srcObjs)
+			}
+		}
+		for _, rel := range inEdges.Incoming {
+			if incomingEdges[rel.Type] == nil {
+				incomingEdges[rel.Type] = make(map[string]bool)
+			}
+			incomingEdges[rel.Type][rel.SrcID] = true
+			// Also index by the resolved object's ID and CanonicalID
+			if obj := resolvedSrcIdx[rel.SrcID]; obj != nil {
+				incomingEdges[rel.Type][obj.ID] = true
+				if obj.CanonicalID != "" {
+					incomingEdges[rel.Type][obj.CanonicalID] = true
+				}
+			}
+		}
+	}
+
+	// hasEdge checks if an outgoing edge exists from srcID → dstID
+	hasOutgoing := func(relType, dstID string) bool {
+		if s, ok := existingEdges[relType]; ok {
+			return s[dstID]
+		}
+		return false
+	}
+
+	// ensureRel creates a relationship only if it doesn't already exist
+	ensureRel := func(relType, srcID, dstID string) (bool, error) {
+		// For outgoing from entityID, use cached edges
+		if srcID == entityID {
+			if hasOutgoing(relType, dstID) {
+				return false, nil
+			}
+		} else {
+			// For relationships where entityID is the dst (incoming)
+			if s, ok := incomingEdges[relType]; ok && s[srcID] {
+				return false, nil
+			}
+		}
+		if _, err := t.client.CreateRelationship(ctx, relType, srcID, dstID, nil); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
 
 	// Handle patterns: look up each by name and create uses_pattern relationship
 	if patternNames := getStringSlice(content, "patterns"); len(patternNames) > 0 {
@@ -628,7 +732,7 @@ func (t *SpecArtifact) createEntityRelationships(ctx context.Context, typeName, 
 				results = append(results, fmt.Sprintf("pattern %q not found", pName))
 				continue
 			}
-			created, err := t.ensureRelationship(ctx, emergent.RelUsesPattern, entityID, pattern.ID)
+			created, err := ensureRel(emergent.RelUsesPattern, entityID, pattern.ID)
 			if err != nil {
 				results = append(results, fmt.Sprintf("pattern %q link failed: %v", pName, err))
 				continue
@@ -644,7 +748,7 @@ func (t *SpecArtifact) createEntityRelationships(ctx context.Context, typeName, 
 	// Handle context_id: create uses_component (Context → this UIComponent)
 	if typeName == emergent.TypeUIComponent {
 		if ctxID := getString(content, "context_id"); ctxID != "" {
-			created, err := t.ensureRelationship(ctx, emergent.RelUsesComponent, ctxID, entityID)
+			created, err := ensureRel(emergent.RelUsesComponent, ctxID, entityID)
 			if err != nil {
 				return results, fmt.Errorf("creating uses_component: %w", err)
 			}
@@ -659,7 +763,7 @@ func (t *SpecArtifact) createEntityRelationships(ctx context.Context, typeName, 
 	// Handle parent_context_id: create nested_in (this Context → parent Context)
 	if typeName == emergent.TypeContext {
 		if parentID := getString(content, "parent_context_id"); parentID != "" {
-			created, err := t.ensureRelationship(ctx, emergent.RelNestedIn, entityID, parentID)
+			created, err := ensureRel(emergent.RelNestedIn, entityID, parentID)
 			if err != nil {
 				return results, fmt.Errorf("creating nested_in: %w", err)
 			}
@@ -675,7 +779,7 @@ func (t *SpecArtifact) createEntityRelationships(ctx context.Context, typeName, 
 	if typeName == emergent.TypeContext {
 		if compIDs := getStringSlice(content, "component_ids"); len(compIDs) > 0 {
 			for _, compID := range compIDs {
-				created, err := t.ensureRelationship(ctx, emergent.RelUsesComponent, entityID, compID)
+				created, err := ensureRel(emergent.RelUsesComponent, entityID, compID)
 				if err != nil {
 					results = append(results, fmt.Sprintf("uses_component → %s failed: %v", compID, err))
 					continue
@@ -691,7 +795,7 @@ func (t *SpecArtifact) createEntityRelationships(ctx context.Context, typeName, 
 
 	// Handle service_id: create belongs_to_service (this entity → Service)
 	if serviceID := getString(content, "service_id"); serviceID != "" {
-		created, err := t.ensureRelationship(ctx, emergent.RelBelongsToService, entityID, serviceID)
+		created, err := ensureRel(emergent.RelBelongsToService, entityID, serviceID)
 		if err != nil {
 			results = append(results, fmt.Sprintf("belongs_to_service → %s failed: %v", serviceID, err))
 		} else if created {
@@ -704,7 +808,7 @@ func (t *SpecArtifact) createEntityRelationships(ctx context.Context, typeName, 
 	// Handle model_ids: create uses_model (this entity → each DataModel)
 	if modelIDs := getStringSlice(content, "model_ids"); len(modelIDs) > 0 {
 		for _, modelID := range modelIDs {
-			created, err := t.ensureRelationship(ctx, emergent.RelUsesModel, entityID, modelID)
+			created, err := ensureRel(emergent.RelUsesModel, entityID, modelID)
 			if err != nil {
 				results = append(results, fmt.Sprintf("uses_model → %s failed: %v", modelID, err))
 				continue
@@ -721,7 +825,7 @@ func (t *SpecArtifact) createEntityRelationships(ctx context.Context, typeName, 
 	if typeName == emergent.TypeAction {
 		if ctxIDs := getStringSlice(content, "context_ids"); len(ctxIDs) > 0 {
 			for _, ctxID := range ctxIDs {
-				created, err := t.ensureRelationship(ctx, emergent.RelAvailableIn, entityID, ctxID)
+				created, err := ensureRel(emergent.RelAvailableIn, entityID, ctxID)
 				if err != nil {
 					results = append(results, fmt.Sprintf("available_in → %s failed: %v", ctxID, err))
 					continue
@@ -739,7 +843,7 @@ func (t *SpecArtifact) createEntityRelationships(ctx context.Context, typeName, 
 	if typeName == emergent.TypeService {
 		if apiIDs := getStringSlice(content, "api_ids"); len(apiIDs) > 0 {
 			for _, apiID := range apiIDs {
-				created, err := t.ensureRelationship(ctx, emergent.RelExposesAPI, entityID, apiID)
+				created, err := ensureRel(emergent.RelExposesAPI, entityID, apiID)
 				if err != nil {
 					results = append(results, fmt.Sprintf("exposes_api → %s failed: %v", apiID, err))
 					continue
@@ -823,14 +927,4 @@ func getStringSlice(m map[string]any, key string) []string {
 		}
 	}
 	return ss
-}
-
-func jsonResult(v any) (*mcp.ToolsCallResult, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("marshaling result: %w", err)
-	}
-	return &mcp.ToolsCallResult{
-		Content: []mcp.ContentBlock{mcp.TextContent(string(b))},
-	}, nil
 }

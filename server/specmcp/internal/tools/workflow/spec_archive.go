@@ -108,5 +108,5 @@ func (t *SpecArchive) Execute(ctx context.Context, params json.RawMessage) (*mcp
 		result["advisories"] = advisory
 	}
 
-	return jsonResult(result)
+	return mcp.JSONResult(result)
 }

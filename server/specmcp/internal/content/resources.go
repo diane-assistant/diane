@@ -57,14 +57,14 @@ func (r *GuardrailsResource) Read() (*mcp.ResourcesReadResult, error) {
 
 // --- specmcp://tool-reference resource ---
 
-// ToolReferenceResource exposes a quick-reference card for all 24 tools.
+// ToolReferenceResource exposes a quick-reference card for all 25 tools.
 type ToolReferenceResource struct{}
 
 func (r *ToolReferenceResource) Definition() mcp.ResourceDefinition {
 	return mcp.ResourceDefinition{
 		URI:         "specmcp://tool-reference",
 		Name:        "SpecMCP Tool Reference",
-		Description: "Quick-reference card for all 24 SpecMCP tools with parameters and usage notes",
+		Description: "Quick-reference card for all 25 SpecMCP tools with parameters and usage notes",
 		MimeType:    "text/markdown",
 	}
 }
@@ -281,7 +281,7 @@ Each guard returns a result with one of four severity levels.
 | # | Guard | Severity | Checks |
 |---|-------|----------|--------|
 | 1 | kebab_case_name | HARD_BLOCK | Name matches ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ |
-| 2 | constitution_required | SOFT_BLOCK | At least one Constitution exists in the project |
+| 2 | constitution_required | HARD_BLOCK | At least one Constitution exists in the project |
 | 3 | patterns_seeded | SOFT_BLOCK | At least one Pattern exists in the project |
 | 4 | context_discovery | SUGGESTION | At least one Context entity exists |
 | 5 | component_discovery | SUGGESTION | At least one UIComponent entity exists |
@@ -430,6 +430,12 @@ Verify change completeness, correctness, and coherence.
 - **Returns**: count of patterns created (15 built-in patterns)
 
 ## Constitution & Sync Tools
+
+### spec_create_constitution
+Create or update the project constitution (no change_id required).
+- **Required**: name (string), version (string), principles (string)
+- **Optional**: guardrails ([]string), testing_requirements (string), security_requirements (string), patterns_required ([]string), patterns_forbidden ([]string)
+- **Returns**: constitution entity with linked patterns
 
 ### spec_validate_constitution
 - **Required**: change_name (string)

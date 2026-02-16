@@ -82,6 +82,13 @@ func (t *SpecBatchArtifact) Execute(ctx context.Context, params json.RawMessage)
 
 	results := make([]map[string]any, 0, len(p.Artifacts))
 	for i, a := range p.Artifacts {
+		// Check for context cancellation between artifacts
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("batch cancelled after %d/%d artifacts: %w", i, len(p.Artifacts), ctx.Err())
+		default:
+		}
+
 		// Build the single-artifact params and delegate to the existing tool
 		singleParams := specArtifactParams{
 			ChangeID:     p.ChangeID,
@@ -119,7 +126,7 @@ func (t *SpecBatchArtifact) Execute(ctx context.Context, params json.RawMessage)
 			entry["error"] = true
 			results = append(results, entry)
 			// Return partial results up to the error
-			return jsonResult(map[string]any{
+			return mcp.JSONResult(map[string]any{
 				"completed": i,
 				"total":     len(p.Artifacts),
 				"error":     fmt.Sprintf("artifact %d failed", i),
@@ -130,7 +137,7 @@ func (t *SpecBatchArtifact) Execute(ctx context.Context, params json.RawMessage)
 		results = append(results, entry)
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"completed": len(p.Artifacts),
 		"total":     len(p.Artifacts),
 		"results":   results,

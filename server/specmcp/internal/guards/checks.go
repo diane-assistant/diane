@@ -13,15 +13,15 @@ var kebabCaseRegex = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
 // These guards run before a new Change can be created.
 
 // ConstitutionRequired ensures a Constitution exists in the project before any change is created.
-// This is a SOFT_BLOCK — the first change in a new project may need to create the constitution
-// itself, so the user can override with force=true.
+// This is a HARD_BLOCK — every project must have a constitution before changes can be created.
+// Use spec_create_constitution to bootstrap the project's constitution.
 var ConstitutionRequired = NewGuardFunc("constitution_required", func(_ context.Context, gctx *GuardContext) Result {
 	if gctx.HasConstitution {
 		return Pass("constitution_required")
 	}
-	return Fail("constitution_required", SoftBlock,
-		"No Constitution found in the project. A constitution defines project principles, guardrails, testing requirements, and pattern mandates. Changes should be governed by a constitution.",
-		"Create a constitution first using spec_artifact with artifact_type='constitution', or use force=true to skip this check for bootstrapping.",
+	return Fail("constitution_required", HardBlock,
+		"No Constitution found in the project. A constitution defines project principles, guardrails, testing requirements, and pattern mandates. Every project must have a constitution before changes can be created.",
+		"Create a constitution first using spec_create_constitution.",
 	)
 })
 

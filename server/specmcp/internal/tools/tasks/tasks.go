@@ -101,6 +101,13 @@ func (t *GenerateTasks) Execute(ctx context.Context, params json.RawMessage) (*m
 	created := make([]map[string]any, 0, len(p.Tasks))
 
 	for _, td := range p.Tasks {
+		// Check for context cancellation between task creations
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("task generation cancelled: %w", ctx.Err())
+		default:
+		}
+
 		task, err := t.client.CreateTask(ctx, p.ChangeID, &emergent.Task{
 			Number:             td.Number,
 			Description:        td.Description,
@@ -125,6 +132,13 @@ func (t *GenerateTasks) Execute(ctx context.Context, params json.RawMessage) (*m
 	// Now create relationships using the number→ID map
 	relCount := 0
 	for _, td := range p.Tasks {
+		// Check for context cancellation between relationship batches
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("task relationship creation cancelled: %w", ctx.Err())
+		default:
+		}
+
 		taskID := numberToID[td.Number]
 
 		// Create blocks relationships
@@ -165,7 +179,7 @@ func (t *GenerateTasks) Execute(ctx context.Context, params json.RawMessage) (*m
 		totalPoints += td.ComplexityPoints
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"tasks":              created,
 		"task_count":         len(created),
 		"relationship_count": relCount,
@@ -225,27 +239,84 @@ func (t *GetAvailableTasks) Execute(ctx context.Context, params json.RawMessage)
 		taskStatus[task.ID] = task.Status
 	}
 
+	// Batch-fetch all blocks and assigned_to relationships in one ExpandGraph call
+	// from the change, depth 2 (change → tasks → blocks/assigned_to targets)
+	blockedByMap := make(map[string][]string) // taskID → []blockerIDs
+	assignedSet := make(map[string]bool)      // taskIDs that have assignments
+
+	resp, err := t.client.ExpandGraph(ctx, &graph.GraphExpandRequest{
+		RootIDs:           []string{p.ChangeID},
+		Direction:         "outgoing",
+		MaxDepth:          2,
+		MaxNodes:          500,
+		MaxEdges:          1000,
+		RelationshipTypes: []string{emergent.RelHasTask, emergent.RelBlocks, emergent.RelAssignedTo},
+	})
+	if err == nil {
+		// Normalize edge IDs so SrcID/DstID reference the node's current .ID,
+		// which matches the task.ID from ListTasks. Fixes canonical vs version ID mismatch.
+		nodeIdx := emergent.NewNodeIndex(resp.Nodes)
+		emergent.CanonicalizeEdgeIDs(resp.Edges, nodeIdx)
+
+		for _, edge := range resp.Edges {
+			switch edge.Type {
+			case emergent.RelBlocks:
+				// edge.SrcID blocks edge.DstID
+				if _, ok := taskStatus[edge.DstID]; ok {
+					blockedByMap[edge.DstID] = append(blockedByMap[edge.DstID], edge.SrcID)
+				}
+			case emergent.RelAssignedTo:
+				if _, ok := taskStatus[edge.SrcID]; ok {
+					assignedSet[edge.SrcID] = true
+				}
+			}
+		}
+	} else {
+		// Fallback: individual checks (original behavior)
+		for _, task := range tasks {
+			if task.Status != emergent.StatusPending {
+				continue
+			}
+			blocked, err := t.isBlocked(ctx, task.ID, taskStatus)
+			if err != nil {
+				return nil, fmt.Errorf("checking if task %s is blocked: %w", task.Number, err)
+			}
+			if blocked {
+				blockedByMap[task.ID] = []string{"unknown"}
+			}
+			assigned, err := t.isAssigned(ctx, task.ID)
+			if err != nil {
+				return nil, fmt.Errorf("checking assignment for %s: %w", task.Number, err)
+			}
+			if assigned {
+				assignedSet[task.ID] = true
+			}
+		}
+	}
+
 	available := make([]map[string]any, 0)
 	for _, task := range tasks {
 		if task.Status != emergent.StatusPending {
 			continue
 		}
 
-		// Check if this task is blocked by any incomplete task
-		blocked, err := t.isBlocked(ctx, task.ID, taskStatus)
-		if err != nil {
-			return nil, fmt.Errorf("checking if task %s is blocked: %w", task.Number, err)
-		}
-		if blocked {
-			continue
+		// Check if blocked by any incomplete task
+		if blockers, ok := blockedByMap[task.ID]; ok {
+			isBlocked := false
+			for _, blockerID := range blockers {
+				status, ok := taskStatus[blockerID]
+				if !ok || status != emergent.StatusCompleted {
+					isBlocked = true
+					break
+				}
+			}
+			if isBlocked {
+				continue
+			}
 		}
 
 		// Check if already assigned
-		assigned, err := t.isAssigned(ctx, task.ID)
-		if err != nil {
-			return nil, fmt.Errorf("checking assignment for %s: %w", task.Number, err)
-		}
-		if assigned {
+		if assignedSet[task.ID] {
 			continue
 		}
 
@@ -264,7 +335,7 @@ func (t *GetAvailableTasks) Execute(ctx context.Context, params json.RawMessage)
 		return available[i]["number"].(string) < available[j]["number"].(string)
 	})
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"available_tasks": available,
 		"count":           len(available),
 	})
@@ -376,7 +447,7 @@ func (t *AssignTask) Execute(ctx context.Context, params json.RawMessage) (*mcp.
 		return nil, fmt.Errorf("updating task status: %w", err)
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"task_id":    p.TaskID,
 		"agent_id":   p.AgentID,
 		"number":     task.Number,
@@ -467,54 +538,83 @@ func (t *CompleteTask) Execute(ctx context.Context, params json.RawMessage) (*mc
 	}
 
 	// Find tasks that this task was blocking and check if they're now unblocked
+	// Use ExpandGraph to batch-fetch blocked tasks and all their blockers in one call
 	unblocked := make([]map[string]any, 0)
-	blocksRels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
-		Type:  emergent.RelBlocks,
-		SrcID: p.TaskID,
-		Limit: 50,
+	expandResp, err := t.client.ExpandGraph(ctx, &graph.GraphExpandRequest{
+		RootIDs:           []string{p.TaskID},
+		Direction:         "both",
+		MaxDepth:          2,
+		MaxNodes:          200,
+		MaxEdges:          500,
+		RelationshipTypes: []string{emergent.RelBlocks},
 	})
 	if err == nil {
-		for _, rel := range blocksRels {
-			// Check if the blocked task has any other incomplete blockers
-			otherBlockers, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
-				Type:  emergent.RelBlocks,
-				DstID: rel.DstID,
-				Limit: 50,
-			})
-			if err != nil {
-				continue
-			}
+		// Normalize edge IDs to match node primary IDs. Fixes canonical vs version ID mismatch.
+		nodeIdx := emergent.NewNodeIndex(expandResp.Nodes)
+		emergent.CanonicalizeEdgeIDs(expandResp.Edges, nodeIdx)
 
+		// Build a map of all nodes from the expand response (using normalized IDs)
+		nodeMap := make(map[string]*graph.ExpandNode)
+		for _, node := range expandResp.Nodes {
+			nodeMap[node.ID] = node
+		}
+
+		// Build an ID set for the completed task so edge matching works
+		// regardless of which ID variant the edge stores.
+		taskIDs := emergent.NewIDSet(p.TaskID, "")
+		// Also add canonical ID if available from the expand response
+		if node, ok := nodeIdx[p.TaskID]; ok {
+			taskIDs = emergent.NewIDSet(node.ID, node.CanonicalID)
+		}
+
+		// Find tasks this task directly blocks (outgoing blocks edges from this task)
+		blockedTaskIDs := make(map[string]bool)
+		for _, edge := range expandResp.Edges {
+			if taskIDs[edge.SrcID] && edge.Type == emergent.RelBlocks {
+				blockedTaskIDs[edge.DstID] = true
+			}
+		}
+
+		// For each blocked task, check if all OTHER blockers are completed
+		for blockedID := range blockedTaskIDs {
 			stillBlocked := false
-			for _, ob := range otherBlockers {
-				if ob.SrcID == p.TaskID {
-					continue // this is us, skip
-				}
-				blocker, err := t.client.GetTask(ctx, ob.SrcID)
-				if err != nil {
-					stillBlocked = true
-					break
-				}
-				if blocker.Status != emergent.StatusCompleted {
-					stillBlocked = true
-					break
+			for _, edge := range expandResp.Edges {
+				if edge.DstID == blockedID && edge.Type == emergent.RelBlocks && !taskIDs[edge.SrcID] {
+					// Another blocker — check its status from the expand nodes
+					if node, ok := nodeMap[edge.SrcID]; ok {
+						status, _ := node.Properties["status"].(string)
+						if status != emergent.StatusCompleted {
+							stillBlocked = true
+							break
+						}
+					} else {
+						// Unknown node — conservatively treat as blocked
+						stillBlocked = true
+						break
+					}
 				}
 			}
 
 			if !stillBlocked {
-				unblockedTask, err := t.client.GetTask(ctx, rel.DstID)
-				if err == nil {
-					unblocked = append(unblocked, map[string]any{
-						"id":          unblockedTask.ID,
-						"number":      unblockedTask.Number,
-						"description": unblockedTask.Description,
-					})
+				if node, ok := nodeMap[blockedID]; ok {
+					entry := map[string]any{
+						"id": blockedID,
+					}
+					if node.Properties != nil {
+						if num, ok := node.Properties["number"].(string); ok {
+							entry["number"] = num
+						}
+						if desc, ok := node.Properties["description"].(string); ok {
+							entry["description"] = desc
+						}
+					}
+					unblocked = append(unblocked, entry)
 				}
 			}
 		}
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"task_id":      p.TaskID,
 		"number":       task.Number,
 		"status":       emergent.StatusCompleted,
@@ -570,7 +670,7 @@ func (t *GetCriticalPath) Execute(ctx context.Context, params json.RawMessage) (
 		return nil, fmt.Errorf("listing tasks: %w", err)
 	}
 	if len(tasks) == 0 {
-		return jsonResult(map[string]any{
+		return mcp.JSONResult(map[string]any{
 			"critical_path":     []any{},
 			"total_complexity":  0,
 			"completed_points":  0,
@@ -586,22 +686,48 @@ func (t *GetCriticalPath) Execute(ctx context.Context, params json.RawMessage) (
 		taskByID[task.ID] = task
 	}
 
-	// Get all blocks relationships among these tasks
+	// Get all blocks relationships among these tasks using a single ExpandGraph call
 	blocksGraph := make(map[string][]string) // blocker → []blocked
 	blockedBy := make(map[string][]string)   // blocked → []blockers
-	for _, task := range tasks {
-		rels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
-			Type:  emergent.RelBlocks,
-			SrcID: task.ID,
-			Limit: 50,
-		})
-		if err != nil {
-			continue
+	expandResp, err := t.client.ExpandGraph(ctx, &graph.GraphExpandRequest{
+		RootIDs:           []string{p.ChangeID},
+		Direction:         "outgoing",
+		MaxDepth:          2,
+		MaxNodes:          500,
+		MaxEdges:          1000,
+		RelationshipTypes: []string{emergent.RelHasTask, emergent.RelBlocks},
+	})
+	if err == nil {
+		// Normalize edge IDs to match node/task primary IDs. Fixes canonical vs version ID mismatch.
+		nodeIdx := emergent.NewNodeIndex(expandResp.Nodes)
+		emergent.CanonicalizeEdgeIDs(expandResp.Edges, nodeIdx)
+
+		for _, edge := range expandResp.Edges {
+			if edge.Type == emergent.RelBlocks {
+				if _, ok := taskByID[edge.SrcID]; ok {
+					if _, ok := taskByID[edge.DstID]; ok {
+						blocksGraph[edge.SrcID] = append(blocksGraph[edge.SrcID], edge.DstID)
+						blockedBy[edge.DstID] = append(blockedBy[edge.DstID], edge.SrcID)
+					}
+				}
+			}
 		}
-		for _, rel := range rels {
-			if _, ok := taskByID[rel.DstID]; ok {
-				blocksGraph[task.ID] = append(blocksGraph[task.ID], rel.DstID)
-				blockedBy[rel.DstID] = append(blockedBy[rel.DstID], task.ID)
+	} else {
+		// Fallback: individual relationship lookups
+		for _, task := range tasks {
+			rels, err := t.client.ListRelationships(ctx, &graph.ListRelationshipsOptions{
+				Type:  emergent.RelBlocks,
+				SrcID: task.ID,
+				Limit: 50,
+			})
+			if err != nil {
+				continue
+			}
+			for _, rel := range rels {
+				if _, ok := taskByID[rel.DstID]; ok {
+					blocksGraph[task.ID] = append(blocksGraph[task.ID], rel.DstID)
+					blockedBy[rel.DstID] = append(blockedBy[rel.DstID], task.ID)
+				}
 			}
 		}
 	}
@@ -700,7 +826,7 @@ func (t *GetCriticalPath) Execute(ctx context.Context, params json.RawMessage) (
 		}
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"critical_path":      criticalPath,
 		"critical_path_cost": maxLen,
 		"progress": map[string]any{
@@ -725,16 +851,4 @@ func safePercent(num, denom int) float64 {
 		return 0
 	}
 	return float64(num) / float64(denom) * 100
-}
-
-// --- shared helpers ---
-
-func jsonResult(v any) (*mcp.ToolsCallResult, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("marshaling result: %w", err)
-	}
-	return &mcp.ToolsCallResult{
-		Content: []mcp.ContentBlock{mcp.TextContent(string(b))},
-	}, nil
 }

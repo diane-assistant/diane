@@ -239,7 +239,7 @@ func (t *SeedPatterns) Execute(ctx context.Context, params json.RawMessage) (*mc
 		})
 	}
 
-	return jsonResult(map[string]any{
+	return mcp.JSONResult(map[string]any{
 		"created":       created,
 		"created_count": len(created),
 		"skipped":       skipped,

@@ -159,7 +159,7 @@ The proposal captures the **intent** of the change — why it needs to happen.
 
 ### Guardrails
 - Change name must be **kebab-case** (hard block)
-- A **Constitution** should exist (soft block, override with force=true)
+- A **Constitution** must exist (hard block — use ` + "`spec_create_constitution`" + ` to bootstrap)
 - **Patterns** should be seeded (soft block, override with force=true)
 
 ### Next stage
@@ -365,7 +365,7 @@ SpecMCP enforces guardrails at three points:
 | Guard | Severity | What it checks |
 |-------|----------|---------------|
 | kebab_case_name | HARD_BLOCK | Change name must be kebab-case |
-| constitution_required | SOFT_BLOCK | Project should have a constitution |
+| constitution_required | HARD_BLOCK | Project should have a constitution |
 | patterns_seeded | SOFT_BLOCK | Project should have patterns |
 | context_discovery | SUGGESTION | Contexts should be mapped |
 | component_discovery | SUGGESTION | Components should be mapped |
@@ -419,7 +419,8 @@ SpecMCP enforces guardrails at three points:
 - **spec_apply_pattern** — Link a pattern to a change
 - **spec_seed_patterns** — Seed 15 built-in patterns
 
-### Constitution (1 tool)
+### Constitution (2 tools)
+- **spec_create_constitution** — Create or update the project constitution (no change_id required)
 - **spec_validate_constitution** — Check change compliance against constitution
 
 ### Sync (3 tools)
@@ -431,7 +432,7 @@ SpecMCP enforces guardrails at three points:
 
 1. **Bootstrap** (once per project):
    - Seed patterns: ` + "`spec_seed_patterns`" + `
-   - Create constitution: ` + "`spec_artifact`" + ` with artifact_type="constitution"
+   - Create constitution: ` + "`spec_create_constitution`" + ` (no change_id required)
 
 2. **Start a change**:
    - ` + "`spec_new`" + ` with a kebab-case name
@@ -495,7 +496,7 @@ Guardrails are automated checks that run at key points in the workflow to preven
 
 ## Pre-Change Guards (run on spec_new)
 1. **kebab_case_name** [HARD_BLOCK] — Name must be lowercase letters, digits, hyphens
-2. **constitution_required** [SOFT_BLOCK] — Project should have a constitution
+2. **constitution_required** [HARD_BLOCK] — Project must have a constitution (use spec_create_constitution)
 3. **patterns_seeded** [SOFT_BLOCK] — Project should have patterns seeded
 4. **context_discovery** [SUGGESTION] — Map interaction surfaces first
 5. **component_discovery** [SUGGESTION] — Map reusable components first
@@ -557,6 +558,7 @@ const guideToolsSection = `# SpecMCP Tools Reference
 ## Constitution & Sync Tools
 | Tool | Purpose |
 |------|---------|
+| spec_create_constitution | Create or update project constitution |
 | spec_validate_constitution | Check constitution compliance |
 | spec_sync_status | Check graph sync state |
 | spec_sync | Sync graph with codebase |
