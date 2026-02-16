@@ -20,7 +20,9 @@ type MCPHTTPServer struct {
 	sessions        map[string]*mcpSession
 	sessionsMu      sync.RWMutex
 	server          *http.Server
+	secureServer    *http.Server
 	port            int
+	securePort      int
 	routeRegistrars []func(*http.ServeMux)
 	tlsConfig       *tls.Config
 	tlsCertPath     string
@@ -69,12 +71,13 @@ type MCPError struct {
 }
 
 // NewMCPHTTPServer creates a new MCP HTTP server
-func NewMCPHTTPServer(statusProvider StatusProvider, mcpHandler MCPHandler, port int) *MCPHTTPServer {
+func NewMCPHTTPServer(statusProvider StatusProvider, mcpHandler MCPHandler, port int, securePort int) *MCPHTTPServer {
 	return &MCPHTTPServer{
 		statusProvider:  statusProvider,
 		mcpHandler:      mcpHandler,
 		sessions:        make(map[string]*mcpSession),
 		port:            port,
+		securePort:      securePort,
 		routeRegistrars: make([]func(*http.ServeMux), 0),
 	}
 }
@@ -115,24 +118,41 @@ func (s *MCPHTTPServer) Start() error {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
+	// Start main HTTP server (always)
 	s.server = &http.Server{
-		Addr:      fmt.Sprintf(":%d", s.port),
-		Handler:   s.corsMiddleware(mux),
-		TLSConfig: s.tlsConfig,
+		Addr:    fmt.Sprintf(":%d", s.port),
+		Handler: s.corsMiddleware(mux),
 	}
 
 	go func() {
-		slog.Info("MCP HTTP server listening", "port", s.port, "tls", s.tlsConfig != nil)
-		var err error
-		if s.tlsConfig != nil && s.tlsCertPath != "" && s.tlsKeyPath != "" {
-			err = s.server.ListenAndServeTLS(s.tlsCertPath, s.tlsKeyPath)
-		} else {
-			err = s.server.ListenAndServe()
-		}
-		if err != nil && err != http.ErrServerClosed {
+		slog.Info("MCP HTTP server listening", "port", s.port)
+		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("MCP HTTP server error", "error", err)
 		}
 	}()
+
+	// Start secure HTTPS server (if configured)
+	if s.tlsConfig != nil && s.securePort > 0 {
+		s.secureServer = &http.Server{
+			Addr:      fmt.Sprintf(":%d", s.securePort),
+			Handler:   s.corsMiddleware(mux),
+			TLSConfig: s.tlsConfig,
+		}
+
+		go func() {
+			slog.Info("MCP HTTPS server listening", "port", s.securePort)
+			var err error
+			if s.tlsCertPath != "" && s.tlsKeyPath != "" {
+				err = s.secureServer.ListenAndServeTLS(s.tlsCertPath, s.tlsKeyPath)
+			} else {
+				// Should not happen if tlsConfig is set correctly with certs
+				err = s.secureServer.ListenAndServeTLS("", "")
+			}
+			if err != nil && err != http.ErrServerClosed {
+				slog.Error("MCP HTTPS server error", "error", err)
+			}
+		}()
+	}
 
 	// Start session cleanup goroutine
 	go s.cleanupSessions()
@@ -142,10 +162,23 @@ func (s *MCPHTTPServer) Start() error {
 
 // Stop stops the MCP HTTP server
 func (s *MCPHTTPServer) Stop() error {
+	var err error
 	if s.server != nil {
-		return s.server.Close()
+		if e := s.server.Close(); e != nil {
+			err = e
+		}
 	}
-	return nil
+	if s.secureServer != nil {
+		if e := s.secureServer.Close(); e != nil {
+			// Combine errors if both fail?
+			if err == nil {
+				err = e
+			} else {
+				err = fmt.Errorf("%v; %v", err, e)
+			}
+		}
+	}
+	return err
 }
 
 // corsMiddleware adds CORS headers

@@ -119,10 +119,11 @@ func ctlSlavePair(masterURL string) {
 	if !strings.HasPrefix(masterURL, "http://") && !strings.HasPrefix(masterURL, "https://") {
 		masterURL = "https://" + masterURL
 	}
-	// If user explicitly specified http:// with port 8765, upgrade to https://
+	// If user explicitly specified http:// with port 8765, upgrade to https:// and switch to secure port 8766
 	if strings.HasPrefix(masterURL, "http://") && strings.Contains(masterURL, ":8765") {
 		masterURL = strings.Replace(masterURL, "http://", "https://", 1)
-		fmt.Println("Note: Upgrading connection to HTTPS for WebSocket server")
+		masterURL = strings.Replace(masterURL, ":8765", ":8766", 1)
+		fmt.Println("Note: Upgrading connection to HTTPS on port 8766 for secure pairing")
 	}
 
 	u, err := url.Parse(masterURL)
@@ -197,13 +198,13 @@ func ctlSlavePair(masterURL string) {
 			if resp.StatusCode == http.StatusNotFound {
 				fmt.Printf("\r\033[KError: Master returned 404 (Not Found).\n")
 				fmt.Println("Possible causes:")
-				fmt.Println("1. Master is running an old version (upgrade to v1.10.0+)")
-				fmt.Println("2. You are connecting to the wrong port (try 8765 for pairing)")
+				fmt.Println("1. Master is running an old version (upgrade to v1.14.5+)")
+				fmt.Println("2. You are connecting to the wrong port (try 8766 for secure pairing)")
 				fmt.Println("3. API endpoint path is incorrect")
 			} else if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 				fmt.Printf("\r\033[KError: Master returned %d (Unauthorized/Forbidden).\n", resp.StatusCode)
-				fmt.Println("You are likely connecting to the HTTP API port instead of the pairing port.")
-				fmt.Println("Use HTTPS port 8765 for pairing: diane slave pair https://master-hostname:8765")
+				fmt.Println("You are likely connecting to the HTTP API port instead of the secure pairing port.")
+				fmt.Println("Use HTTPS port 8766 for pairing: diane slave pair https://master-hostname:8766")
 			} else {
 				fmt.Printf("\r\033[KError from master: %s (Status %d)\n", string(body), resp.StatusCode)
 			}
@@ -214,8 +215,8 @@ func ctlSlavePair(masterURL string) {
 
 		fmt.Println("\n\nEnsure master is running:")
 		fmt.Println("1. Check if 'diane serve' is running on the master machine")
-		fmt.Println("2. Verify port 8765 is open and accessible")
-		fmt.Println("3. Ensure master version is v1.10.0 or later")
+		fmt.Println("2. Verify port 8766 is open and accessible")
+		fmt.Println("3. Ensure master version is v1.14.5 or later")
 		fmt.Println("\nRetrying in 5 seconds...")
 		time.Sleep(5 * time.Second)
 	}

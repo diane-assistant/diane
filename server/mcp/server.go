@@ -1713,7 +1713,8 @@ func main() {
 
 	// Start the MCP HTTP/SSE server for network-based MCP clients
 	mcpHandler := &MCPHandlerAdapter{statusProvider: statusProvider}
-	mcpHTTPServer = api.NewMCPHTTPServer(statusProvider, mcpHandler, 8765)
+	// Use port 8765 for HTTP (standard) and 8766 for HTTPS (secure/slave)
+	mcpHTTPServer = api.NewMCPHTTPServer(statusProvider, mcpHandler, 8765, 8766)
 
 	// Register slave routes on the public-facing MCP server so slaves can pair remotely
 	// This exposes /api/slaves/... endpoints
@@ -1760,6 +1761,7 @@ func main() {
 		slog.Warn("Failed to start MCP HTTP server", "error", err)
 	} else {
 		slog.Info("MCP HTTP server started", "port", 8765)
+		slog.Info("MCP HTTPS server started", "port", 8766)
 	}
 	defer func() {
 		if mcpHTTPServer != nil {
@@ -1788,6 +1790,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Diane %s running in serve mode (pid %d)\n", Version, os.Getpid())
 		fmt.Fprintf(os.Stderr, "  Unix socket: ~/.diane/diane.sock\n")
 		fmt.Fprintf(os.Stderr, "  MCP HTTP: http://localhost:8765\n")
+		fmt.Fprintf(os.Stderr, "  MCP HTTPS: https://localhost:8766 (secure/slave)\n")
 		if cfg.HTTP.Port > 0 {
 			if cfg.HTTP.APIKey != "" {
 				fmt.Fprintf(os.Stderr, "  Remote API: http://0.0.0.0:%d (API key auth)\n", cfg.HTTP.Port)
