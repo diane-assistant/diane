@@ -38,6 +38,9 @@ func runCTLCommand(args []string) bool {
 		fmt.Printf("diane %s\n", Version)
 		os.Exit(0)
 
+	case "upgrade":
+		ctlHandleUpgradeCommand(args)
+
 	case "info":
 		ctlHandleInfoCommand(client)
 
@@ -96,6 +99,9 @@ func runCTLCommand(args []string) bool {
 
 	case "auth":
 		ctlHandleAuthCommand(client, args[2:])
+
+	case "slave":
+		ctlHandleSlaveCommand(client, args[2:])
 
 	case "pair":
 		ctlHandlePairCommand()
@@ -1410,6 +1416,7 @@ Control Commands:
   reload             Reload MCP configuration
   restart <name>     Restart a specific MCP server
   pair               Show a time-based pairing code for connecting apps
+  upgrade            Upgrade to the latest version
   version            Show version
 
 MCP Commands:

@@ -56,6 +56,173 @@ func (c *Client) Health() error {
 	return nil
 }
 
+// --- Slave Management Methods ---
+
+// GetSlaves retrieves all registered slave servers
+func (c *Client) GetSlaves() ([]SlaveInfo, error) {
+	resp, err := c.httpClient.Get("http://unix/slaves")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get slaves: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get slaves: status %d", resp.StatusCode)
+	}
+
+	var slaves []SlaveInfo
+	if err := json.NewDecoder(resp.Body).Decode(&slaves); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return slaves, nil
+}
+
+// GetPendingPairingRequests retrieves all pending pairing requests
+func (c *Client) GetPendingPairingRequests() ([]PairingRequest, error) {
+	resp, err := c.httpClient.Get("http://unix/slaves/pending")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pending requests: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get pending requests: status %d", resp.StatusCode)
+	}
+
+	var requests []PairingRequest
+	if err := json.NewDecoder(resp.Body).Decode(&requests); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return requests, nil
+}
+
+// ApprovePairingResponse represents the response from approving a pairing request
+type ApprovePairingResponse struct {
+	Success     bool   `json:"success"`
+	Message     string `json:"message"`
+	Certificate string `json:"certificate"`
+	CACert      string `json:"ca_cert"`
+}
+
+// ApprovePairingRequest approves a pairing request
+func (c *Client) ApprovePairingRequest(hostname, code string) (*ApprovePairingResponse, error) {
+	req := ApproveRequestBody{
+		Hostname:    hostname,
+		PairingCode: code,
+	}
+	body, _ := json.Marshal(req)
+
+	resp, err := c.httpClient.Post("http://unix/slaves/approve", "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to approve request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if errResp.Error != "" {
+			return nil, fmt.Errorf("approval failed: %s", errResp.Error)
+		}
+		return nil, fmt.Errorf("approval failed: status %d", resp.StatusCode)
+	}
+
+	var result ApprovePairingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// DenyPairingRequest denies a pairing request
+func (c *Client) DenyPairingRequest(hostname, code string) error {
+	req := ApproveRequestBody{
+		Hostname:    hostname,
+		PairingCode: code,
+	}
+	body, _ := json.Marshal(req)
+
+	resp, err := c.httpClient.Post("http://unix/slaves/deny", "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to deny request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if errResp.Error != "" {
+			return fmt.Errorf("denial failed: %s", errResp.Error)
+		}
+		return fmt.Errorf("denial failed: status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// RevokeSlave revokes a slave's credentials
+func (c *Client) RevokeSlave(hostname string) error {
+	req := RevokeRequestBody{
+		Hostname: hostname,
+		Reason:   "Revoked via CLI",
+	}
+	body, _ := json.Marshal(req)
+
+	resp, err := c.httpClient.Post("http://unix/slaves/revoke", "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to revoke slave: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if errResp.Error != "" {
+			return fmt.Errorf("revocation failed: %s", errResp.Error)
+		}
+		return fmt.Errorf("revocation failed: status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// RevokedCredentialInfo represents information about a revoked credential
+type RevokedCredentialInfo struct {
+	Hostname   string `json:"hostname"`
+	CertSerial string `json:"cert_serial"`
+	RevokedAt  string `json:"revoked_at"`
+	Reason     string `json:"reason"`
+}
+
+// GetRevokedSlaves retrieves list of revoked slave credentials
+func (c *Client) GetRevokedSlaves() ([]RevokedCredentialInfo, error) {
+	resp, err := c.httpClient.Get("http://unix/slaves/revoked")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get revoked slaves: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get revoked slaves: status %d", resp.StatusCode)
+	}
+
+	var revoked []RevokedCredentialInfo
+	if err := json.NewDecoder(resp.Body).Decode(&revoked); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return revoked, nil
+}
+
 // GetStatus returns the full Diane status
 func (c *Client) GetStatus() (*Status, error) {
 	resp, err := c.httpClient.Get("http://unix/status")
