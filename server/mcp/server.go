@@ -1720,7 +1720,15 @@ func main() {
 	mcpHTTPServer.RegisterRoutes(func(mux *http.ServeMux) {
 		slaveMux := http.NewServeMux()
 		api.RegisterSlaveRoutes(slaveMux, apiServer)
-		mux.Handle("/api/", http.StripPrefix("/api", slaveMux))
+
+		// Wrap with logging
+		handler := http.StripPrefix("/api", slaveMux)
+		loggingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			slog.Info("DEBUG: Request to /api prefix", "path", r.URL.Path, "method", r.Method)
+			handler.ServeHTTP(w, r)
+		})
+
+		mux.Handle("/api/", loggingHandler)
 	})
 
 	if err := mcpHTTPServer.Start(); err != nil {

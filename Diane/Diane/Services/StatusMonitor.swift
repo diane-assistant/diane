@@ -254,7 +254,9 @@ class StatusMonitor: ObservableObject {
         guard let client else { return }
         
         do {
+            logger.info("DEBUG: Fetching pending pairing requests...")
             let newRequests = try await client.getPendingPairingRequests()
+            logger.info("DEBUG: Fetched \(newRequests.count) pending requests: \(newRequests.map { $0.hostname })")
             
             // Check if there are new requests (for notifications)
             let previousCodes = Set(pendingPairingRequests.map { $0.pairingCode })

@@ -945,7 +945,11 @@ class DianeClient: DianeClientProtocol {
     
     /// Get pending pairing requests
     func getPendingPairingRequests() async throws -> [PairingRequest] {
+        logger.info("DEBUG: Requesting GET /slaves/pending")
         let data = try await request("/slaves/pending", timeout: 5)
+        if let str = String(data: data, encoding: .utf8) {
+            logger.info("DEBUG: Response from /slaves/pending: \(str)")
+        }
         return try JSONDecoder().decode([PairingRequest].self, from: data)
     }
     

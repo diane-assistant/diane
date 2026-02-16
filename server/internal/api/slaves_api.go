@@ -102,17 +102,20 @@ func (s *Server) handleSlaves(w http.ResponseWriter, r *http.Request) {
 
 // handleSlavePending handles GET /api/slaves/pending - list pending pairing requests
 func (s *Server) handlePendingSlaves(w http.ResponseWriter, r *http.Request) {
+	slog.Info("DEBUG: Handling GET /api/slaves/pending")
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	if s.slaveManager == nil {
+		slog.Error("DEBUG: Slave manager is nil")
 		http.Error(w, "Slave manager not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	pendingReqs := s.slaveManager.GetPairingService().GetPendingRequests()
+	slog.Info("DEBUG: Found pending requests", "count", len(pendingReqs))
 
 	response := make([]PairingRequest, 0, len(pendingReqs))
 	for _, req := range pendingReqs {
@@ -132,6 +135,7 @@ func (s *Server) handlePendingSlaves(w http.ResponseWriter, r *http.Request) {
 
 // handleSlavePair handles POST /api/slaves/pair - initiate pairing
 func (s *Server) handlePairSlave(w http.ResponseWriter, r *http.Request) {
+	slog.Info("DEBUG: Handling POST /api/slaves/pair")
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -139,9 +143,11 @@ func (s *Server) handlePairSlave(w http.ResponseWriter, r *http.Request) {
 
 	var req PairRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Error("DEBUG: Failed to decode pair request body", "error", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	slog.Info("DEBUG: Decoded pair request", "hostname", req.Hostname, "platform", req.Platform)
 
 	if req.Hostname == "" {
 		http.Error(w, "hostname is required", http.StatusBadRequest)
