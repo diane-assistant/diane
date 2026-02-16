@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -21,6 +22,9 @@ type MCPHTTPServer struct {
 	server          *http.Server
 	port            int
 	routeRegistrars []func(*http.ServeMux)
+	tlsConfig       *tls.Config
+	tlsCertPath     string
+	tlsKeyPath      string
 }
 
 // MCPHandler interface for handling MCP requests
@@ -80,6 +84,13 @@ func (s *MCPHTTPServer) RegisterRoutes(fn func(*http.ServeMux)) {
 	s.routeRegistrars = append(s.routeRegistrars, fn)
 }
 
+// SetTLS configures TLS for the server
+func (s *MCPHTTPServer) SetTLS(tlsConfig *tls.Config, certPath, keyPath string) {
+	s.tlsConfig = tlsConfig
+	s.tlsCertPath = certPath
+	s.tlsKeyPath = keyPath
+}
+
 // Start starts the MCP HTTP server
 func (s *MCPHTTPServer) Start() error {
 	mux := http.NewServeMux()
@@ -105,13 +116,20 @@ func (s *MCPHTTPServer) Start() error {
 	})
 
 	s.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.port),
-		Handler: s.corsMiddleware(mux),
+		Addr:      fmt.Sprintf(":%d", s.port),
+		Handler:   s.corsMiddleware(mux),
+		TLSConfig: s.tlsConfig,
 	}
 
 	go func() {
-		slog.Info("MCP HTTP server listening", "port", s.port)
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Info("MCP HTTP server listening", "port", s.port, "tls", s.tlsConfig != nil)
+		var err error
+		if s.tlsConfig != nil && s.tlsCertPath != "" && s.tlsKeyPath != "" {
+			err = s.server.ListenAndServeTLS(s.tlsCertPath, s.tlsKeyPath)
+		} else {
+			err = s.server.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			slog.Error("MCP HTTP server error", "error", err)
 		}
 	}()

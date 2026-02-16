@@ -43,6 +43,7 @@ func (m *Manager) StartServer(addr string, ca *CertificateAuthority) error {
 	}
 
 	m.server = server
+	slog.Info("Slave server initialized", "addr", addr)
 	return nil
 }
 

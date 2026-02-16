@@ -1,0 +1,8 @@
+{
+    "mcpServers": {
+        "diane-work": {
+            "type": "sse",
+            "url": "http://mcj-emergent:8765/mcp/sse?context=work-diane"
+        }
+    }
+}

@@ -68,9 +68,30 @@ func NewServer(ca *CertificateAuthority, registry *Registry, database *db.DB, pa
 }
 
 // Start begins listening for slave connections
+// DEPRECATED: This starts its own server which conflicts with the MCP HTTP server
+// Use RegisterHandlers and GetTLSConfig instead
 func Start(addr string, ca *CertificateAuthority, registry *Registry, database *db.DB, pairing *PairingService) (*Server, error) {
 	srv := NewServer(ca, registry, database, pairing)
 
+	// Start heartbeat monitor
+	srv.startHeartbeatMonitor()
+
+	// Note: No longer starting a separate HTTP server
+	// Handlers should be registered with the main MCP HTTP server
+	slog.Info("Slave server initialized (handlers not bound)", "addr", addr)
+
+	return srv, nil
+}
+
+// RegisterHandlers registers the slave WebSocket and pairing handlers with the given mux
+func (s *Server) RegisterHandlers(mux *http.ServeMux) {
+	mux.HandleFunc("/slave/connect", s.handleConnect)
+	mux.HandleFunc("/api/slaves/pair", s.handlePair)
+	mux.HandleFunc("/api/slaves/pair/", s.handlePairStatus)
+}
+
+// GetTLSConfig returns the TLS configuration for slave connections
+func (s *Server) GetTLSConfig() (*tls.Config, error) {
 	// Create TLS config with optional client certificate authentication
 	// This allows pairing requests (without cert) to proceed
 	tlsConfig := &tls.Config{
@@ -80,46 +101,18 @@ func Start(addr string, ca *CertificateAuthority, registry *Registry, database *
 	}
 
 	// Add CA certificate to client CA pool
-	caCert, err := ca.GetCertificate()
+	caCert, err := s.ca.GetCertificate()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get CA certificate: %w", err)
 	}
 	tlsConfig.ClientCAs.AddCert(caCert)
 
-	// Setup HTTP server with WebSocket handler and pairing endpoints
-	mux := http.NewServeMux()
-	mux.HandleFunc("/slave/connect", srv.handleConnect)
-	mux.HandleFunc("/api/slaves/pair", srv.handlePair)
-	mux.HandleFunc("/api/slaves/pair/", srv.handlePairStatus)
+	return tlsConfig, nil
+}
 
-	srv.server = &http.Server{
-		Addr:      addr,
-		Handler:   mux,
-		TLSConfig: tlsConfig,
-	}
-
-	// Start heartbeat monitor
-	srv.startHeartbeatMonitor()
-
-	// Start server in background
-	srv.wg.Add(1)
-	go func() {
-		defer srv.wg.Done()
-		slog.Info("Starting slave WebSocket server", "addr", addr)
-
-		// Load CA cert and key for TLS
-		caCertPath, caKeyPath, err := ca.GetPaths()
-		if err != nil {
-			slog.Error("Failed to get CA paths", "error", err)
-			return
-		}
-
-		if err := srv.server.ListenAndServeTLS(caCertPath, caKeyPath); err != nil && err != http.ErrServerClosed {
-			slog.Error("Slave server error", "error", err)
-		}
-	}()
-
-	return srv, nil
+// GetCertPaths returns the paths to the CA certificate and key files
+func (s *Server) GetCertPaths() (certPath, keyPath string, err error) {
+	return s.ca.GetPaths()
 }
 
 // handleConnect handles WebSocket upgrade and slave connection

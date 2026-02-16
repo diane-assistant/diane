@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json",
+  "mcpServers": {
+    "diane-work": {
+      "url": "http://mcj-emergent:8765/mcp/sse?context=work-diane"
+    }
+  }
+}

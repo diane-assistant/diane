@@ -1580,11 +1580,11 @@ func main() {
 			if err != nil {
 				slog.Warn("Failed to initialize slave manager", "error", err)
 			} else {
-				// Start WebSocket server for slave connections on port 8765
+				// Initialize the slave server (doesn't start HTTP yet, just sets up handlers)
 				if err := slaveManager.StartServer(":8765", ca); err != nil {
-					slog.Warn("Failed to start slave WebSocket server", "error", err)
+					slog.Warn("Failed to initialize slave server", "error", err)
 				} else {
-					slog.Info("Slave manager initialized and WebSocket server started on port 8765")
+					slog.Info("Slave manager initialized")
 				}
 			}
 		}
@@ -1730,6 +1730,31 @@ func main() {
 
 		mux.Handle("/api/", loggingHandler)
 	})
+
+	// If slave manager is initialized, register its handlers and configure TLS
+	if slaveManager != nil {
+		slaveServer := slaveManager.GetServer()
+		if slaveServer != nil {
+			// Register slave WebSocket and pairing handlers
+			mcpHTTPServer.RegisterRoutes(func(mux *http.ServeMux) {
+				slaveServer.RegisterHandlers(mux)
+			})
+
+			// Configure TLS for client certificate authentication
+			tlsConfig, err := slaveServer.GetTLSConfig()
+			if err != nil {
+				slog.Warn("Failed to get TLS config from slave server", "error", err)
+			} else {
+				certPath, keyPath, err := slaveServer.GetCertPaths()
+				if err != nil {
+					slog.Warn("Failed to get cert paths from slave server", "error", err)
+				} else {
+					mcpHTTPServer.SetTLS(tlsConfig, certPath, keyPath)
+					slog.Info("MCP HTTP server configured with TLS for slave connections")
+				}
+			}
+		}
+	}
 
 	if err := mcpHTTPServer.Start(); err != nil {
 		slog.Warn("Failed to start MCP HTTP server", "error", err)
