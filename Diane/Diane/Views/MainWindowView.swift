@@ -109,32 +109,91 @@ struct MainWindowView: View {
     /// Toolbar controls for the detail view
     private var toolbarControls: some View {
         HStack(spacing: 8) {
-            if statusMonitor.isRemoteMode {
-                // Remote mode: show connection indicator, no start/stop/restart
-                if case .connected = statusMonitor.connectionState {
-                    Label("Remote", systemImage: "network")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            // Connection status indicator (always visible)
+            serverStatusView
+            
+            // Local server controls (start/restart)
+            if !statusMonitor.isRemoteMode {
+                if statusMonitor.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                } else if case .connected = statusMonitor.connectionState {
+                    Button {
+                        Task { await statusMonitor.restartDiane() }
+                    } label: {
+                        Label("Restart", systemImage: "arrow.clockwise")
+                    }
+                    .help("Restart Diane")
+                } else {
+                    Button {
+                        Task { await statusMonitor.startDiane() }
+                    } label: {
+                        Label("Start", systemImage: "play.fill")
+                    }
+                    .help("Start Diane")
                 }
-            } else if statusMonitor.isLoading {
-                ProgressView()
-                    .scaleEffect(0.6)
-            } else if case .connected = statusMonitor.connectionState {
-                Button {
-                    Task { await statusMonitor.restartDiane() }
-                } label: {
-                    Label("Restart", systemImage: "arrow.clockwise")
-                }
-                .help("Restart Diane")
-            } else {
-                Button {
-                    Task { await statusMonitor.startDiane() }
-                } label: {
-                    Label("Start", systemImage: "play.fill")
-                }
-                .help("Start Diane")
             }
         }
+    }
+    
+    /// Server status indicator with server list menu
+    @State private var showServerList = false
+    
+    private var serverStatusView: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+            
+            Text(statusMonitor.serverDisplayName)
+                .font(.caption)
+                .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            showServerList.toggle()
+        }
+        .popover(isPresented: $showServerList) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Servers")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                
+                Divider()
+                
+                Button {
+                    showServerList = false
+                } label: {
+                    HStack {
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 6, height: 6)
+                        
+                        Text(statusMonitor.serverDisplayName)
+                            .font(.system(size: 13))
+                        
+                        Spacer()
+                        
+                        if case .connected = statusMonitor.connectionState {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
+                .background(Color.primary.opacity(0.05))
+                .padding(.bottom, 8)
+            }
+            .frame(width: 200)
+        }
+        .help("Connected to \(statusMonitor.serverDisplayName)")
     }
     
     /// Returns the color for the current connection state
@@ -145,9 +204,9 @@ struct MainWindowView: View {
         case .connected:
             return .green
         case .disconnected:
-            return .gray
+            return .red
         case .error:
-            return .orange
+            return .red
         }
     }
     

@@ -270,6 +270,8 @@ func verifyUpgrade(binaryPath, expectedVersion string) {
 	}
 
 	installedVersion := strings.TrimSpace(string(output))
+	// Handle "diane v1.13.2" or just "v1.13.2"
+	installedVersion = strings.TrimPrefix(installedVersion, "diane ")
 	cleanExpected := strings.TrimPrefix(expectedVersion, "v")
 	cleanInstalled := strings.TrimPrefix(installedVersion, "v")
 

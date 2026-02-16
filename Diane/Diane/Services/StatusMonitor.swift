@@ -14,6 +14,7 @@ class StatusMonitor: ObservableObject {
     @Published var lastError: String?
     @Published var isPaused: Bool = false  // Pause during updates
     @Published var isRemoteMode: Bool = false
+    @Published var serverDisplayName: String = "Unknown"
     
     private var client: DianeClientProtocol?
     
@@ -41,6 +42,7 @@ class StatusMonitor: ObservableObject {
         FileLogger.shared.info("StatusMonitor configuring for local mode", category: "StatusMonitor")
         client = DianeClient()
         isRemoteMode = false
+        serverDisplayName = "Local"
     }
     
     /// Configure for remote mode (HTTP)
@@ -50,6 +52,7 @@ class StatusMonitor: ObservableObject {
         let effectiveKey = (apiKey?.isEmpty ?? true) ? nil : apiKey
         client = DianeHTTPClient(baseURL: baseURL, apiKey: effectiveKey)
         isRemoteMode = true
+        serverDisplayName = baseURL.host ?? "Remote"
     }
     
     /// Configure from a ServerConfiguration object
