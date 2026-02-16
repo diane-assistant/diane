@@ -162,7 +162,16 @@ struct MenuBarView: View {
     
     private var controlButtons: some View {
         HStack(spacing: 2) {
-            if statusMonitor.isLoading {
+            if statusMonitor.isRemoteMode {
+                // Remote mode: no start/stop/restart controls
+                if case .connected = statusMonitor.connectionState {
+                    Image(systemName: "network")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .help("Connected to remote server")
+                }
+            } else if statusMonitor.isLoading {
                 ProgressView()
                     .scaleEffect(0.6)
                     .frame(width: 24, height: 24)

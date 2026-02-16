@@ -59,28 +59,36 @@ enum DianeHTTPClientError: LocalizedError {
 
 // MARK: - HTTP Client
 
-/// URLSession-based HTTP client for iOS that connects to Diane server over TCP.
-/// Read-only: all write/mutation methods throw `readOnlyMode`.
+/// URLSession-based HTTP client that connects to Diane server over TCP.
+/// Supports optional API key authentication via Bearer token.
 @MainActor
 class DianeHTTPClient: DianeClientProtocol {
     private(set) var baseURL: URL
+    private(set) var apiKey: String?
     private let session: URLSession
 
-    init(baseURL: URL) {
+    init(baseURL: URL, apiKey: String? = nil) {
         self.baseURL = baseURL
+        self.apiKey = apiKey
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 30
         self.session = URLSession(configuration: config)
 
-        logger.info("DianeHTTPClient initialized with base URL: \(baseURL.absoluteString)")
+        logger.info("DianeHTTPClient initialized with base URL: \(baseURL.absoluteString), apiKey: \(apiKey != nil ? "set" : "none")")
     }
 
     /// Update the base URL for server address changes
     func updateBaseURL(_ url: URL) {
         self.baseURL = url
         logger.info("Base URL updated to: \(url.absoluteString)")
+    }
+    
+    /// Update the API key
+    func updateAPIKey(_ key: String?) {
+        self.apiKey = key
+        logger.info("API key updated: \(key != nil ? "set" : "cleared")")
     }
 
     // MARK: - Private Helpers
@@ -93,6 +101,11 @@ class DianeHTTPClient: DianeClientProtocol {
 
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "GET"
+        
+        // Add API key auth header if configured
+        if let apiKey, !apiKey.isEmpty {
+            urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
 
         logger.info("GET \(url.absoluteString)")
 

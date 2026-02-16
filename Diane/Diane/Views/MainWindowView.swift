@@ -113,7 +113,14 @@ struct MainWindowView: View {
     /// Toolbar controls for the detail view
     private var toolbarControls: some View {
         HStack(spacing: 8) {
-            if statusMonitor.isLoading {
+            if statusMonitor.isRemoteMode {
+                // Remote mode: show connection indicator, no start/stop/restart
+                if case .connected = statusMonitor.connectionState {
+                    Label("Remote", systemImage: "network")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if statusMonitor.isLoading {
                 ProgressView()
                     .scaleEffect(0.6)
             } else if case .connected = statusMonitor.connectionState {

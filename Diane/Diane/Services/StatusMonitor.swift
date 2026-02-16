@@ -4,7 +4,8 @@ import os.log
 
 private let logger = Logger(subsystem: "com.diane.Diane", category: "StatusMonitor")
 
-/// Observable object that monitors Diane status
+/// Observable object that monitors Diane status.
+/// Supports both local (Unix socket) and remote (HTTP) connections.
 @MainActor
 class StatusMonitor: ObservableObject {
     @Published var status: DianeStatus = .empty
@@ -12,8 +13,9 @@ class StatusMonitor: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var lastError: String?
     @Published var isPaused: Bool = false  // Pause during updates
+    @Published var isRemoteMode: Bool = false
     
-    private let client = DianeClient()
+    private var client: DianeClientProtocol?
     private nonisolated(unsafe) var pollTimer: Timer?
     private var pollInterval: TimeInterval = 5.0
     private var hasStarted = false
@@ -27,6 +29,50 @@ class StatusMonitor: ObservableObject {
         pollTimer?.invalidate()
     }
     
+    /// Configure for local mode (Unix socket)
+    func configureLocal() {
+        logger.info("StatusMonitor configuring for local mode")
+        FileLogger.shared.info("StatusMonitor configuring for local mode", category: "StatusMonitor")
+        client = DianeClient()
+        isRemoteMode = false
+    }
+    
+    /// Configure for remote mode (HTTP)
+    func configureRemote(baseURL: URL, apiKey: String?) {
+        logger.info("StatusMonitor configuring for remote mode: \(baseURL.absoluteString)")
+        FileLogger.shared.info("StatusMonitor configuring for remote mode: \(baseURL.absoluteString)", category: "StatusMonitor")
+        let effectiveKey = (apiKey?.isEmpty ?? true) ? nil : apiKey
+        client = DianeHTTPClient(baseURL: baseURL, apiKey: effectiveKey)
+        isRemoteMode = true
+    }
+    
+    /// Configure from a ServerConfiguration object
+    func configure(from config: ServerConfiguration) {
+        stopPolling()
+        hasStarted = false
+        
+        guard config.isConfigured, let mode = config.connectionMode else {
+            logger.info("StatusMonitor: config not yet configured, skipping")
+            client = nil
+            connectionState = .disconnected
+            status = .empty
+            return
+        }
+        
+        switch mode {
+        case .local:
+            configureLocal()
+        case .remote:
+            guard let url = config.baseURL else {
+                logger.error("StatusMonitor: remote mode but no base URL")
+                client = nil
+                connectionState = .error("No server URL configured")
+                return
+            }
+            configureRemote(baseURL: url, apiKey: config.apiKey)
+        }
+    }
+    
     /// Call this after the app has fully initialized
     func start() async {
         guard !hasStarted else { 
@@ -34,18 +80,28 @@ class StatusMonitor: ObservableObject {
             FileLogger.shared.info("StatusMonitor already started, skipping", category: "StatusMonitor")
             return 
         }
+        
+        guard client != nil else {
+            logger.info("StatusMonitor: no client configured, cannot start")
+            return
+        }
+        
         hasStarted = true
         logger.info("StatusMonitor starting...")
         FileLogger.shared.info("StatusMonitor starting...", category: "StatusMonitor")
         
         await startPolling()
         
-        // Auto-start Diane if enabled and not already running
-        await autoStartIfNeeded()
+        // Auto-start Diane if enabled and not already running (local mode only)
+        if !isRemoteMode {
+            await autoStartIfNeeded()
+        }
     }
     
-    /// Auto-start Diane if the setting is enabled
+    /// Auto-start Diane if the setting is enabled (local mode only)
     private func autoStartIfNeeded() async {
+        guard !isRemoteMode else { return }
+        
         // Small delay to let the initial status check complete
         try? await Task.sleep(nanoseconds: 500_000_000)
         
@@ -91,53 +147,78 @@ class StatusMonitor: ObservableObject {
     
     /// Refresh status
     func refresh() async {
+        guard let client else {
+            connectionState = .disconnected
+            return
+        }
+        
         // Skip refresh if paused (e.g., during update)
         guard !isPaused else {
             logger.info("Refresh skipped - monitor is paused")
             return
         }
         
-        let socketExists = client.socketExists
-        let processRunning = client.isProcessRunning()
-        logger.info("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)")
-        FileLogger.shared.info("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)", category: "StatusMonitor")
-        
-        // Quick check if socket exists
-        guard socketExists || processRunning else {
-            logger.info("No socket and no process, setting disconnected")
-            FileLogger.shared.info("No socket and no process, setting disconnected", category: "StatusMonitor")
-            connectionState = .disconnected
-            status = .empty
-            return
-        }
-        
-        do {
-            let newStatus = try await client.getStatus()
-            status = newStatus
-            connectionState = .connected
-            lastError = nil
-            logger.info("Status refresh successful: connected, \(newStatus.totalTools) tools")
-            FileLogger.shared.info("Status refresh successful: connected, \(newStatus.totalTools) tools", category: "StatusMonitor")
-        } catch {
-            logger.error("Status refresh failed: \(error.localizedDescription)")
-            FileLogger.shared.error("Status refresh failed: \(error.localizedDescription)", category: "StatusMonitor")
-            // Fallback: check if process is running via PID
-            if client.isProcessRunning() {
-                logger.warning("Process running but API failed, setting error state")
-                FileLogger.shared.warning("Process running but API failed, setting error state", category: "StatusMonitor")
-                connectionState = .error("API unavailable")
-            } else {
-                logger.info("Process not running, setting disconnected")
-                FileLogger.shared.info("Process not running, setting disconnected", category: "StatusMonitor")
+        if isRemoteMode {
+            // Remote mode: just try to get status via HTTP
+            do {
+                let newStatus = try await client.getStatus()
+                status = newStatus
+                connectionState = .connected
+                lastError = nil
+                logger.info("Remote status refresh successful: connected, \(newStatus.totalTools) tools")
+                FileLogger.shared.info("Remote status refresh successful", category: "StatusMonitor")
+            } catch {
+                logger.error("Remote status refresh failed: \(error.localizedDescription)")
+                FileLogger.shared.error("Remote status refresh failed: \(error.localizedDescription)", category: "StatusMonitor")
+                connectionState = .error("Connection failed")
+                status = .empty
+                lastError = error.localizedDescription
+            }
+        } else {
+            // Local mode: check socket and process
+            let socketExists = client.socketExists
+            let processRunning = client.isProcessRunning()
+            logger.info("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)")
+            FileLogger.shared.info("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)", category: "StatusMonitor")
+            
+            // Quick check if socket exists
+            guard socketExists || processRunning else {
+                logger.info("No socket and no process, setting disconnected")
+                FileLogger.shared.info("No socket and no process, setting disconnected", category: "StatusMonitor")
                 connectionState = .disconnected
                 status = .empty
+                return
             }
-            lastError = error.localizedDescription
+            
+            do {
+                let newStatus = try await client.getStatus()
+                status = newStatus
+                connectionState = .connected
+                lastError = nil
+                logger.info("Status refresh successful: connected, \(newStatus.totalTools) tools")
+                FileLogger.shared.info("Status refresh successful: connected, \(newStatus.totalTools) tools", category: "StatusMonitor")
+            } catch {
+                logger.error("Status refresh failed: \(error.localizedDescription)")
+                FileLogger.shared.error("Status refresh failed: \(error.localizedDescription)", category: "StatusMonitor")
+                // Fallback: check if process is running via PID
+                if client.isProcessRunning() {
+                    logger.warning("Process running but API failed, setting error state")
+                    FileLogger.shared.warning("Process running but API failed, setting error state", category: "StatusMonitor")
+                    connectionState = .error("API unavailable")
+                } else {
+                    logger.info("Process not running, setting disconnected")
+                    FileLogger.shared.info("Process not running, setting disconnected", category: "StatusMonitor")
+                    connectionState = .disconnected
+                    status = .empty
+                }
+                lastError = error.localizedDescription
+            }
         }
     }
     
     /// Reload MCP configuration
     func reloadConfig() async {
+        guard let client else { return }
         isLoading = true
         defer { isLoading = false }
         
@@ -154,6 +235,7 @@ class StatusMonitor: ObservableObject {
     
     /// Refresh with retry logic for operations that may cause temporary unavailability
     private func refreshWithRetry(maxAttempts: Int, delayMs: UInt64) async {
+        guard let client else { return }
         for attempt in 1...maxAttempts {
             do {
                 let newStatus = try await client.getStatus()
@@ -175,6 +257,7 @@ class StatusMonitor: ObservableObject {
     
     /// Restart an MCP server
     func restartMCPServer(name: String) async {
+        guard let client else { return }
         isLoading = true
         defer { isLoading = false }
         
@@ -189,8 +272,9 @@ class StatusMonitor: ObservableObject {
         }
     }
     
-    /// Start Diane
+    /// Start Diane (local mode only)
     func startDiane() async {
+        guard let client, !isRemoteMode else { return }
         isLoading = true
         defer { isLoading = false }
         
@@ -204,8 +288,9 @@ class StatusMonitor: ObservableObject {
         }
     }
     
-    /// Stop Diane
+    /// Stop Diane (local mode only)
     func stopDiane() async {
+        guard let client, !isRemoteMode else { return }
         isLoading = true
         defer { isLoading = false }
         
@@ -219,8 +304,9 @@ class StatusMonitor: ObservableObject {
         }
     }
     
-    /// Restart Diane
+    /// Restart Diane (local mode only)
     func restartDiane() async {
+        guard let client, !isRemoteMode else { return }
         isLoading = true
         defer { isLoading = false }
         
@@ -236,14 +322,19 @@ class StatusMonitor: ObservableObject {
     
     /// Check if Diane is running
     var isRunning: Bool {
+        guard let client else { return false }
         if case .connected = connectionState {
             return true
         }
-        return client.isProcessRunning()
+        if !isRemoteMode {
+            return client.isProcessRunning()
+        }
+        return false
     }
     
     /// Start OAuth authentication for an MCP server
     func startAuth(serverName: String) async -> DeviceCodeInfo? {
+        guard let client else { return nil }
         isLoading = true
         defer { isLoading = false }
         
@@ -259,6 +350,7 @@ class StatusMonitor: ObservableObject {
     
     /// Poll for OAuth token and refresh status when complete
     func pollAuthAndRefresh(serverName: String, deviceCode: String, interval: Int) async -> Bool {
+        guard let client else { return false }
         do {
             try await client.pollAuth(serverName: serverName, deviceCode: deviceCode, interval: interval)
             // Auth successful, refresh to show updated status

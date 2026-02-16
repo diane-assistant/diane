@@ -28,6 +28,7 @@ struct DianeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var statusMonitor = StatusMonitor()
     @StateObject private var updateChecker = UpdateChecker()
+    @State private var serverConfig = ServerConfiguration()
     @State private var hasStarted = false
     @Environment(\.openWindow) private var openWindow
     
@@ -42,32 +43,28 @@ struct DianeApp: App {
         }
     }
     
-    init() {
-        // Schedule startup after app is fully initialized
-        // This runs on the main queue after the app has launched
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            Task { @MainActor in
-                // Access the shared instances and start them
-                // Note: We can't access @StateObject here, so we use a different approach
-            }
-        }
-    }
-    
     var body: some Scene {
         // Primary desktop window
         Window("Diane", id: "main") {
-            MainWindowView()
-                .environmentObject(statusMonitor)
-                .environmentObject(updateChecker)
-                .frame(minWidth: 800, minHeight: 600)
-                .task {
-                    await startServicesIfNeeded()
+            Group {
+                if serverConfig.isConfigured {
+                    MainWindowView()
+                        .environmentObject(statusMonitor)
+                        .environmentObject(updateChecker)
+                        .environment(serverConfig)
+                        .frame(minWidth: 800, minHeight: 600)
+                        .task {
+                            await startServicesIfNeeded()
+                        }
+                        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenMainWindow"))) { _ in
+                            NSApp.activate(ignoringOtherApps: true)
+                        }
+                } else {
+                    MacServerSetupView(config: serverConfig) {
+                        configureAndStart()
+                    }
                 }
-                .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenMainWindow"))) { _ in
-                    // When notification is received, the window should already be visible
-                    // Just make sure it's frontmost
-                    NSApp.activate(ignoringOtherApps: true)
-                }
+            }
         }
         .defaultSize(width: 1000, height: 700)
         .commands {
@@ -96,8 +93,6 @@ struct DianeApp: App {
                 .environmentObject(statusMonitor)
                 .environmentObject(updateChecker)
                 .task {
-                    // Start services once. This runs when the view appears for the first time,
-                    // but we also trigger it on app launch via onChange below
                     await startServicesIfNeeded()
                 }
         } label: {
@@ -108,12 +103,34 @@ struct DianeApp: App {
                 }
         }
         .menuBarExtraStyle(.window)
+        
+        // Settings window (opened via SettingsLink or Cmd+,)
+        Settings {
+            SettingsView()
+                .environmentObject(statusMonitor)
+                .environmentObject(updateChecker)
+                .environment(serverConfig)
+                .frame(minWidth: 450, minHeight: 300)
+        }
+    }
+    
+    /// Called when the user completes the setup flow
+    private func configureAndStart() {
+        statusMonitor.configure(from: serverConfig)
+        Task {
+            await startServicesIfNeeded()
+        }
     }
     
     @MainActor
     private func startServicesIfNeeded() async {
+        // Don't start until configured
+        guard serverConfig.isConfigured else { return }
         guard !hasStarted else { return }
         hasStarted = true
+        
+        // Configure the status monitor from server config if not already done
+        statusMonitor.configure(from: serverConfig)
         
         // Wire up the status monitor reference for pausing during updates
         updateChecker.statusMonitor = statusMonitor

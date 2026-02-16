@@ -134,6 +134,9 @@
 		1125 /* JobsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1012 /* JobsViews.swift */; };
 		1126 /* UsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1013 /* UsageView.swift */; };
 		1127 /* IOSSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1014 /* IOSSettingsView.swift */; };
+		1128 /* DianeHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1002 /* DianeHTTPClient.swift */; };
+		1129 /* ServerConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1003 /* ServerConfiguration.swift */; };
+		1130 /* MacServerSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1015 /* MacServerSetupView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -146,6 +149,7 @@
 		106 /* DianeStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeStatus.swift; sourceTree = "<group>"; };
 		107 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		108 /* Diane.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Diane.entitlements; sourceTree = "<group>"; };
+		1016 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		109 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		110 /* ToolsBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsBrowserView.swift; sourceTree = "<group>"; };
 		111 /* WindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManager.swift; sourceTree = "<group>"; };
@@ -213,6 +217,7 @@
 		1012 /* JobsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobsViews.swift; sourceTree = "<group>"; };
 		1013 /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
 		1014 /* IOSSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSettingsView.swift; sourceTree = "<group>"; };
+		1015 /* MacServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacServerSetupView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -306,6 +311,7 @@
 				101 /* DianeApp.swift */,
 				1000 /* DianeIOSApp.swift */,
 				108 /* Diane.entitlements */,
+				1016 /* Info.plist */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -325,6 +331,7 @@
 				124 /* MainWindowView.swift */,
 				125 /* MasterDetailView.swift */,
 				121 /* UsageView.swift */,
+				1015 /* MacServerSetupView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -662,6 +669,9 @@
 				095 /* DesignTokens.swift in Sources */,
 				097 /* EmptyStateView.swift in Sources */,
 				099 /* TimeRangePicker.swift in Sources */,
+				1128 /* DianeHTTPClient.swift in Sources */,
+				1129 /* ServerConfiguration.swift in Sources */,
+				1130 /* MacServerSetupView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -901,6 +911,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Diane/App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Diane;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = NO;
@@ -930,6 +941,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Diane/App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Diane;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = NO;
