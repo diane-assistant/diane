@@ -44,28 +44,3 @@ jobs:
         env:
           CGO_ENABLED: 1
         run: go build -ldflags="-s -w" -o ../../../dist/acp-server .
-
-  test-specmcp:
-    name: Test & Build (specmcp)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: server/specmcp/go.mod
-          cache-dependency-path: server/specmcp/go.sum
-
-      - name: Vet
-        working-directory: server/specmcp
-        run: go vet ./...
-
-      - name: Test
-        working-directory: server/specmcp
-        run: go test ./...
-
-      - name: Build specmcp
-        working-directory: server/specmcp
-        run: go build -ldflags="-s -w" -o ../../dist/specmcp ./cmd/specmcp/

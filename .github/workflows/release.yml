@@ -32,30 +32,9 @@ jobs:
           CGO_ENABLED: 1
         run: go test ./...
 
-  test-specmcp:
-    name: Test (specmcp)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: server/specmcp/go.mod
-          cache-dependency-path: server/specmcp/go.sum
-
-      - name: Vet
-        working-directory: server/specmcp
-        run: go vet ./...
-
-      - name: Test
-        working-directory: server/specmcp
-        run: go test ./...
-
   build-macos:
     name: Build macOS (${{ matrix.goarch }})
-    needs: [test-server, test-specmcp]
+    needs: [test-server]
     runs-on: macos-latest
     strategy:
       matrix:
@@ -73,9 +52,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
-          cache-dependency-path: |
-            server/go.sum
-            server/specmcp/go.sum
+          cache-dependency-path: server/go.sum
 
       - name: Build diane
         env:
@@ -93,17 +70,10 @@ jobs:
         working-directory: server/cmd/acp-server
         run: go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o ../../../dist/acp-server .
 
-      - name: Build specmcp
-        env:
-          GOOS: darwin
-          GOARCH: ${{ matrix.goarch }}
-        working-directory: server/specmcp
-        run: go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o ../../dist/specmcp ./cmd/specmcp/
-
       - name: Compress binaries
         run: |
           cd dist
-          tar -czvf ${{ matrix.name }}.tar.gz diane acp-server specmcp
+          tar -czvf ${{ matrix.name }}.tar.gz diane acp-server
           shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
 
       - name: Upload artifact
@@ -116,7 +86,7 @@ jobs:
 
   build-linux:
     name: Build Linux (${{ matrix.goarch }})
-    needs: [test-server, test-specmcp]
+    needs: [test-server]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -135,9 +105,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
-          cache-dependency-path: |
-            server/go.sum
-            server/specmcp/go.sum
+          cache-dependency-path: server/go.sum
 
       - name: Install cross-compiler
         if: matrix.goarch == 'arm64'
@@ -163,17 +131,10 @@ jobs:
         working-directory: server/cmd/acp-server
         run: go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o ../../../dist/acp-server .
 
-      - name: Build specmcp
-        env:
-          GOOS: linux
-          GOARCH: ${{ matrix.goarch }}
-        working-directory: server/specmcp
-        run: go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o ../../dist/specmcp ./cmd/specmcp/
-
       - name: Compress binaries
         run: |
           cd dist
-          tar -czvf ${{ matrix.name }}.tar.gz diane acp-server specmcp
+          tar -czvf ${{ matrix.name }}.tar.gz diane acp-server
           sha256sum ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
 
       - name: Upload artifact
