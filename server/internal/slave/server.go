@@ -205,6 +205,7 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Hostname string `json:"hostname"`
 		CSR      string `json:"csr"`
+		Platform string `json:"platform"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -216,7 +217,7 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code, err := s.pairing.CreatePairingRequest(req.Hostname, []byte(req.CSR))
+	code, err := s.pairing.CreatePairingRequest(req.Hostname, []byte(req.CSR), req.Platform)
 	if err != nil {
 		slog.Error("Failed to create pairing request", "error", err)
 		http.Error(w, "Failed to create pairing request", http.StatusInternalServerError)

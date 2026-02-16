@@ -935,6 +935,50 @@ class DianeClient: DianeClientProtocol {
         _ = try await request("/google/auth?account=\(account)", method: "DELETE")
     }
     
+    // MARK: - Slave Management
+    
+    /// Get all registered slaves
+    func getSlaves() async throws -> [SlaveInfo] {
+        let data = try await request("/slaves", timeout: 5)
+        return try JSONDecoder().decode([SlaveInfo].self, from: data)
+    }
+    
+    /// Get pending pairing requests
+    func getPendingPairingRequests() async throws -> [PairingRequest] {
+        let data = try await request("/slaves/pending", timeout: 5)
+        return try JSONDecoder().decode([PairingRequest].self, from: data)
+    }
+    
+    /// Approve a pairing request
+    func approvePairingRequest(hostname: String, pairingCode: String) async throws {
+        let body: [String: Any] = [
+            "hostname": hostname,
+            "pairing_code": pairingCode
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        _ = try await request("/slaves/approve", method: "POST", timeout: 10, body: bodyData)
+    }
+    
+    /// Deny a pairing request
+    func denyPairingRequest(hostname: String, pairingCode: String) async throws {
+        let body: [String: Any] = [
+            "hostname": hostname,
+            "pairing_code": pairingCode
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        _ = try await request("/slaves/deny", method: "POST", timeout: 10, body: bodyData)
+    }
+    
+    /// Revoke slave credentials
+    func revokeSlaveCredentials(hostname: String, reason: String?) async throws {
+        var body: [String: Any] = ["hostname": hostname]
+        if let reason = reason {
+            body["reason"] = reason
+        }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        _ = try await request("/slaves/revoke", method: "POST", timeout: 10, body: bodyData)
+    }
+    
     /// Make a request that accepts non-200 status codes (for polling)
     private func requestWithStatus(_ path: String, method: String = "GET", timeout: Int = 3, body: Data? = nil) async throws -> Data {
         logger.info("Making \(method) request to \(path) (with status)")

@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -174,6 +175,7 @@ func ctlSlavePair(masterURL string) {
 	reqBody := map[string]string{
 		"hostname": hostname,
 		"csr":      string(csrPEM),
+		"platform": runtime.GOOS, // darwin, linux, windows
 	}
 	jsonBody, _ := json.Marshal(reqBody)
 

@@ -248,6 +248,7 @@ func (db *DB) migrate() error {
 		expires_at DATETIME NOT NULL,
 		last_seen DATETIME,
 		enabled INTEGER NOT NULL DEFAULT 1,
+		platform TEXT DEFAULT '',
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
@@ -273,6 +274,7 @@ func (db *DB) migrate() error {
 		host_id TEXT NOT NULL,
 		pairing_code TEXT NOT NULL,
 		csr TEXT NOT NULL,
+		platform TEXT DEFAULT '',
 		requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		expires_at DATETIME NOT NULL,
 		status TEXT NOT NULL DEFAULT 'pending'

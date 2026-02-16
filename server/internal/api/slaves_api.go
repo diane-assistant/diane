@@ -22,6 +22,7 @@ type SlaveInfo struct {
 	IssuedAt    string `json:"issued_at"`
 	ExpiresAt   string `json:"expires_at"`
 	Enabled     bool   `json:"enabled"`
+	Platform    string `json:"platform,omitempty"`
 }
 
 // PairingRequest represents a pairing request for API responses
@@ -31,12 +32,14 @@ type PairingRequest struct {
 	Status      string `json:"status"`
 	CreatedAt   string `json:"created_at"`
 	ExpiresAt   string `json:"expires_at"`
+	Platform    string `json:"platform,omitempty"`
 }
 
 // PairRequestBody is the request body for initiating pairing
 type PairRequestBody struct {
 	Hostname string `json:"hostname"`
 	CSR      string `json:"csr"`
+	Platform string `json:"platform"`
 }
 
 // ApproveRequestBody is the request body for approving a pairing request
@@ -77,6 +80,7 @@ func (s *Server) handleSlaves(w http.ResponseWriter, r *http.Request) {
 			Status:     string(slave.Status),
 			ToolCount:  slave.ToolCount,
 			CertSerial: slave.CertSerial,
+			Platform:   slave.Platform,
 			IssuedAt:   slave.IssuedAt.Format(time.RFC3339),
 			ExpiresAt:  slave.ExpiresAt.Format(time.RFC3339),
 			Enabled:    slave.Enabled,
@@ -118,6 +122,7 @@ func (s *Server) handlePendingSlaves(w http.ResponseWriter, r *http.Request) {
 			Status:      "pending",
 			CreatedAt:   req.RequestedAt.Format(time.RFC3339),
 			ExpiresAt:   req.ExpiresAt.Format(time.RFC3339),
+			Platform:    req.Platform,
 		})
 	}
 
@@ -154,7 +159,7 @@ func (s *Server) handlePairSlave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create pairing request
-	code, err := s.slaveManager.GetPairingService().CreatePairingRequest(req.Hostname, []byte(req.CSR))
+	code, err := s.slaveManager.GetPairingService().CreatePairingRequest(req.Hostname, []byte(req.CSR), req.Platform)
 	if err != nil {
 		slog.Error("Failed to create pairing request", "hostname", req.Hostname, "error", err)
 		http.Error(w, fmt.Sprintf("Failed to create pairing request: %v", err), http.StatusBadRequest)

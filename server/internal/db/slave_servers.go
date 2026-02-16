@@ -13,6 +13,7 @@ type SlaveServer struct {
 	ID         string
 	HostID     string
 	CertSerial string
+	Platform   string
 	IssuedAt   time.Time
 	ExpiresAt  time.Time
 	LastSeen   *time.Time
@@ -43,14 +44,14 @@ type PairingRequest struct {
 }
 
 // CreateSlaveServer creates a new slave server configuration
-func (db *DB) CreateSlaveServer(hostID, certSerial string, issuedAt, expiresAt time.Time) (*SlaveServer, error) {
+func (db *DB) CreateSlaveServer(hostID, certSerial, platform string, issuedAt, expiresAt time.Time) (*SlaveServer, error) {
 	id := uuid.New().String()
 	now := time.Now()
 
 	_, err := db.conn.Exec(`
-		INSERT INTO slave_servers (id, host_id, cert_serial, issued_at, expires_at, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-	`, id, hostID, certSerial, issuedAt, expiresAt, now, now)
+		INSERT INTO slave_servers (id, host_id, cert_serial, platform, issued_at, expires_at, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+	`, id, hostID, certSerial, platform, issuedAt, expiresAt, now, now)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create slave server: %w", err)
@@ -65,10 +66,10 @@ func (db *DB) GetSlaveServerByHostID(hostID string) (*SlaveServer, error) {
 	var lastSeen sql.NullTime
 
 	err := db.conn.QueryRow(`
-		SELECT id, host_id, cert_serial, issued_at, expires_at, last_seen, enabled, created_at, updated_at
+		SELECT id, host_id, cert_serial, platform, issued_at, expires_at, last_seen, enabled, created_at, updated_at
 		FROM slave_servers
 		WHERE host_id = ?
-	`, hostID).Scan(&s.ID, &s.HostID, &s.CertSerial, &s.IssuedAt, &s.ExpiresAt, &lastSeen, &s.Enabled, &s.CreatedAt, &s.UpdatedAt)
+	`, hostID).Scan(&s.ID, &s.HostID, &s.CertSerial, &s.Platform, &s.IssuedAt, &s.ExpiresAt, &lastSeen, &s.Enabled, &s.CreatedAt, &s.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -87,7 +88,7 @@ func (db *DB) GetSlaveServerByHostID(hostID string) (*SlaveServer, error) {
 // ListSlaveServers retrieves all slave servers
 func (db *DB) ListSlaveServers() ([]*SlaveServer, error) {
 	rows, err := db.conn.Query(`
-		SELECT id, host_id, cert_serial, issued_at, expires_at, last_seen, enabled, created_at, updated_at
+		SELECT id, host_id, cert_serial, platform, issued_at, expires_at, last_seen, enabled, created_at, updated_at
 		FROM slave_servers
 		ORDER BY host_id
 	`)
@@ -101,7 +102,7 @@ func (db *DB) ListSlaveServers() ([]*SlaveServer, error) {
 		var s SlaveServer
 		var lastSeen sql.NullTime
 
-		err := rows.Scan(&s.ID, &s.HostID, &s.CertSerial, &s.IssuedAt, &s.ExpiresAt, &lastSeen, &s.Enabled, &s.CreatedAt, &s.UpdatedAt)
+		err := rows.Scan(&s.ID, &s.HostID, &s.CertSerial, &s.Platform, &s.IssuedAt, &s.ExpiresAt, &lastSeen, &s.Enabled, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan slave server: %w", err)
 		}
@@ -210,13 +211,13 @@ func (db *DB) ListRevokedCredentials() ([]*RevokedCredential, error) {
 }
 
 // CreatePairingRequest creates a new pairing request
-func (db *DB) CreatePairingRequest(hostID, pairingCode, csr string, expiresAt time.Time) error {
+func (db *DB) CreatePairingRequest(hostID, pairingCode, csr, platform string, expiresAt time.Time) error {
 	id := uuid.New().String()
 
 	_, err := db.conn.Exec(`
-		INSERT INTO pairing_requests (id, host_id, pairing_code, csr, requested_at, expires_at, status)
-		VALUES (?, ?, ?, ?, ?, ?, 'pending')
-	`, id, hostID, pairingCode, csr, time.Now(), expiresAt)
+		INSERT INTO pairing_requests (id, host_id, pairing_code, csr, platform, requested_at, expires_at, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+	`, id, hostID, pairingCode, csr, platform, time.Now(), expiresAt)
 
 	return err
 }

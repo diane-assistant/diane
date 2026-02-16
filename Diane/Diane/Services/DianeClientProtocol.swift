@@ -253,4 +253,21 @@ protocol DianeClientProtocol {
 
     /// Delete Google OAuth token
     func deleteGoogleAuth(account: String) async throws
+
+    // MARK: - Slave Management
+
+    /// Get all registered slaves
+    func getSlaves() async throws -> [SlaveInfo]
+
+    /// Get pending pairing requests
+    func getPendingPairingRequests() async throws -> [PairingRequest]
+
+    /// Approve a pairing request
+    func approvePairingRequest(hostname: String, pairingCode: String) async throws
+
+    /// Deny a pairing request
+    func denyPairingRequest(hostname: String, pairingCode: String) async throws
+
+    /// Revoke slave credentials
+    func revokeSlaveCredentials(hostname: String, reason: String?) async throws
 }

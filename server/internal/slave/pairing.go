@@ -24,6 +24,7 @@ type PairingRequestInfo struct {
 	HostID      string
 	PairingCode string
 	CSR         []byte
+	Platform    string
 	RequestedAt time.Time
 	ExpiresAt   time.Time
 }
@@ -65,7 +66,7 @@ func (ps *PairingService) GeneratePairingCode() (string, error) {
 }
 
 // CreatePairingRequest creates a new pairing request
-func (ps *PairingService) CreatePairingRequest(hostID string, csrPEM []byte) (string, error) {
+func (ps *PairingService) CreatePairingRequest(hostID string, csrPEM []byte, platform string) (string, error) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
@@ -90,6 +91,7 @@ func (ps *PairingService) CreatePairingRequest(hostID string, csrPEM []byte) (st
 		HostID:      hostID,
 		PairingCode: pairingCode,
 		CSR:         csrPEM,
+		Platform:    platform,
 		RequestedAt: now,
 		ExpiresAt:   expiresAt,
 	}
@@ -98,7 +100,7 @@ func (ps *PairingService) CreatePairingRequest(hostID string, csrPEM []byte) (st
 	ps.pendingRequests[pairingCode] = req
 
 	// Persist to database
-	if err := ps.db.CreatePairingRequest(hostID, pairingCode, string(csrPEM), expiresAt); err != nil {
+	if err := ps.db.CreatePairingRequest(hostID, pairingCode, string(csrPEM), platform, expiresAt); err != nil {
 		delete(ps.pendingRequests, pairingCode)
 		return "", fmt.Errorf("failed to persist pairing request: %w", err)
 	}
@@ -148,7 +150,7 @@ func (ps *PairingService) ApprovePairingRequest(hostID, pairingCode string) (cer
 	// Create slave server record in database
 	now := time.Now()
 	expiresAt := now.AddDate(0, 0, 365)
-	_, err = ps.db.CreateSlaveServer(hostID, serialNumber, now, expiresAt)
+	_, err = ps.db.CreateSlaveServer(hostID, serialNumber, req.Platform, now, expiresAt)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create slave server record: %w", err)
 	}
