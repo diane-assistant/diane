@@ -10,12 +10,45 @@ struct ToolInfo: Codable, Identifiable {
     var id: String { name }
 }
 
+/// Information about a prompt
+struct PromptInfo: Codable, Identifiable {
+    let name: String
+    let description: String
+    let server: String
+    let builtin: Bool
+    
+    var id: String { name }
+}
+
+/// Information about a resource
+struct ResourceInfo: Codable, Identifiable {
+    let name: String
+    let description: String
+    let uri: String
+    let mimeType: String?
+    let server: String
+    let builtin: Bool
+    
+    var id: String { name }
+    
+    enum CodingKeys: String, CodingKey {
+        case name
+        case description
+        case uri
+        case mimeType = "mime_type"
+        case server
+        case builtin
+    }
+}
+
 /// Status of an MCP server (includes both builtin providers and external MCP servers)
 struct MCPServerStatus: Codable, Identifiable {
     let name: String
     let enabled: Bool
     let connected: Bool
     let toolCount: Int
+    let promptCount: Int
+    let resourceCount: Int
     let error: String?
     let builtin: Bool
     let requiresAuth: Bool
@@ -28,6 +61,8 @@ struct MCPServerStatus: Codable, Identifiable {
         case enabled
         case connected
         case toolCount = "tool_count"
+        case promptCount = "prompt_count"
+        case resourceCount = "resource_count"
         case error
         case builtin
         case requiresAuth = "requires_auth"
@@ -40,6 +75,8 @@ struct MCPServerStatus: Codable, Identifiable {
         enabled = try container.decode(Bool.self, forKey: .enabled)
         connected = try container.decode(Bool.self, forKey: .connected)
         toolCount = try container.decode(Int.self, forKey: .toolCount)
+        promptCount = try container.decodeIfPresent(Int.self, forKey: .promptCount) ?? 0
+        resourceCount = try container.decodeIfPresent(Int.self, forKey: .resourceCount) ?? 0
         error = try container.decodeIfPresent(String.self, forKey: .error)
         builtin = try container.decodeIfPresent(Bool.self, forKey: .builtin) ?? false
         requiresAuth = try container.decodeIfPresent(Bool.self, forKey: .requiresAuth) ?? false
@@ -51,6 +88,8 @@ struct MCPServerStatus: Codable, Identifiable {
         enabled: Bool = true,
         connected: Bool = true,
         toolCount: Int = 0,
+        promptCount: Int = 0,
+        resourceCount: Int = 0,
         error: String? = nil,
         builtin: Bool = false,
         requiresAuth: Bool = false,
@@ -60,6 +99,8 @@ struct MCPServerStatus: Codable, Identifiable {
         self.enabled = enabled
         self.connected = connected
         self.toolCount = toolCount
+        self.promptCount = promptCount
+        self.resourceCount = resourceCount
         self.error = error
         self.builtin = builtin
         self.requiresAuth = requiresAuth

@@ -2,7 +2,9 @@ import SwiftUI
 import AppKit
 
 struct ContextsView: View {
+    @EnvironmentObject var statusMonitor: StatusMonitor
     @State private var viewModel: ContextsViewModel
+    @State private var clientInitialized = false
     
     init(viewModel: ContextsViewModel = ContextsViewModel()) {
         _viewModel = State(initialValue: viewModel)
@@ -31,6 +33,11 @@ struct ContextsView: View {
         .frame(minWidth: 750, idealWidth: 900, maxWidth: .infinity,
                minHeight: 450, idealHeight: 600, maxHeight: .infinity)
         .task {
+            // Initialize with the correct client from StatusMonitor if available
+            if !clientInitialized, let configuredClient = statusMonitor.configuredClient {
+                viewModel = ContextsViewModel(client: configuredClient)
+                clientInitialized = true
+            }
             await viewModel.loadContexts()
         }
         .sheet(isPresented: $viewModel.showCreateContext) {

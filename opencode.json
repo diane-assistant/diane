@@ -4,359 +4,90 @@
     "diane-work": {
       "oauth": false,
       "type": "remote",
-      "url": "http://localhost:8765/mcp/sse?context=work-diane"
+      "url": "http://mcj-emergent:8765/mcp/sse?context=work-diane"
     }
   },
   "model": "github-copilot/claude-sonnet-4",
+  "small_model": "copilot/claude-haiku-4.5",
   "plugin": [
     "opencode-google-antigravity-auth@latest"
   ],
-  "provider": {
+ "provider": {
     "google": {
       "models": {
-        "gemini-2.5-flash": {
-          "cost": {
-            "cache_read": 0.05,
-            "input": 0.5,
-            "output": 2
-          },
-          "id": "gemini-2.5-flash",
-          "limit": {
-            "context": 1048576,
-            "output": 65536
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "video",
-              "audio",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "name": "Gemini 2.5 Flash",
-          "reasoning": true,
+        "antigravity-gemini-3-pro": {
+          "name": "Gemini 3 Pro (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
-            "low": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 8192
-                }
-              }
-            },
-            "medium": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 16384
-                }
-              }
-            },
-            "minimal": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 4096
-                }
-              }
-            }
+            "low": { "thinkingLevel": "low" },
+            "high": { "thinkingLevel": "high" }
           }
         },
-        "gemini-2.5-flash-lite": {
-          "cost": {
-            "cache_read": 0.025,
-            "input": 0.25,
-            "output": 1.5
-          },
-          "id": "gemini-2.5-flash-lite",
-          "limit": {
-            "context": 1048576,
-            "output": 65536
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "name": "Gemini 2.5 Flash Lite",
-          "reasoning": false
+        "antigravity-gemini-3-flash": {
+          "name": "Gemini 3 Flash (Antigravity)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "minimal": { "thinkingLevel": "minimal" },
+            "low": { "thinkingLevel": "low" },
+            "medium": { "thinkingLevel": "medium" },
+            "high": { "thinkingLevel": "high" }
+          }
+        },
+        "antigravity-claude-sonnet-4-5": {
+          "name": "Claude Sonnet 4.5 (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "antigravity-claude-sonnet-4-5-thinking": {
+          "name": "Claude Sonnet 4.5 Thinking (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
+        },
+        "antigravity-claude-opus-4-5-thinking": {
+          "name": "Claude Opus 4.5 Thinking (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
+        },
+        "antigravity-claude-opus-4-6-thinking": {
+          "name": "Claude Opus 4.6 Thinking (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
+        },
+        "gemini-2.5-flash": {
+          "name": "Gemini 2.5 Flash (Gemini CLI)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
         "gemini-2.5-pro": {
-          "cost": {
-            "cache_read": 0.125,
-            "input": 1.25,
-            "output": 5
-          },
-          "id": "gemini-2.5-pro",
-          "limit": {
-            "context": 2000000,
-            "output": 65536
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "video",
-              "audio",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "name": "Gemini 2.5 Pro",
-          "reasoning": true,
-          "variants": {
-            "high": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 32768
-                }
-              }
-            },
-            "low": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 8192
-                }
-              }
-            },
-            "medium": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 16384
-                }
-              }
-            }
-          }
+          "name": "Gemini 2.5 Pro (Gemini CLI)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
-        "gemini-3-flash": {
-          "cost": {
-            "cache_read": 0.05,
-            "input": 0.5,
-            "output": 3
-          },
-          "id": "gemini-3-flash",
-          "limit": {
-            "context": 1048576,
-            "output": 65536
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "video",
-              "audio",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "name": "Gemini 3 Flash",
-          "reasoning": true,
-          "release_date": "2025-12-17",
-          "variants": {
-            "high": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingLevel": "high"
-                }
-              }
-            },
-            "low": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingLevel": "low"
-                }
-              }
-            },
-            "medium": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingLevel": "medium"
-                }
-              }
-            },
-            "minimal": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingLevel": "minimal"
-                }
-              }
-            }
-          }
+        "gemini-3-flash-preview": {
+          "name": "Gemini 3 Flash Preview (Gemini CLI)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
         "gemini-3-pro-preview": {
-          "cost": {
-            "cache_read": 0.2,
-            "input": 2,
-            "output": 12
-          },
-          "id": "gemini-3-pro-preview",
-          "limit": {
-            "context": 1000000,
-            "output": 64000
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "video",
-              "audio",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "name": "Gemini 3 Pro",
-          "reasoning": true,
-          "release_date": "2025-11-18",
-          "variants": {
-            "high": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingLevel": "high"
-                }
-              }
-            },
-            "low": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingLevel": "low"
-                }
-              }
-            },
-            "medium": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingLevel": "medium"
-                }
-              }
-            }
-          }
-        },
-        "gemini-claude-opus-4-5-thinking": {
-          "id": "gemini-claude-opus-4-5-thinking",
-          "limit": {
-            "context": 200000,
-            "output": 64000
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "name": "Claude Opus 4.5",
-          "reasoning": true,
-          "release_date": "2025-11-24",
-          "variants": {
-            "high": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 32000
-                }
-              }
-            },
-            "low": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 4000
-                }
-              }
-            },
-            "medium": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 16000
-                }
-              }
-            }
-          }
-        },
-        "gemini-claude-sonnet-4-thinking": {
-          "id": "gemini-claude-sonnet-4-thinking",
-          "limit": {
-            "context": 200000,
-            "output": 64000
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "name": "Claude Sonnet 4",
-          "reasoning": true,
-          "variants": {
-            "high": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 32000
-                }
-              }
-            },
-            "low": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 4000
-                }
-              }
-            },
-            "medium": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": true,
-                  "thinkingBudget": 16000
-                }
-              }
-            },
-            "none": {
-              "options": {
-                "thinkingConfig": {
-                  "includeThoughts": false
-                }
-              },
-              "reasoning": false
-            }
-          }
+          "name": "Gemini 3 Pro Preview (Gemini CLI)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         }
-      },
-      "npm": "@ai-sdk/google"
+      }
     }
   }
 }

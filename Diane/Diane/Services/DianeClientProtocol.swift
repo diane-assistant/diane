@@ -75,6 +75,12 @@ protocol DianeClientProtocol {
 
     /// Get all tools
     func getTools() async throws -> [ToolInfo]
+    
+    /// Get all prompts
+    func getPrompts() async throws -> [PromptInfo]
+    
+    /// Get all resources
+    func getResources() async throws -> [ResourceInfo]
 
     // MARK: - OAuth
 

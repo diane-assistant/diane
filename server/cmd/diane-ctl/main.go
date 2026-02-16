@@ -84,6 +84,10 @@ func main() {
 	case "auth":
 		handleAuthCommand(client, os.Args[2:])
 
+	// Slave commands
+	case "slave":
+		handleSlaveCommand(client, os.Args[2:])
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -1472,6 +1476,16 @@ Agent Gallery (one-click install):
                                 --workdir <path>  Working directory for the agent
   gallery refresh             Refresh the agent registry
 
+Slave Management (Distributed MCP):
+  slave pair <master-url>     Initiate pairing with master Diane instance
+  slave start <master-url>    Connect to master as slave (requires prior pairing)
+  slave pending               List pending pairing requests (master only)
+  slave approve <hostname>    Approve a pending pairing request (master only)
+  slave deny <hostname>       Deny a pending pairing request (master only)
+  slave list                  List all registered slaves (master only)
+  slave revoke <hostname>     Revoke slave credentials (master only)
+  slave revoked               List revoked slave credentials (master only)
+
 Examples:
   diane-ctl info                                              # Show connection guide
   diane-ctl mcp install opencode                              # Install MCP config in OpenCode project
@@ -1483,5 +1497,164 @@ Examples:
   diane-ctl gallery install gemini --name gemini-work         # Install with custom name
   diane-ctl agent run gemini "what is 2+2?"                   # Run a prompt
   diane-ctl agent logs opencode                               # View logs for opencode agent
-  diane-ctl agents`)
+  diane-ctl agents                                            # List all agents
+  diane-ctl slave pair wss://master.example.com:8765          # Pair with master
+  diane-ctl slave list                                        # List connected slaves`)
+}
+
+// handleSlaveCommand handles slave management commands
+func handleSlaveCommand(client *api.Client, args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Error: slave command requires a subcommand")
+		fmt.Fprintln(os.Stderr, "\nAvailable subcommands:")
+		fmt.Fprintln(os.Stderr, "  pair <master-url>     Initiate pairing with master")
+		fmt.Fprintln(os.Stderr, "  start <master-url>    Connect to master as slave")
+		fmt.Fprintln(os.Stderr, "  pending               List pending pairing requests")
+		fmt.Fprintln(os.Stderr, "  approve <hostname>    Approve a pairing request")
+		fmt.Fprintln(os.Stderr, "  deny <hostname>       Deny a pairing request")
+		fmt.Fprintln(os.Stderr, "  list                  List all registered slaves")
+		fmt.Fprintln(os.Stderr, "  revoke <hostname>     Revoke slave credentials")
+		fmt.Fprintln(os.Stderr, "  revoked               List revoked credentials")
+		os.Exit(1)
+	}
+
+	subcommand := args[0]
+
+	switch subcommand {
+	case "pair":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "Error: pair command requires master URL")
+			fmt.Fprintln(os.Stderr, "Usage: diane-ctl slave pair <master-url>")
+			os.Exit(1)
+		}
+		handleSlavePair(client, args[1])
+
+	case "start":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "Error: start command requires master URL")
+			fmt.Fprintln(os.Stderr, "Usage: diane-ctl slave start <master-url>")
+			os.Exit(1)
+		}
+		handleSlaveStart(client, args[1])
+
+	case "pending":
+		handleSlavePending(client)
+
+	case "approve":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "Error: approve command requires hostname")
+			fmt.Fprintln(os.Stderr, "Usage: diane-ctl slave approve <hostname>")
+			os.Exit(1)
+		}
+		handleSlaveApprove(client, args[1])
+
+	case "deny":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "Error: deny command requires hostname")
+			fmt.Fprintln(os.Stderr, "Usage: diane-ctl slave deny <hostname>")
+			os.Exit(1)
+		}
+		handleSlaveDeny(client, args[1])
+
+	case "list":
+		handleSlaveList(client)
+
+	case "revoke":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "Error: revoke command requires hostname")
+			fmt.Fprintln(os.Stderr, "Usage: diane-ctl slave revoke <hostname>")
+			os.Exit(1)
+		}
+		handleSlaveRevoke(client, args[1])
+
+	case "revoked":
+		handleSlaveRevoked(client)
+
+	default:
+		fmt.Fprintf(os.Stderr, "Error: unknown slave subcommand: %s\n", subcommand)
+		os.Exit(1)
+	}
+}
+
+// handleSlavePair initiates pairing with a master Diane instance
+func handleSlavePair(client *api.Client, masterURL string) {
+	fmt.Printf("Initiating pairing with master: %s\n", masterURL)
+
+	// TODO: Implement API call
+	fmt.Println("\nNOTE: This feature is not yet fully implemented.")
+	fmt.Println("The pairing process will:")
+	fmt.Println("1. Generate a 6-digit pairing code")
+	fmt.Println("2. Display the code for you to approve on the master")
+	fmt.Println("3. Exchange certificates once approved")
+	fmt.Println("4. Save connection credentials locally")
+}
+
+// handleSlaveStart connects to master as a slave
+func handleSlaveStart(client *api.Client, masterURL string) {
+	fmt.Printf("Connecting to master: %s\n", masterURL)
+
+	// TODO: Implement API call
+	fmt.Println("\nNOTE: This feature is not yet fully implemented.")
+	fmt.Println("This will start the slave WebSocket client and connect to the master.")
+}
+
+// handleSlavePending lists pending pairing requests
+func handleSlavePending(client *api.Client) {
+	fmt.Println("Pending pairing requests:")
+
+	// TODO: Implement API call
+	fmt.Println("\nNOTE: This feature is not yet fully implemented.")
+	fmt.Println("This will list all pending pairing requests from slave instances.")
+}
+
+// handleSlaveApprove approves a pending pairing request
+func handleSlaveApprove(client *api.Client, hostname string) {
+	fmt.Printf("Approving pairing request from: %s\n", hostname)
+
+	// TODO: Implement API call
+	fmt.Println("\nNOTE: This feature is not yet fully implemented.")
+	fmt.Println("This will approve the pairing request and issue a client certificate.")
+}
+
+// handleSlaveDeny denies a pending pairing request
+func handleSlaveDeny(client *api.Client, hostname string) {
+	fmt.Printf("Denying pairing request from: %s\n", hostname)
+
+	// TODO: Implement API call
+	fmt.Println("\nNOTE: This feature is not yet fully implemented.")
+	fmt.Println("This will deny and remove the pairing request.")
+}
+
+// handleSlaveList lists all registered slaves
+func handleSlaveList(client *api.Client) {
+	fmt.Println("Registered slaves:")
+	fmt.Println()
+
+	// TODO: Implement API call
+	fmt.Println("NOTE: This feature is not yet fully implemented.")
+	fmt.Println("This will list all registered slave instances, their status, and tools.")
+	fmt.Println()
+	fmt.Println("Example output:")
+	fmt.Println("  HOSTNAME          STATUS       TOOLS  LAST SEEN")
+	fmt.Println("  workstation       connected    15     2 minutes ago")
+	fmt.Println("  homelab-server    disconnected 23     1 hour ago")
+}
+
+// handleSlaveRevoke revokes a slave's credentials
+func handleSlaveRevoke(client *api.Client, hostname string) {
+	fmt.Printf("Revoking credentials for: %s\n", hostname)
+
+	// TODO: Implement API call
+	fmt.Println("\nNOTE: This feature is not yet fully implemented.")
+	fmt.Println("This will immediately revoke the slave's certificate and disconnect it.")
+}
+
+// handleSlaveRevoked lists revoked slave credentials
+func handleSlaveRevoked(client *api.Client) {
+	fmt.Println("Revoked slave credentials:")
+	fmt.Println()
+
+	// TODO: Implement API call
+	fmt.Println("NOTE: This feature is not yet fully implemented.")
+	fmt.Println("This will list all revoked slave certificates and the revocation reason.")
 }

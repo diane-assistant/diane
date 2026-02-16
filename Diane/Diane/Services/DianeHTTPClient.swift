@@ -235,6 +235,16 @@ class DianeHTTPClient: DianeClientProtocol {
         let data = try await request("/tools")
         return try decode([ToolInfo].self, from: data)
     }
+    
+    func getPrompts() async throws -> [PromptInfo] {
+        let data = try await request("/prompts")
+        return try decode([PromptInfo].self, from: data)
+    }
+    
+    func getResources() async throws -> [ResourceInfo] {
+        let data = try await request("/resources")
+        return try decode([ResourceInfo].self, from: data)
+    }
 
     // MARK: - OAuth (read-only: no login/poll)
 

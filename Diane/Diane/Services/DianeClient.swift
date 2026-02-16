@@ -267,6 +267,16 @@ class DianeClient: DianeClientProtocol {
         return try JSONDecoder().decode([ToolInfo].self, from: data)
     }
     
+    func getPrompts() async throws -> [PromptInfo] {
+        let data = try await request("/prompts")
+        return try JSONDecoder().decode([PromptInfo].self, from: data)
+    }
+    
+    func getResources() async throws -> [ResourceInfo] {
+        let data = try await request("/resources")
+        return try JSONDecoder().decode([ResourceInfo].self, from: data)
+    }
+    
     /// Reload configuration
     func reloadConfig() async throws {
         _ = try await request("/reload", method: "POST")

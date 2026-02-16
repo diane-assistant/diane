@@ -2,7 +2,9 @@ import SwiftUI
 import AppKit
 
 struct SchedulerView: View {
+    @EnvironmentObject var statusMonitor: StatusMonitor
     @State private var viewModel: SchedulerViewModel
+    @State private var clientInitialized = false
     
     init(viewModel: SchedulerViewModel = SchedulerViewModel()) {
         _viewModel = State(initialValue: viewModel)
@@ -33,6 +35,11 @@ struct SchedulerView: View {
         .frame(minWidth: 700, idealWidth: 900, maxWidth: .infinity,
                minHeight: 400, idealHeight: 600, maxHeight: .infinity)
         .task {
+            // Initialize with the correct client from StatusMonitor if available
+            if !clientInitialized, let configuredClient = statusMonitor.configuredClient {
+                viewModel = SchedulerViewModel(client: configuredClient)
+                clientInitialized = true
+            }
             await viewModel.loadData()
         }
     }

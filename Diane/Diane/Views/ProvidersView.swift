@@ -2,7 +2,9 @@ import SwiftUI
 import AppKit
 
 struct ProvidersView: View {
+    @EnvironmentObject var statusMonitor: StatusMonitor
     @State private var viewModel: ProvidersViewModel
+    @State private var clientInitialized = false
     
     init(viewModel: ProvidersViewModel = ProvidersViewModel()) {
         _viewModel = State(initialValue: viewModel)
@@ -31,6 +33,11 @@ struct ProvidersView: View {
         .frame(minWidth: 700, idealWidth: 800, maxWidth: .infinity,
                minHeight: 400, idealHeight: 500, maxHeight: .infinity)
         .task {
+            // Initialize with the correct client from StatusMonitor if available
+            if !clientInitialized, let configuredClient = statusMonitor.configuredClient {
+                viewModel = ProvidersViewModel(client: configuredClient)
+                clientInitialized = true
+            }
             await viewModel.loadData()
         }
         .sheet(isPresented: $viewModel.showCreateProvider) {

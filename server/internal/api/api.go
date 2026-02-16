@@ -19,6 +19,7 @@ import (
 	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/models"
 	"github.com/diane-assistant/diane/internal/pairing"
+	"github.com/diane-assistant/diane/internal/slave"
 )
 
 // MCPServerStatus represents the status of an MCP server
@@ -51,6 +52,24 @@ type Status struct {
 type ToolInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Server      string `json:"server"`
+	Builtin     bool   `json:"builtin"`
+}
+
+// PromptInfo represents information about a prompt
+type PromptInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Server      string `json:"server"`
+	Builtin     bool   `json:"builtin"`
+}
+
+// ResourceInfo represents information about a resource
+type ResourceInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	URI         string `json:"uri"`
+	MimeType    string `json:"mime_type,omitempty"`
 	Server      string `json:"server"`
 	Builtin     bool   `json:"builtin"`
 }
@@ -99,6 +118,8 @@ type StatusProvider interface {
 	GetStatus() Status
 	GetMCPServers() []MCPServerStatus
 	GetAllTools() []ToolInfo
+	GetAllPrompts() []PromptInfo
+	GetAllResources() []ResourceInfo
 	RestartMCPServer(name string) error
 	ReloadConfig() error
 	GetJobs() ([]Job, error)
@@ -158,11 +179,12 @@ type Server struct {
 	contextsAPI    *ContextsAPI
 	providersAPI   *ProvidersAPI
 	mcpServersAPI  *MCPServersAPI
+	slaveManager   *slave.Manager
 	pairLimiter    *pairing.RateLimiter // rate limiter for pairing attempts
 }
 
 // NewServer creates a new API server
-func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config) (*Server, error) {
+func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config, slaveManager *slave.Manager) (*Server, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
@@ -227,6 +249,7 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 		providersAPI:   providersAPI,
 		mcpServersAPI:  mcpServersAPI,
 		pairLimiter:    pairing.NewRateLimiter(),
+		slaveManager:   slaveManager,
 	}, nil
 }
 
@@ -303,6 +326,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/doctor", s.handleDoctor)
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/tools", s.handleTools)
+	mux.HandleFunc("/prompts", s.handlePrompts)
+	mux.HandleFunc("/resources", s.handleResources)
 	mux.HandleFunc("/mcp-servers", s.handleMCPServers)
 	mux.HandleFunc("/mcp-servers/", s.handleMCPServerAction)
 	mux.HandleFunc("/reload", s.handleReload)
@@ -317,6 +342,15 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/auth", s.handleAuth)
 	mux.HandleFunc("/auth/", s.handleAuthAction)
 	mux.HandleFunc("/pair", s.handlePair)
+	mux.HandleFunc("/slaves", s.handleSlaves)
+	mux.HandleFunc("/slaves/pending", s.handlePendingSlaves)
+	mux.HandleFunc("/slaves/pair", s.handlePairSlave)
+	mux.HandleFunc("/slaves/approve", s.handleApproveSlave)
+	mux.HandleFunc("/slaves/deny", s.handleDenySlave)
+	mux.HandleFunc("/slaves/revoke", s.handleRevokeSlave)
+	mux.HandleFunc("/slaves/revoked", s.handleRevokedSlaves)
+	mux.HandleFunc("/slaves/health", s.handleSlaveHealth)
+	mux.HandleFunc("/slaves/", s.handleSlaveAction)
 
 	// Register Contexts API routes
 	if s.contextsAPI != nil {
@@ -630,6 +664,32 @@ func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tools)
+}
+
+// handlePrompts returns the list of all available prompts
+func (s *Server) handlePrompts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	prompts := s.statusProvider.GetAllPrompts()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(prompts)
+}
+
+// handleResources returns the list of all available resources
+func (s *Server) handleResources(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	resources := s.statusProvider.GetAllResources()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resources)
 }
 
 // handleMCPServers returns the list of MCP servers

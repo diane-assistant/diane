@@ -16,6 +16,7 @@ import (
 	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/logger"
 	"github.com/diane-assistant/diane/internal/mcpproxy"
+	"github.com/diane-assistant/diane/internal/slave"
 	"github.com/diane-assistant/diane/mcp/tools"
 	"github.com/diane-assistant/diane/mcp/tools/apple"
 	"github.com/diane-assistant/diane/mcp/tools/downloads"
@@ -36,6 +37,7 @@ import (
 var Version = "dev"
 
 var proxy *mcpproxy.Proxy
+var slaveManager *slave.Manager // Distributed MCP slave manager
 var globalEncoder *json.Encoder // For sending notifications
 var appleProvider *apple.Provider
 var googleProvider *google.Provider
@@ -756,6 +758,127 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 	return tools
 }
 
+// GetAllPrompts returns all prompts from builtin and external MCP servers
+func (d *DianeStatusProvider) GetAllPrompts() []api.PromptInfo {
+	var prompts []api.PromptInfo
+
+	// Built-in job prompts
+	builtinPrompts := []struct{ name, desc string }{
+		{"job_report", "Generate a report of job executions over a time period"},
+		{"job_summary", "Summarize the current state of all jobs"},
+		{"job_troubleshoot", "Troubleshoot a failing job"},
+	}
+	for _, p := range builtinPrompts {
+		prompts = append(prompts, api.PromptInfo{
+			Name:        p.name,
+			Description: p.desc,
+			Server:      "jobs",
+			Builtin:     true,
+		})
+	}
+
+	// Google prompts
+	if googleProvider != nil {
+		for _, prompt := range googleProvider.Prompts() {
+			prompts = append(prompts, api.PromptInfo{
+				Name:        prompt.Name,
+				Description: prompt.Description,
+				Server:      "google",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// Notifications prompts
+	if notificationsProvider != nil {
+		for _, prompt := range notificationsProvider.Prompts() {
+			prompts = append(prompts, api.PromptInfo{
+				Name:        prompt.Name,
+				Description: prompt.Description,
+				Server:      "discord",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// External MCP server prompts (from proxy)
+	if proxy != nil {
+		proxiedPrompts, err := proxy.ListAllPrompts()
+		if err == nil {
+			for _, p := range proxiedPrompts {
+				name, _ := p["name"].(string)
+				desc, _ := p["description"].(string)
+				server, _ := p["_server"].(string)
+				prompts = append(prompts, api.PromptInfo{
+					Name:        name,
+					Description: desc,
+					Server:      server,
+					Builtin:     false,
+				})
+			}
+		}
+	}
+
+	return prompts
+}
+
+// GetAllResources returns all resources from builtin and external MCP servers
+func (d *DianeStatusProvider) GetAllResources() []api.ResourceInfo {
+	var resources []api.ResourceInfo
+
+	// Google resources
+	if googleProvider != nil {
+		for _, resource := range googleProvider.Resources() {
+			resources = append(resources, api.ResourceInfo{
+				Name:        resource.Name,
+				Description: resource.Description,
+				URI:         resource.URI,
+				MimeType:    resource.MimeType,
+				Server:      "google",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// Downloads resources
+	if downloadsProvider != nil {
+		for _, resource := range downloadsProvider.Resources() {
+			resources = append(resources, api.ResourceInfo{
+				Name:        resource.Name,
+				Description: resource.Description,
+				URI:         resource.URI,
+				MimeType:    resource.MimeType,
+				Server:      "downloads",
+				Builtin:     true,
+			})
+		}
+	}
+
+	// External MCP server resources (from proxy)
+	if proxy != nil {
+		proxiedResources, err := proxy.ListAllResources()
+		if err == nil {
+			for _, r := range proxiedResources {
+				name, _ := r["name"].(string)
+				desc, _ := r["description"].(string)
+				uri, _ := r["uri"].(string)
+				mimeType, _ := r["mimeType"].(string)
+				server, _ := r["_server"].(string)
+				resources = append(resources, api.ResourceInfo{
+					Name:        name,
+					Description: desc,
+					URI:         uri,
+					MimeType:    mimeType,
+					Server:      server,
+					Builtin:     false,
+				})
+			}
+		}
+	}
+
+	return resources
+}
+
 // GetToolsForContext returns tools filtered by context settings
 func (d *DianeStatusProvider) GetToolsForContext(contextName string) []api.ToolInfo {
 	// If no context specified, return all tools
@@ -1294,6 +1417,36 @@ func main() {
 		}
 	}()
 
+	// Initialize Slave Manager (for distributed MCP)
+	if database != nil && proxy != nil {
+		// Initialize Certificate Authority
+		caDir := filepath.Join(home, ".diane")
+		ca, err := slave.NewCertificateAuthority(caDir)
+		if err != nil {
+			slog.Warn("Failed to initialize slave CA", "error", err)
+		} else {
+			// Create Slave Manager
+			var managerErr error
+			slaveManager, managerErr = slave.NewManager(database, proxy, ca)
+			if managerErr != nil {
+				slog.Warn("Failed to create slave manager", "error", managerErr)
+			} else {
+				// Start WebSocket server for slave connections
+				wsAddr := ":8765" // TODO: Make configurable via flag/env
+				if err := slaveManager.StartServer(wsAddr, ca); err != nil {
+					slog.Warn("Failed to start slave WebSocket server", "error", err)
+				} else {
+					slog.Info("Slave manager initialized successfully", "address", wsAddr)
+				}
+			}
+		}
+	}
+	defer func() {
+		if slaveManager != nil {
+			slaveManager.Stop()
+		}
+	}()
+
 	// Initialize Apple tools provider (only on macOS)
 	appleProvider = apple.NewProvider()
 	if err := appleProvider.CheckDependencies(); err != nil {
@@ -1394,7 +1547,7 @@ func main() {
 
 	// Start the Unix socket API server for companion app
 	statusProvider := &DianeStatusProvider{}
-	apiServer, err = api.NewServer(statusProvider, database, cfg)
+	apiServer, err = api.NewServer(statusProvider, database, cfg, slaveManager)
 	if err != nil {
 		slog.Warn("Failed to create API server", "error", err)
 	} else {

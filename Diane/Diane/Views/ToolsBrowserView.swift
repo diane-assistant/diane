@@ -3,6 +3,7 @@ import SwiftUI
 struct ToolsBrowserView: View {
     @EnvironmentObject var statusMonitor: StatusMonitor
     @State private var viewModel: ToolsBrowserViewModel
+    @State private var clientInitialized = false
 
     init(viewModel: ToolsBrowserViewModel = ToolsBrowserViewModel()) {
         _viewModel = State(initialValue: viewModel)
@@ -28,6 +29,12 @@ struct ToolsBrowserView: View {
         .frame(minWidth: 500, idealWidth: 600, maxWidth: .infinity,
                minHeight: 400, idealHeight: 500, maxHeight: .infinity)
         .onAppear {
+            // Initialize with the correct client from StatusMonitor if available
+            if !clientInitialized, let configuredClient = statusMonitor.configuredClient {
+                viewModel = ToolsBrowserViewModel(client: configuredClient)
+                clientInitialized = true
+            }
+            
             // Only load tools when view appears AND we're connected
             FileLogger.shared.info("onAppear, connectionState=\(statusMonitor.connectionState)", category: "ToolsBrowserView")
             if case .connected = statusMonitor.connectionState {

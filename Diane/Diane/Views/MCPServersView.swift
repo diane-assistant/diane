@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct MCPServersView: View {
+    @EnvironmentObject var statusMonitor: StatusMonitor
     @State private var viewModel: MCPServersViewModel
+    @State private var clientInitialized = false
     
     init(viewModel: MCPServersViewModel = MCPServersViewModel()) {
         _viewModel = State(initialValue: viewModel)
@@ -30,6 +32,11 @@ struct MCPServersView: View {
         .frame(minWidth: 700, idealWidth: 800, maxWidth: .infinity,
                minHeight: 400, idealHeight: 500, maxHeight: .infinity)
         .task {
+            // Initialize with the correct client from StatusMonitor if available
+            if !clientInitialized, let configuredClient = statusMonitor.configuredClient {
+                viewModel = MCPServersViewModel(client: configuredClient)
+                clientInitialized = true
+            }
             await viewModel.loadData()
         }
         .sheet(isPresented: $viewModel.showCreateServer) {
@@ -185,6 +192,39 @@ struct MCPServersView: View {
                         .font(.caption)
                         .foregroundStyle(server.enabled ? .green : .secondary)
                 }
+                
+                // Capability counts from status
+                if let status = statusMonitor.status.mcpServers.first(where: { $0.name == server.name }) {
+                    HStack(spacing: 8) {
+                        if status.toolCount > 0 {
+                            HStack(spacing: 2) {
+                                Image(systemName: "wrench.fill")
+                                    .font(.system(size: 8))
+                                Text("\(status.toolCount)")
+                                    .font(.caption2)
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                        if status.promptCount > 0 {
+                            HStack(spacing: 2) {
+                                Image(systemName: "text.bubble.fill")
+                                    .font(.system(size: 8))
+                                Text("\(status.promptCount)")
+                                    .font(.caption2)
+                            }
+                            .foregroundStyle(.purple)
+                        }
+                        if status.resourceCount > 0 {
+                            HStack(spacing: 2) {
+                                Image(systemName: "doc.fill")
+                                    .font(.system(size: 8))
+                                Text("\(status.resourceCount)")
+                                    .font(.caption2)
+                            }
+                            .foregroundStyle(.green)
+                        }
+                    }
+                }
             }
             
             Spacer()
@@ -271,6 +311,42 @@ struct MCPServersView: View {
                         }
                     }
                 }
+                
+                Divider()
+                
+                // Capabilities section
+                if let status = statusMonitor.status.mcpServers.first(where: { $0.name == server.name }) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Capabilities")
+                            .font(.headline)
+                        
+                        HStack(spacing: 20) {
+                            CapabilityBadge(
+                                icon: "wrench.fill",
+                                label: "Tools",
+                                count: status.toolCount,
+                                color: .blue
+                            )
+                            CapabilityBadge(
+                                icon: "text.bubble.fill",
+                                label: "Prompts",
+                                count: status.promptCount,
+                                color: .purple
+                            )
+                            CapabilityBadge(
+                                icon: "doc.fill",
+                                label: "Resources",
+                                count: status.resourceCount,
+                                color: .green
+                            )
+                        }
+                    }
+                    
+                    Divider()
+                }
+                
+                // Capabilities section with tabs
+                CapabilitiesSection(serverName: server.name)
                 
                 Divider()
                 
@@ -605,4 +681,312 @@ struct MCPServersView: View {
         return formatter.string(from: date)
     }
 }
+
+// MARK: - Capability Badge
+
+struct CapabilityBadge: View {
+    let icon: String
+    let label: String
+    let count: Int
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(color)
+            
+            VStack(spacing: 2) {
+                Text("\(count)")
+                    .font(.title3.bold())
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(color.opacity(0.1))
+        .cornerRadius(8)
+    }
+}
+
+// MARK: - Capabilities Section
+
+struct CapabilitiesSection: View {
+    let serverName: String
+    @EnvironmentObject var statusMonitor: StatusMonitor
+    @State private var tools: [ToolInfo] = []
+    @State private var prompts: [PromptInfo] = []
+    @State private var resources: [ResourceInfo] = []
+    @State private var isLoading = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Capabilities")
+                .font(.headline)
+            
+            if isLoading {
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Loading...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Prompts section
+                    let filteredPrompts = prompts.filter { $0.server == serverName }
+                    let _ = print("CapabilitiesSection for '\(serverName)': total prompts=\(prompts.count), filtered=\(filteredPrompts.count), total resources=\(resources.count), filtered resources=\(resources.filter { $0.server == serverName }.count), total tools=\(tools.count), filtered tools=\(tools.filter { $0.server == serverName }.count)")
+                    if !filteredPrompts.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "text.bubble.fill")
+                                    .foregroundStyle(.purple)
+                                    .font(.caption)
+                                Text("Prompts")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Text("(\(filteredPrompts.count))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(filteredPrompts) { prompt in
+                                    CapabilityItemRow(name: prompt.name, description: prompt.description, color: .purple)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.purple.opacity(0.05))
+                            .cornerRadius(6)
+                        }
+                    }
+                    
+                    // Resources section
+                    let filteredResources = resources.filter { $0.server == serverName }
+                    if !filteredResources.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "doc.fill")
+                                    .foregroundStyle(.green)
+                                    .font(.caption)
+                                Text("Resources")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Text("(\(filteredResources.count))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(filteredResources) { resource in
+                                    ResourceItemRow(resource: resource)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.green.opacity(0.05))
+                            .cornerRadius(6)
+                        }
+                    }
+                    
+                    // Tools section
+                    let filteredTools = tools.filter { $0.server == serverName }
+                    if !filteredTools.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "wrench.fill")
+                                    .foregroundStyle(.blue)
+                                    .font(.caption)
+                                Text("Tools")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Text("(\(filteredTools.count))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(filteredTools) { tool in
+                                    CapabilityItemRow(name: tool.name, description: tool.description, color: .blue)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.blue.opacity(0.05))
+                            .cornerRadius(6)
+                        }
+                    }
+                    
+                    // Show empty state if nothing is available
+                    if filteredPrompts.isEmpty && filteredResources.isEmpty && filteredTools.isEmpty {
+                        Text("No capabilities available for this server")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
+                    }
+                }
+            }
+        }
+        .task {
+            await loadCapabilities()
+        }
+    }
+    
+    private func loadCapabilities() async {
+        guard let client = statusMonitor.configuredClient else { return }
+        
+        isLoading = true
+        do {
+            async let toolsTask = client.getTools()
+            async let promptsTask = client.getPrompts()
+            async let resourcesTask = client.getResources()
+            
+            tools = try await toolsTask
+            prompts = try await promptsTask
+            resources = try await resourcesTask
+        } catch {
+            print("Error loading capabilities: \(error)")
+            // Show empty state on error
+        }
+        isLoading = false
+    }
+}
+
+struct CapabilityItemRow: View {
+    let name: String
+    let description: String
+    let color: Color
+    @State private var isExpanded = false
+    @State private var isHovering = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(name)
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.medium)
+                
+                Spacer()
+                
+                if isHovering {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(name, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy name")
+                }
+                
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            if isExpanded {
+                Text(description)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isHovering ? color.opacity(0.1) : Color.clear)
+        .cornerRadius(4)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+    }
+}
+
+struct ResourceItemRow: View {
+    let resource: ResourceInfo
+    @State private var isExpanded = false
+    @State private var isHovering = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(resource.name)
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.medium)
+                
+                Spacer()
+                
+                if isHovering {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(resource.uri, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy URI")
+                }
+                
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(resource.description)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    
+                    HStack(spacing: 4) {
+                        Text("URI:")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text(resource.uri)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    if let mimeType = resource.mimeType, !mimeType.isEmpty {
+                        HStack(spacing: 4) {
+                            Text("Type:")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Text(mimeType)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isHovering ? Color.green.opacity(0.1) : Color.clear)
+        .cornerRadius(4)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+    }
+}
+
 

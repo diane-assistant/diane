@@ -238,6 +238,48 @@ func (db *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_usage_service ON usage(service);
 	CREATE INDEX IF NOT EXISTS idx_usage_model ON usage(model);
 	CREATE INDEX IF NOT EXISTS idx_usage_created_at ON usage(created_at);
+
+	-- Slave servers for distributed MCP
+	CREATE TABLE IF NOT EXISTS slave_servers (
+		id TEXT PRIMARY KEY,
+		host_id TEXT UNIQUE NOT NULL,
+		cert_serial TEXT NOT NULL,
+		issued_at DATETIME NOT NULL,
+		expires_at DATETIME NOT NULL,
+		last_seen DATETIME,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_slave_servers_host_id ON slave_servers(host_id);
+	CREATE INDEX IF NOT EXISTS idx_slave_servers_enabled ON slave_servers(enabled);
+
+	-- Revoked slave credentials
+	CREATE TABLE IF NOT EXISTS revoked_slave_credentials (
+		id TEXT PRIMARY KEY,
+		host_id TEXT NOT NULL,
+		cert_serial TEXT NOT NULL,
+		revoked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		reason TEXT
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_revoked_creds_host_id ON revoked_slave_credentials(host_id);
+	CREATE INDEX IF NOT EXISTS idx_revoked_creds_serial ON revoked_slave_credentials(cert_serial);
+
+	-- Pending pairing requests (optional persistence)
+	CREATE TABLE IF NOT EXISTS pairing_requests (
+		id TEXT PRIMARY KEY,
+		host_id TEXT NOT NULL,
+		pairing_code TEXT NOT NULL,
+		csr TEXT NOT NULL,
+		requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		expires_at DATETIME NOT NULL,
+		status TEXT NOT NULL DEFAULT 'pending'
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_pairing_requests_host_id ON pairing_requests(host_id);
+	CREATE INDEX IF NOT EXISTS idx_pairing_requests_status ON pairing_requests(status);
 	`
 
 	_, err := db.conn.Exec(schema)

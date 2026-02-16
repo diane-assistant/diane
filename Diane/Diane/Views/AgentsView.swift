@@ -2,7 +2,9 @@ import SwiftUI
 import AppKit
 
 struct AgentsView: View {
+    @EnvironmentObject var statusMonitor: StatusMonitor
     @State private var viewModel: AgentsViewModel
+    @State private var clientInitialized = false
     
     init(viewModel: AgentsViewModel = AgentsViewModel()) {
         _viewModel = State(initialValue: viewModel)
@@ -31,6 +33,11 @@ struct AgentsView: View {
         .frame(minWidth: 750, idealWidth: 950, maxWidth: .infinity,
                minHeight: 450, idealHeight: 650, maxHeight: .infinity)
         .task {
+            // Initialize with the correct client from StatusMonitor if available
+            if !clientInitialized, let configuredClient = statusMonitor.configuredClient {
+                viewModel = AgentsViewModel(client: configuredClient)
+                clientInitialized = true
+            }
             await viewModel.loadData()
         }
     }

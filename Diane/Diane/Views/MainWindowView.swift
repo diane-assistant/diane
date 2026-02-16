@@ -3,22 +3,21 @@ import AppKit
 
 /// Main window view with sidebar navigation and detail view
 /// 
-/// This consolidates all functionality (Tools, Scheduler, Agents, Contexts, MCP Servers, Providers, Usage, Settings)
+/// This consolidates all functionality (MCP Servers, Scheduler, Agents, Contexts, Providers, Usage, Settings)
 /// into a single unified desktop application interface.
 ///
 /// ## Navigation Structure
-/// - **Sidebar**: List of 8 sections with icons and labels
+/// - **Sidebar**: List of 7 sections with icons and labels
 /// - **Detail View**: Dynamically switches based on selected section
 /// - **Persistence**: Selected section is saved and restored across app launches
 ///
 /// ## Keyboard Shortcuts
-/// - Cmd+1: Tools
+/// - Cmd+1: MCP Servers
 /// - Cmd+2: Scheduler
 /// - Cmd+3: Agents
 /// - Cmd+4: Contexts
-/// - Cmd+5: MCP Servers
-/// - Cmd+6: Providers
-/// - Cmd+7: Usage
+/// - Cmd+5: Providers
+/// - Cmd+6: Usage
 /// - Cmd+,: Settings
 ///
 /// ## Features
@@ -33,11 +32,10 @@ struct MainWindowView: View {
     
     /// Navigation section enum defining all available sections in the sidebar
     enum Section: String, CaseIterable, Identifiable {
-        case tools = "Tools"
+        case mcpServers = "MCP Servers"
         case scheduler = "Scheduler"
         case agents = "Agents"
         case contexts = "Contexts"
-        case mcpServers = "MCP Servers"
         case providers = "Providers"
         case usage = "Usage"
         case settings = "Settings"
@@ -47,16 +45,14 @@ struct MainWindowView: View {
         /// SF Symbol icon for each section
         var icon: String {
             switch self {
-            case .tools:
-                return "wrench.and.screwdriver"
+            case .mcpServers:
+                return "server.rack"
             case .scheduler:
                 return "calendar.badge.clock"
             case .agents:
                 return "person.3.fill"
             case .contexts:
                 return "square.stack.3d.up"
-            case .mcpServers:
-                return "server.rack"
             case .providers:
                 return "cpu"
             case .usage:
@@ -68,7 +64,7 @@ struct MainWindowView: View {
     }
     
     /// Selected section (persisted across launches)
-    @SceneStorage("selectedSection") private var selectedSection: Section = .tools
+    @SceneStorage("selectedSection") private var selectedSection: Section = .mcpServers
     
     var body: some View {
         NavigationSplitView {
@@ -159,17 +155,14 @@ struct MainWindowView: View {
     @ViewBuilder
     private func detailView(for section: Section?) -> some View {
         switch section {
-        case .tools:
-            ToolsBrowserView()
-                .id("tools-view") // Force view recreation when switching sections
+        case .mcpServers:
+            MCPServersView()
         case .scheduler:
             SchedulerView()
         case .agents:
             AgentsView()
         case .contexts:
             ContextsView()
-        case .mcpServers:
-            MCPServersView()
         case .providers:
             ProvidersView()
         case .usage:
@@ -185,13 +178,12 @@ struct MainWindowView: View {
     /// Returns keyboard shortcut key for each section
     private func shortcutKey(for section: Section) -> KeyEquivalent {
         switch section {
-        case .tools: return "1"
+        case .mcpServers: return "1"
         case .scheduler: return "2"
         case .agents: return "3"
         case .contexts: return "4"
-        case .mcpServers: return "5"
-        case .providers: return "6"
-        case .usage: return "7"
+        case .providers: return "5"
+        case .usage: return "6"
         case .settings: return ","
         }
     }

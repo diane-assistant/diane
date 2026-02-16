@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct UsageView: View {
+    @EnvironmentObject var statusMonitor: StatusMonitor
     @State private var viewModel: UsageViewModel
+    @State private var clientInitialized = false
 
     init(viewModel: UsageViewModel = UsageViewModel()) {
         _viewModel = State(initialValue: viewModel)
@@ -37,6 +39,11 @@ struct UsageView: View {
         .frame(minWidth: 600, idealWidth: 700, maxWidth: .infinity,
                minHeight: 400, idealHeight: 500, maxHeight: .infinity)
         .task {
+            // Initialize with the correct client from StatusMonitor if available
+            if !clientInitialized, let configuredClient = statusMonitor.configuredClient {
+                viewModel = UsageViewModel(client: configuredClient)
+                clientInitialized = true
+            }
             await viewModel.loadData()
         }
         .onChange(of: viewModel.selectedTimeRange) { _, _ in

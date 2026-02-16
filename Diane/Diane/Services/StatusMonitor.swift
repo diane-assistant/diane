@@ -16,6 +16,12 @@ class StatusMonitor: ObservableObject {
     @Published var isRemoteMode: Bool = false
     
     private var client: DianeClientProtocol?
+    
+    /// The configured client instance for use by ViewModels
+    /// This allows ViewModels to use the same remote/local client as StatusMonitor
+    var configuredClient: DianeClientProtocol? {
+        return client
+    }
     private nonisolated(unsafe) var pollTimer: Timer?
     private var pollInterval: TimeInterval = 5.0
     private var hasStarted = false

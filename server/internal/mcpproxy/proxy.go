@@ -28,7 +28,7 @@ type OAuthConfig struct {
 type ServerConfig struct {
 	Name    string            `json:"name"`
 	Enabled bool              `json:"enabled"`
-	Type    string            `json:"type"` // stdio, sse, http
+	Type    string            `json:"type"` // stdio, sse, http, remote
 	Command string            `json:"command"`
 	Args    []string          `json:"args"`
 	Env     map[string]string `json:"env"`
@@ -37,6 +37,11 @@ type ServerConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 	// OAuth configuration
 	OAuth *OAuthConfig `json:"oauth,omitempty"`
+	// Remote slave fields
+	Hostname string `json:"hostname,omitempty"`  // For remote slaves
+	CertPath string `json:"cert_path,omitempty"` // Client cert path
+	KeyPath  string `json:"key_path,omitempty"`  // Client key path
+	CAPath   string `json:"ca_path,omitempty"`   // CA cert path
 }
 
 // Config represents the MCP proxy configuration
@@ -143,6 +148,13 @@ func (p *Proxy) startClient(config ServerConfig) error {
 		client, err = NewSSEClient(config.Name, config.URL, config.Headers)
 	case "http":
 		client, err = NewHTTPClientWithOAuth(config.Name, config.URL, config.Headers, config.OAuth)
+	case "remote":
+		// Remote slave connection via WebSocket
+		if config.Hostname == "" || config.URL == "" {
+			return fmt.Errorf("remote slaves require hostname and URL (master address)")
+		}
+		client, err = NewWSClient(config.Name, config.Hostname, config.URL,
+			config.CertPath, config.KeyPath, config.CAPath)
 	case "stdio", "":
 		// Default to stdio
 		client, err = NewMCPClient(config.Name, config.Command, config.Args, config.Env)
@@ -593,6 +605,56 @@ func (p *Proxy) Close() error {
 
 	p.clients = make(map[string]Client)
 	return nil
+}
+
+// RegisterSlaveClient dynamically registers a remote slave client
+// This is used by the slave registry to add slaves as they connect
+func (p *Proxy) RegisterSlaveClient(name string, client Client) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if _, exists := p.clients[name]; exists {
+		return fmt.Errorf("client with name %s already exists", name)
+	}
+
+	p.clients[name] = client
+	slog.Info("Registered slave client", "name", name)
+
+	// Start monitoring the client
+	go p.monitorClient(client)
+
+	return nil
+}
+
+// UnregisterSlaveClient dynamically removes a remote slave client
+// This is used by the slave registry when slaves disconnect
+func (p *Proxy) UnregisterSlaveClient(name string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	client, exists := p.clients[name]
+	if !exists {
+		return fmt.Errorf("client with name %s not found", name)
+	}
+
+	// Close the client
+	if err := client.Close(); err != nil {
+		slog.Warn("Error closing slave client", "name", name, "error", err)
+	}
+
+	delete(p.clients, name)
+	slog.Info("Unregistered slave client", "name", name)
+
+	return nil
+}
+
+// GetClient returns a client by name (useful for testing and debugging)
+func (p *Proxy) GetClient(name string) (Client, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	client, ok := p.clients[name]
+	return client, ok
 }
 
 // GetServerConfig returns the configuration for a specific server
