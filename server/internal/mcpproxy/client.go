@@ -14,24 +14,28 @@ import (
 
 // MCPClient represents a connection to an MCP server
 type MCPClient struct {
-	Name            string
-	cmd             *exec.Cmd
-	stdin           io.WriteCloser
-	stdout          io.ReadCloser
-	stderr          io.ReadCloser
-	encoder         *json.Encoder
-	decoder         *json.Decoder
-	mu              sync.Mutex
-	notifyChan      chan string // Channel for notifications (method names)
-	responseCh      chan MCPResponse
-	nextID          int
-	pendingMu       sync.Mutex
-	pending         map[interface{}]chan MCPResponse
-	cachedToolCount int    // Cached tool count for fast status queries
-	toolCountValid  bool   // Whether cached count is valid
-	refreshing      bool   // Whether a cache refresh is in progress
-	lastError       string // Last error message
-	stderrOutput    string // Last stderr output (truncated)
+	Name                string
+	cmd                 *exec.Cmd
+	stdin               io.WriteCloser
+	stdout              io.ReadCloser
+	stderr              io.ReadCloser
+	encoder             *json.Encoder
+	decoder             *json.Decoder
+	mu                  sync.Mutex
+	notifyChan          chan string // Channel for notifications (method names)
+	responseCh          chan MCPResponse
+	nextID              int
+	pendingMu           sync.Mutex
+	pending             map[interface{}]chan MCPResponse
+	cachedToolCount     int    // Cached tool count for fast status queries
+	toolCountValid      bool   // Whether cached count is valid
+	cachedPromptCount   int    // Cached prompt count for fast status queries
+	promptCountValid    bool   // Whether cached prompt count is valid
+	cachedResourceCount int    // Cached resource count for fast status queries
+	resourceCountValid  bool   // Whether cached resource count is valid
+	refreshing          bool   // Whether a cache refresh is in progress
+	lastError           string // Last error message
+	stderrOutput        string // Last stderr output (truncated)
 }
 
 // MCPRequest represents a JSON-RPC request
@@ -349,6 +353,8 @@ func (c *MCPClient) TriggerAsyncRefresh(timeout time.Duration) bool {
 
 	go func() {
 		_, _ = c.ListToolsWithTimeout(timeout)
+		_, _ = c.ListPrompts()
+		_, _ = c.ListResources()
 		c.mu.Lock()
 		c.refreshing = false
 		c.mu.Unlock()
@@ -369,6 +375,99 @@ func (c *MCPClient) CallTool(toolName string, arguments map[string]interface{}) 
 	}
 
 	return c.sendRequestWithTimeout("tools/call", params, 30*time.Second)
+}
+
+// ListPrompts requests the list of prompts from the MCP server
+func (c *MCPClient) ListPrompts() ([]map[string]interface{}, error) {
+	result, err := c.sendRequestWithTimeout("prompts/list", nil, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	var promptsResult struct {
+		Prompts []map[string]interface{} `json:"prompts"`
+	}
+	if err := json.Unmarshal(result, &promptsResult); err != nil {
+		return nil, fmt.Errorf("failed to parse prompts: %w", err)
+	}
+
+	// Cache the prompt count
+	c.mu.Lock()
+	c.cachedPromptCount = len(promptsResult.Prompts)
+	c.promptCountValid = true
+	c.mu.Unlock()
+
+	return promptsResult.Prompts, nil
+}
+
+// GetPrompt retrieves a specific prompt and fills in its template
+func (c *MCPClient) GetPrompt(name string, arguments map[string]string) (json.RawMessage, error) {
+	params, err := json.Marshal(map[string]interface{}{
+		"name":      name,
+		"arguments": arguments,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal params: %w", err)
+	}
+
+	return c.sendRequestWithTimeout("prompts/get", params, 5*time.Second)
+}
+
+// ListResources requests the list of resources from the MCP server
+func (c *MCPClient) ListResources() ([]map[string]interface{}, error) {
+	result, err := c.sendRequestWithTimeout("resources/list", nil, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	var resourcesResult struct {
+		Resources []map[string]interface{} `json:"resources"`
+	}
+	if err := json.Unmarshal(result, &resourcesResult); err != nil {
+		return nil, fmt.Errorf("failed to parse resources: %w", err)
+	}
+
+	// Cache the resource count
+	c.mu.Lock()
+	c.cachedResourceCount = len(resourcesResult.Resources)
+	c.resourceCountValid = true
+	c.mu.Unlock()
+
+	return resourcesResult.Resources, nil
+}
+
+// ReadResource reads the contents of a specific resource
+func (c *MCPClient) ReadResource(uri string) (json.RawMessage, error) {
+	params, err := json.Marshal(map[string]interface{}{
+		"uri": uri,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal params: %w", err)
+	}
+
+	return c.sendRequestWithTimeout("resources/read", params, 5*time.Second)
+}
+
+// GetCachedPromptCount returns the cached prompt count (fast, non-blocking)
+// Returns -1 if no cached value is available
+func (c *MCPClient) GetCachedPromptCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.promptCountValid {
+		return c.cachedPromptCount
+	}
+	return -1
+}
+
+// GetCachedResourceCount returns the cached resource count (fast, non-blocking)
+// Returns -1 if no cached value is available
+func (c *MCPClient) GetCachedResourceCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.resourceCountValid {
+		return c.cachedResourceCount
+	}
+	return -1
 }
 
 // NotificationChan returns the channel for receiving notifications from this client

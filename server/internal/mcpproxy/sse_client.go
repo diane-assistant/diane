@@ -18,27 +18,31 @@ import (
 
 // SSEClient represents a connection to an MCP server via SSE transport
 type SSEClient struct {
-	name            string
-	baseURL         string
-	headers         map[string]string
-	httpClient      *http.Client
-	sseTransport    *http.Transport
-	sessionID       string
-	messageEndpoint string
-	mu              sync.Mutex
-	notifyChan      chan string
-	stopChan        chan struct{}
-	reconnectChan   chan struct{}
-	connected       atomic.Bool
-	closing         atomic.Bool
-	cachedToolCount int
-	toolCountValid  bool
-	refreshing      bool
-	lastError       string
-	lastActivity    time.Time
-	nextID          int
-	pendingMu       sync.Mutex
-	pending         map[interface{}]chan MCPResponse
+	name                string
+	baseURL             string
+	headers             map[string]string
+	httpClient          *http.Client
+	sseTransport        *http.Transport
+	sessionID           string
+	messageEndpoint     string
+	mu                  sync.Mutex
+	notifyChan          chan string
+	stopChan            chan struct{}
+	reconnectChan       chan struct{}
+	connected           atomic.Bool
+	closing             atomic.Bool
+	cachedToolCount     int
+	toolCountValid      bool
+	cachedPromptCount   int
+	promptCountValid    bool
+	cachedResourceCount int
+	resourceCountValid  bool
+	refreshing          bool
+	lastError           string
+	lastActivity        time.Time
+	nextID              int
+	pendingMu           sync.Mutex
+	pending             map[interface{}]chan MCPResponse
 }
 
 // NewSSEClient creates a new SSE MCP client
@@ -566,6 +570,77 @@ func (c *SSEClient) CallTool(toolName string, arguments map[string]interface{}) 
 	return c.sendRequest("tools/call", params)
 }
 
+// ListPrompts requests the list of prompts from the MCP server
+func (c *SSEClient) ListPrompts() ([]map[string]interface{}, error) {
+	result, err := c.sendRequest("prompts/list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var promptsResult struct {
+		Prompts []map[string]interface{} `json:"prompts"`
+	}
+	if err := json.Unmarshal(result, &promptsResult); err != nil {
+		return nil, fmt.Errorf("failed to parse prompts: %w", err)
+	}
+
+	// Cache the prompt count
+	c.mu.Lock()
+	c.cachedPromptCount = len(promptsResult.Prompts)
+	c.promptCountValid = true
+	c.mu.Unlock()
+
+	return promptsResult.Prompts, nil
+}
+
+// GetPrompt retrieves a specific prompt and fills in its template
+func (c *SSEClient) GetPrompt(name string, arguments map[string]string) (json.RawMessage, error) {
+	params, err := json.Marshal(map[string]interface{}{
+		"name":      name,
+		"arguments": arguments,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal params: %w", err)
+	}
+
+	return c.sendRequest("prompts/get", params)
+}
+
+// ListResources requests the list of resources from the MCP server
+func (c *SSEClient) ListResources() ([]map[string]interface{}, error) {
+	result, err := c.sendRequest("resources/list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resourcesResult struct {
+		Resources []map[string]interface{} `json:"resources"`
+	}
+	if err := json.Unmarshal(result, &resourcesResult); err != nil {
+		return nil, fmt.Errorf("failed to parse resources: %w", err)
+	}
+
+	// Cache the resource count
+	c.mu.Lock()
+	c.cachedResourceCount = len(resourcesResult.Resources)
+	c.resourceCountValid = true
+	c.mu.Unlock()
+
+	return resourcesResult.Resources, nil
+}
+
+// ReadResource reads the contents of a specific resource
+func (c *SSEClient) ReadResource(uri string) (json.RawMessage, error) {
+	params, err := json.Marshal(map[string]interface{}{
+		"uri": uri,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal params: %w", err)
+	}
+
+	return c.sendRequest("resources/read", params)
+}
+
 // IsConnected returns true if the client is connected
 func (c *SSEClient) IsConnected() bool {
 	return c.connected.Load()
@@ -577,6 +652,26 @@ func (c *SSEClient) GetCachedToolCount() int {
 	defer c.mu.Unlock()
 	if c.toolCountValid {
 		return c.cachedToolCount
+	}
+	return -1
+}
+
+// GetCachedPromptCount returns the cached prompt count
+func (c *SSEClient) GetCachedPromptCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.promptCountValid {
+		return c.cachedPromptCount
+	}
+	return -1
+}
+
+// GetCachedResourceCount returns the cached resource count
+func (c *SSEClient) GetCachedResourceCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.resourceCountValid {
+		return c.cachedResourceCount
 	}
 	return -1
 }
@@ -600,6 +695,8 @@ func (c *SSEClient) TriggerAsyncRefresh(timeout time.Duration) bool {
 
 	go func() {
 		_, _ = c.ListToolsWithTimeout(timeout)
+		_, _ = c.ListPrompts()
+		_, _ = c.ListResources()
 		c.mu.Lock()
 		c.refreshing = false
 		c.mu.Unlock()

@@ -217,6 +217,114 @@ func (p *Proxy) CallTool(toolName string, arguments map[string]interface{}) (jso
 	return client.CallTool(actualToolName, arguments)
 }
 
+// ListAllPrompts aggregates prompts from all MCP clients
+func (p *Proxy) ListAllPrompts() ([]map[string]interface{}, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var allPrompts []map[string]interface{}
+
+	for serverName, client := range p.clients {
+		prompts, err := client.ListPrompts()
+		if err != nil {
+			slog.Warn("Failed to list prompts from server", "server", serverName, "error", err)
+			continue
+		}
+
+		// Prefix prompt names with server name to avoid conflicts
+		for _, prompt := range prompts {
+			if name, ok := prompt["name"].(string); ok {
+				prompt["name"] = serverName + "_" + name
+				prompt["_server"] = serverName // Track which server this prompt belongs to
+			}
+			allPrompts = append(allPrompts, prompt)
+		}
+	}
+
+	return allPrompts, nil
+}
+
+// GetPrompt routes a prompt request to the appropriate MCP client
+func (p *Proxy) GetPrompt(promptName string, arguments map[string]string) (json.RawMessage, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	// Parse server name from prompt name (format: server_promptname)
+	var serverName, actualPromptName string
+	for sName := range p.clients {
+		prefix := sName + "_"
+		if len(promptName) > len(prefix) && promptName[:len(prefix)] == prefix {
+			serverName = sName
+			actualPromptName = promptName[len(prefix):]
+			break
+		}
+	}
+
+	if serverName == "" {
+		return nil, fmt.Errorf("unknown prompt: %s", promptName)
+	}
+
+	client, ok := p.clients[serverName]
+	if !ok {
+		return nil, fmt.Errorf("server not found: %s", serverName)
+	}
+
+	return client.GetPrompt(actualPromptName, arguments)
+}
+
+// ListAllResources aggregates resources from all MCP clients
+func (p *Proxy) ListAllResources() ([]map[string]interface{}, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var allResources []map[string]interface{}
+
+	for serverName, client := range p.clients {
+		resources, err := client.ListResources()
+		if err != nil {
+			slog.Warn("Failed to list resources from server", "server", serverName, "error", err)
+			continue
+		}
+
+		// Add server metadata to track which server this resource belongs to
+		for _, resource := range resources {
+			resource["_server"] = serverName
+			allResources = append(allResources, resource)
+		}
+	}
+
+	return allResources, nil
+}
+
+// ReadResource routes a resource read request to the appropriate MCP client
+// The URI should be prefixed with the server name (format: server_name://uri)
+func (p *Proxy) ReadResource(uri string) (json.RawMessage, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	// Parse server name from URI prefix (format: server_name://actualuri)
+	var serverName, actualURI string
+	for sName := range p.clients {
+		prefix := sName + "://"
+		if len(uri) > len(prefix) && uri[:len(prefix)] == prefix {
+			serverName = sName
+			actualURI = uri[len(prefix):]
+			break
+		}
+	}
+
+	if serverName == "" {
+		return nil, fmt.Errorf("unknown resource server for URI: %s", uri)
+	}
+
+	client, ok := p.clients[serverName]
+	if !ok {
+		return nil, fmt.Errorf("server not found: %s", serverName)
+	}
+
+	return client.ReadResource(actualURI)
+}
+
 // monitorNotifications watches all client notification channels
 func (p *Proxy) monitorNotifications() {
 	p.mu.RLock()
@@ -344,6 +452,8 @@ type ServerStatus struct {
 	Enabled       bool   `json:"enabled"`
 	Connected     bool   `json:"connected"`
 	ToolCount     int    `json:"tool_count"`
+	PromptCount   int    `json:"prompt_count"`
+	ResourceCount int    `json:"resource_count"`
 	Error         string `json:"error,omitempty"`
 	RequiresAuth  bool   `json:"requires_auth,omitempty"`
 	Authenticated bool   `json:"authenticated,omitempty"`
@@ -377,6 +487,16 @@ func (p *Proxy) GetServerStatuses() []ServerStatus {
 			cachedCount := client.GetCachedToolCount()
 			if cachedCount >= 0 {
 				status.ToolCount = cachedCount
+			}
+			// Use cached prompt count for fast response
+			cachedPromptCount := client.GetCachedPromptCount()
+			if cachedPromptCount >= 0 {
+				status.PromptCount = cachedPromptCount
+			}
+			// Use cached resource count for fast response
+			cachedResourceCount := client.GetCachedResourceCount()
+			if cachedResourceCount >= 0 {
+				status.ResourceCount = cachedResourceCount
 			}
 			// If no cache, trigger async refresh (only one at a time)
 			if cachedCount < 0 && status.Connected {

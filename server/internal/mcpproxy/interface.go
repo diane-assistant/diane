@@ -19,11 +19,29 @@ type Client interface {
 	// CallTool calls a tool on the MCP server
 	CallTool(toolName string, arguments map[string]interface{}) (json.RawMessage, error)
 
+	// ListPrompts returns the list of available prompts
+	ListPrompts() ([]map[string]interface{}, error)
+
+	// GetPrompt retrieves a specific prompt and fills in its template
+	GetPrompt(name string, arguments map[string]string) (json.RawMessage, error)
+
+	// ListResources returns the list of available resources
+	ListResources() ([]map[string]interface{}, error)
+
+	// ReadResource reads the contents of a specific resource
+	ReadResource(uri string) (json.RawMessage, error)
+
 	// IsConnected returns true if the client is connected
 	IsConnected() bool
 
 	// GetCachedToolCount returns the cached tool count (-1 if not cached)
 	GetCachedToolCount() int
+
+	// GetCachedPromptCount returns the cached prompt count (-1 if not cached)
+	GetCachedPromptCount() int
+
+	// GetCachedResourceCount returns the cached resource count (-1 if not cached)
+	GetCachedResourceCount() int
 
 	// InvalidateToolCache marks the tool cache as invalid
 	InvalidateToolCache()
