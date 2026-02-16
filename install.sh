@@ -110,116 +110,50 @@ install_arch() {
     # Strip 'v' prefix if present for PKGBUILD versioning compatibility
     CLEAN_VERSION="${VERSION#v}"
     
-    info "Arch Linux detected. Preparing to install Diane ${VERSION}..."
-
-    # Check dependencies
-    if ! command -v makepkg >/dev/null 2>&1; then
-        warn "makepkg not found. Falling back to manual binary installation."
-        install_generic
-        return
-    fi
+    info "Arch Linux detected. Installing Diane ${VERSION}..."
 
     TMP_DIR=$(mktemp -d)
     trap "rm -rf ${TMP_DIR}" EXIT
     
-    info "Downloading package resources..."
+    # URL for the pre-built package
+    # NOTE: We only build x86_64 packages in CI currently.
+    # If the user is on ARM64, we might need to fallback to generic install or manual build?
+    # Our CI build-arch-package job only sets arch=('x86_64').
     
-    # Download helper files from the repo
-    BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/pkg/arch"
+    ARCH_PKG_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/diane-${CLEAN_VERSION}-1-x86_64.pkg.tar.zst"
     
-    # We download service and config to include in the package
-    curl -fsSL "${BASE_URL}/diane.service" -o "${TMP_DIR}/diane.service" || error "Failed to download diane.service"
-    curl -fsSL "${BASE_URL}/diane.config.json" -o "${TMP_DIR}/diane.config.json" || error "Failed to download diane.config.json"
-    
-    cd "${TMP_DIR}"
-
-    # Generate a PKGBUILD that uses the remote binaries
-    cat > PKGBUILD <<EOF
-# Maintainer: Diane <diane@diane-assistant.com>
-pkgname=diane
-pkgver=${CLEAN_VERSION}
-pkgrel=1
-pkgdesc="Diane AI assistant - MCP server and control utility"
-arch=('x86_64' 'aarch64')
-url="https://github.com/${GITHUB_REPO}"
-license=('MIT')
-depends=('glibc')
-makedepends=()
-backup=('etc/diane/config.json')
-source_x86_64=("https://github.com/${GITHUB_REPO}/releases/download/v\${pkgver}/diane-linux-amd64.tar.gz")
-source_aarch64=("https://github.com/${GITHUB_REPO}/releases/download/v\${pkgver}/diane-linux-arm64.tar.gz")
-sha256sums_x86_64=('SKIP')
-sha256sums_aarch64=('SKIP')
-
-package() {
-    # Binaries are in the root of the tarball
-    install -Dm755 "\${srcdir}/diane" "\${pkgdir}/usr/bin/diane"
-    
-    if [ -f "\${srcdir}/acp-server" ]; then
-        install -Dm755 "\${srcdir}/acp-server" "\${pkgdir}/usr/bin/acp-server"
-    fi
-
-    # Service file
-    install -Dm644 "${TMP_DIR}/diane.service" "\${pkgdir}/usr/lib/systemd/system/diane.service"
-    
-    # Config file
-    install -Dm644 "${TMP_DIR}/diane.config.json" "\${pkgdir}/etc/diane/config.json"
-    
-    # Data directory
-    install -dm755 "\${pkgdir}/var/lib/diane"
-}
-EOF
-
-    info "Building package..."
-    
-    # Check if running as root
-    if [ "$(id -u)" -eq 0 ]; then
-        warn "Running as root. Creating temporary build user..."
-        
-        # Create temp user if not exists
-        if ! id -u diane-builder >/dev/null 2>&1; then
-            useradd -m -d /tmp/diane-builder diane-builder || true
-        fi
-        
-        # Ensure build dir ownership
-        chown -R diane-builder:diane-builder "${TMP_DIR}"
-        
-        # Run makepkg as diane-builder
-        # We assume dependencies (base-devel) are already installed since we checked for makepkg
-        su - diane-builder -c "cd ${TMP_DIR} && makepkg --noconfirm"
-    else
-        # -s: Install missing dependencies (will ask for sudo password if needed)
-        # --noconfirm: Non-interactive
-        makepkg -s --noconfirm
+    if [ "$(uname -m)" != "x86_64" ]; then
+        warn "Pre-built Arch packages are only available for x86_64. Falling back to generic install."
+        install_generic
+        return
     fi
     
-    PKG_FILE=$(ls diane-*.pkg.tar.zst | head -1)
-    if [ -z "$PKG_FILE" ]; then
-        error "Package creation failed"
-    fi
+    info "Downloading pre-built package: ${ARCH_PKG_URL}"
     
-    info "Installing ${PKG_FILE}..."
-    if command -v sudo >/dev/null 2>&1; then
-        sudo pacman -U --noconfirm "${PKG_FILE}"
-    else
-        # If we are root, run directly
-        if [ "$(id -u)" -eq 0 ]; then
-             pacman -U --noconfirm "${PKG_FILE}"
+    if curl -fsSL "${ARCH_PKG_URL}" -o "${TMP_DIR}/diane.pkg.tar.zst"; then
+        info "Installing package..."
+        if command -v sudo >/dev/null 2>&1; then
+            sudo pacman -U --noconfirm "${TMP_DIR}/diane.pkg.tar.zst"
         else
-             su -c "pacman -U --noconfirm ${PKG_FILE}"
+            if [ "$(id -u)" -eq 0 ]; then
+                pacman -U --noconfirm "${TMP_DIR}/diane.pkg.tar.zst"
+            else
+                su -c "pacman -U --noconfirm ${TMP_DIR}/diane.pkg.tar.zst"
+            fi
         fi
+        success "Diane installed successfully via Pacman!"
+        
+        echo ""
+        info "Service installed at /usr/lib/systemd/system/diane.service"
+        info "Config installed at /etc/diane/config.json"
+        echo ""
+        info "To enable and start the service:"
+        echo "  sudo systemctl enable --now diane"
+        echo ""
+    else
+        warn "Pre-built package not found (maybe release is still building?). Falling back to generic install."
+        install_generic
     fi
-    
-    success "Diane installed successfully via Pacman!"
-    
-    # Post-install info
-    echo ""
-    info "Service installed at /usr/lib/systemd/system/diane.service"
-    info "Config installed at /etc/diane/config.json"
-    echo ""
-    info "To enable and start the service:"
-    echo "  sudo systemctl enable --now diane"
-    echo ""
 }
 
 # Generic Download and install (macOS, non-Arch Linux)
