@@ -107,6 +107,18 @@ clean:
 	@rm -rf Diane/build
 	@echo "Done"
 
+## Run pre-commit checks manually
+check:
+	@chmod +x $(SCRIPTS_DIR)/pre-commit.sh
+	@$(SCRIPTS_DIR)/pre-commit.sh
+
+## Setup git hooks
+setup-hooks:
+	@echo "Setting up git hooks..."
+	@chmod +x $(SCRIPTS_DIR)/pre-commit.sh
+	@ln -sf ../../$(SCRIPTS_DIR)/pre-commit.sh .git/hooks/pre-commit
+	@echo "Git pre-commit hook installed."
+
 ## Show version
 version:
 	@echo "$(VERSION)"
