@@ -1,9 +1,7 @@
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.9.1 h1:DMYNnSL41Uxl+j8+0P+MxvxdhvTkWJVEaBIF22NO+C0=
-github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.9.1/go.mod h1:cp1Qz62eTu4gVb+ZhXuZysRpbZ1lcXmumW6GKjTs518=
-github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.9.2 h1:PjbtKNQdBV6UM4ukqkajfojpgeiMU7QA+yrkWUoyRkI=
-github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.9.2/go.mod h1:cp1Qz62eTu4gVb+ZhXuZysRpbZ1lcXmumW6GKjTs518=
+github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.9.3 h1:cCFkH0m+2VdREoqycZKvtedt+WjEX8DPTPNfb0YoPxI=
+github.com/emergent-company/emergent/apps/server-go/pkg/sdk v0.9.3/go.mod h1:cp1Qz62eTu4gVb+ZhXuZysRpbZ1lcXmumW6GKjTs518=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
