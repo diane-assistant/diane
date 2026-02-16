@@ -133,12 +133,14 @@ install_arch() {
     if curl -fsSL "${ARCH_PKG_URL}" -o "${TMP_DIR}/diane.pkg.tar.zst"; then
         info "Installing package..."
         if command -v sudo >/dev/null 2>&1; then
-            sudo pacman -U --noconfirm "${TMP_DIR}/diane.pkg.tar.zst"
+            # We use --overwrite '*' to ensure any previous manual installs/leftover files are overwritten
+            # and properly claimed by the package manager.
+            sudo pacman -U --noconfirm --overwrite '*' "${TMP_DIR}/diane.pkg.tar.zst"
         else
             if [ "$(id -u)" -eq 0 ]; then
-                pacman -U --noconfirm "${TMP_DIR}/diane.pkg.tar.zst"
+                pacman -U --noconfirm --overwrite '*' "${TMP_DIR}/diane.pkg.tar.zst"
             else
-                su -c "pacman -U --noconfirm ${TMP_DIR}/diane.pkg.tar.zst"
+                su -c "pacman -U --noconfirm --overwrite '*' ${TMP_DIR}/diane.pkg.tar.zst"
             fi
         fi
         success "Diane installed successfully via Pacman!"
