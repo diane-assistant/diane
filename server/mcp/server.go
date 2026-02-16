@@ -1568,6 +1568,32 @@ func main() {
 		}
 	}()
 
+	// Initialize slave manager (for master/slave pairing)
+	if database != nil && proxy != nil {
+		dianeDir := filepath.Join(home, ".diane")
+		ca, err := slave.NewCertificateAuthority(dianeDir)
+		if err != nil {
+			slog.Warn("Failed to initialize CA for slave manager", "error", err)
+		} else {
+			slaveManager, err = slave.NewManager(database, proxy, ca)
+			if err != nil {
+				slog.Warn("Failed to initialize slave manager", "error", err)
+			} else {
+				// Start WebSocket server for slave connections on port 8765
+				if err := slaveManager.StartServer(":8765", ca); err != nil {
+					slog.Warn("Failed to start slave WebSocket server", "error", err)
+				} else {
+					slog.Info("Slave manager initialized and WebSocket server started on port 8765")
+				}
+			}
+		}
+	}
+	defer func() {
+		if slaveManager != nil {
+			slaveManager.Stop()
+		}
+	}()
+
 	// Initialize Apple tools provider (only on macOS)
 	appleProvider = apple.NewProvider()
 	if err := appleProvider.CheckDependencies(); err != nil {

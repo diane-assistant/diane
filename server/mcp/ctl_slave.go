@@ -182,8 +182,8 @@ func ctlSlavePair(masterURL string) {
 				fmt.Println("3. API endpoint path is incorrect")
 			} else if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 				fmt.Printf("\r\033[KError: Master returned %d (Unauthorized/Forbidden).\n", resp.StatusCode)
-				fmt.Println("The master might require authentication for this port.")
-				fmt.Println("Try connecting to the WebSocket port (default 8765) which handles pairing.")
+				fmt.Println("You are likely connecting to the HTTP API port instead of the pairing port.")
+				fmt.Println("Use port 8765 for pairing: diane slave pair http://master-hostname:8765")
 			} else {
 				fmt.Printf("\r\033[KError from master: %s (Status %d)\n", string(body), resp.StatusCode)
 			}
