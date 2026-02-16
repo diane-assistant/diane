@@ -229,6 +229,96 @@ func (p *Proxy) CallTool(toolName string, arguments map[string]interface{}) (jso
 	return client.CallTool(actualToolName, arguments)
 }
 
+// ListPromptsForContext returns prompts from servers enabled in the context
+func (p *Proxy) ListPromptsForContext(contextName string, contextFilter ContextFilter) ([]map[string]interface{}, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var allPrompts []map[string]interface{}
+
+	// Get enabled servers for this context
+	enabledServers, err := contextFilter.GetEnabledServersForContext(contextName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get enabled servers for context: %w", err)
+	}
+
+	// Create a map for faster lookup
+	enabledMap := make(map[string]bool)
+	for _, name := range enabledServers {
+		enabledMap[name] = true
+	}
+
+	for serverName, client := range p.clients {
+		// Skip if server is not enabled in this context
+		if !enabledMap[serverName] {
+			continue
+		}
+
+		prompts, err := client.ListPrompts()
+		if err != nil {
+			slog.Warn("Failed to list prompts from server", "server", serverName, "error", err)
+			continue
+		}
+
+		// Prefix prompt names with server name to avoid conflicts
+		for _, prompt := range prompts {
+			if name, ok := prompt["name"].(string); ok {
+				prompt["name"] = serverName + "_" + name
+				prompt["_server"] = serverName // Track which server this prompt belongs to
+			}
+			allPrompts = append(allPrompts, prompt)
+		}
+	}
+
+	return allPrompts, nil
+}
+
+// GetPromptForContext routes a prompt request to the appropriate MCP client after validating context access
+func (p *Proxy) GetPromptForContext(contextName, promptName string, arguments map[string]string, contextFilter ContextFilter) (json.RawMessage, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	// Parse server name from prompt name (format: server_promptname)
+	var serverName, actualPromptName string
+	for sName := range p.clients {
+		prefix := sName + "_"
+		if len(promptName) > len(prefix) && promptName[:len(prefix)] == prefix {
+			serverName = sName
+			actualPromptName = promptName[len(prefix):]
+			break
+		}
+	}
+
+	if serverName == "" {
+		return nil, fmt.Errorf("unknown prompt: %s", promptName)
+	}
+
+	// Check if server is enabled in the context
+	enabledServers, err := contextFilter.GetEnabledServersForContext(contextName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check context access: %w", err)
+	}
+
+	isEnabled := false
+	for _, name := range enabledServers {
+		if name == serverName {
+			isEnabled = true
+			break
+		}
+	}
+
+	if !isEnabled {
+		return nil, fmt.Errorf("prompt %s is not enabled in context %s", promptName, contextName)
+	}
+
+	client, ok := p.clients[serverName]
+	if !ok {
+		return nil, fmt.Errorf("server not found: %s", serverName)
+	}
+
+	return client.GetPrompt(actualPromptName, arguments)
+}
+
 // ListAllPrompts aggregates prompts from all MCP clients
 func (p *Proxy) ListAllPrompts() ([]map[string]interface{}, error) {
 	p.mu.RLock()
@@ -721,8 +811,8 @@ func (p *Proxy) ListToolsForContext(contextName string, contextFilter ContextFil
 				enabled, err := contextFilter.IsToolEnabledInContext(contextName, serverName, name)
 				if err != nil {
 					slog.Warn("Failed to check tool context", "context", contextName, "server", serverName, "tool", name, "error", err)
-					// On error, include the tool (fail open)
-					enabled = true
+					// On error, exclude the tool (fail closed)
+					enabled = false
 				}
 				if !enabled {
 					continue
@@ -765,7 +855,7 @@ func (p *Proxy) CallToolForContext(contextName, toolName string, arguments map[s
 		enabled, err := contextFilter.IsToolEnabledInContext(contextName, serverName, actualToolName)
 		if err != nil {
 			slog.Warn("Failed to check tool context access", "context", contextName, "server", serverName, "tool", actualToolName, "error", err)
-			// On error, allow the call (fail open)
+			return nil, fmt.Errorf("failed to verify context access for tool %s", toolName)
 		} else if !enabled {
 			return nil, fmt.Errorf("tool %s is not enabled in context %s", toolName, contextName)
 		}

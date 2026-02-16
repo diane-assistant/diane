@@ -1040,7 +1040,7 @@ func (d *DianeStatusProvider) GetToolsForContext(contextName string) []api.ToolI
 	database, err := getDB()
 	if err != nil {
 		slog.Warn("Failed to get database for context filtering", "error", err)
-		return d.GetAllTools() // Fail open
+		return []api.ToolInfo{} // Fail closed
 	}
 	defer database.Close()
 
@@ -1878,9 +1878,9 @@ func handleRequestWithContext(req MCPRequest, contextName string) MCPResponse {
 	case "tools/call":
 		return callToolForContext(req.Params, contextName)
 	case "prompts/list":
-		return listPrompts()
+		return listPromptsForContext(contextName)
 	case "prompts/get":
-		return getPrompt(req.Params)
+		return getPromptForContext(req.Params, contextName)
 	case "resources/list":
 		return listResources()
 	case "resources/read":
@@ -2392,7 +2392,11 @@ func listToolsForContext(contextName string) MCPResponse {
 	database, err := getDB()
 	if err != nil {
 		slog.Warn("Failed to get database for context filtering", "error", err)
-		return listTools() // Fail open - return all tools
+		return MCPResponse{
+			Result: map[string]interface{}{
+				"tools": []map[string]interface{}{},
+			},
+		} // Fail closed
 	}
 	defer database.Close()
 
@@ -2651,7 +2655,12 @@ func callToolForContext(params json.RawMessage, contextName string) MCPResponse 
 	database, err := getDB()
 	if err != nil {
 		slog.Warn("Failed to get database for context validation", "error", err)
-		return callTool(params) // Fail open
+		return MCPResponse{
+			Error: &MCPError{
+				Code:    -32000,
+				Message: fmt.Sprintf("Context validation failed: %v", err),
+			},
+		} // Fail closed
 	}
 	defer database.Close()
 
@@ -2898,6 +2907,258 @@ func callToolForContext(params json.RawMessage, contextName string) MCPResponse 
 }
 
 // --- Prompts ---
+
+func listPromptsForContext(contextName string) MCPResponse {
+	// Get context filter from database
+	database, err := getDB()
+	if err != nil {
+		slog.Warn("Failed to get database for context filtering", "error", err)
+		return MCPResponse{
+			Result: map[string]interface{}{
+				"prompts": []map[string]interface{}{},
+			},
+		} // Fail closed
+	}
+	defer database.Close()
+
+	contextFilter := db.NewContextFilterAdapter(database)
+
+	var prompts []map[string]interface{}
+
+	// Helper to add prompts from a PromptProvider with context check
+	addPromptsWithContext := func(pp tools.PromptProvider, serverName string) {
+		// Check if server is in enabled list for this context
+		enabledServers, err := contextFilter.GetEnabledServersForContext(contextName)
+		if err != nil {
+			return
+		}
+
+		isEnabled := false
+		for _, s := range enabledServers {
+			if s == serverName {
+				isEnabled = true
+				break
+			}
+		}
+
+		if !isEnabled {
+			return
+		}
+
+		for _, p := range pp.Prompts() {
+			prompt := map[string]interface{}{
+				"name":        p.Name,
+				"description": p.Description,
+			}
+			if len(p.Arguments) > 0 {
+				args := make([]map[string]interface{}, len(p.Arguments))
+				for i, arg := range p.Arguments {
+					args[i] = map[string]interface{}{
+						"name":        arg.Name,
+						"description": arg.Description,
+						"required":    arg.Required,
+					}
+				}
+				prompt["arguments"] = args
+			}
+			prompts = append(prompts, prompt)
+		}
+	}
+
+	// Collect prompts from Google provider
+	if googleProvider != nil {
+		if pp, ok := interface{}(googleProvider).(tools.PromptProvider); ok {
+			addPromptsWithContext(pp, "google")
+		}
+	}
+
+	// Collect prompts from Discord/notifications provider
+	if notificationsProvider != nil {
+		if pp, ok := interface{}(notificationsProvider).(tools.PromptProvider); ok {
+			addPromptsWithContext(pp, "discord")
+		}
+	}
+
+	// Built-in jobs prompts - check if "jobs" server is enabled
+	isJobsEnabled := false
+	enabledServers, err := contextFilter.GetEnabledServersForContext(contextName)
+	if err == nil {
+		for _, s := range enabledServers {
+			if s == "jobs" {
+				isJobsEnabled = true
+				break
+			}
+		}
+	}
+
+	if isJobsEnabled {
+		jobsPrompts := []tools.Prompt{
+			{
+				Name:        "jobs_create_scheduled_task",
+				Description: "Create a new scheduled job with the appropriate cron expression for the desired frequency",
+				Arguments: []tools.PromptArgument{
+					{Name: "task_description", Description: "What the job should do", Required: true},
+					{Name: "frequency", Description: "How often to run (e.g., 'every hour', 'daily at 9am', 'every monday')", Required: true},
+					{Name: "command", Description: "The shell command to execute", Required: true},
+				},
+			},
+			{
+				Name:        "jobs_review_schedules",
+				Description: "Review all configured jobs and suggest optimizations for scheduling conflicts or improvements",
+			},
+			{
+				Name:        "jobs_troubleshoot_failures",
+				Description: "Analyze recent job execution logs to identify and diagnose failures",
+				Arguments: []tools.PromptArgument{
+					{Name: "job_name", Description: "Specific job to troubleshoot (optional, defaults to all)", Required: false},
+					{Name: "limit", Description: "Number of recent logs to analyze", Required: false},
+				},
+			},
+		}
+		for _, p := range jobsPrompts {
+			prompt := map[string]interface{}{
+				"name":        p.Name,
+				"description": p.Description,
+			}
+			if len(p.Arguments) > 0 {
+				args := make([]map[string]interface{}, len(p.Arguments))
+				for i, arg := range p.Arguments {
+					args[i] = map[string]interface{}{
+						"name":        arg.Name,
+						"description": arg.Description,
+						"required":    arg.Required,
+					}
+				}
+				prompt["arguments"] = args
+			}
+			prompts = append(prompts, prompt)
+		}
+	}
+
+	// Add prompts from external MCP servers via proxy with context check
+	if proxy != nil {
+		externalPrompts, err := proxy.ListPromptsForContext(contextName, contextFilter)
+		if err == nil {
+			prompts = append(prompts, externalPrompts...)
+		} else {
+			slog.Warn("Failed to list external prompts for context", "context", contextName, "error", err)
+		}
+	}
+
+	return MCPResponse{
+		Result: map[string]interface{}{
+			"prompts": prompts,
+		},
+	}
+}
+
+func getPromptForContext(params json.RawMessage, contextName string) MCPResponse {
+	var req struct {
+		Name      string            `json:"name"`
+		Arguments map[string]string `json:"arguments"`
+	}
+
+	if err := json.Unmarshal(params, &req); err != nil {
+		return MCPResponse{
+			Error: &MCPError{
+				Code:    -32602,
+				Message: fmt.Sprintf("Invalid params: %v", err),
+			},
+		}
+	}
+
+	// Get context filter from database
+	database, err := getDB()
+	if err != nil {
+		slog.Warn("Failed to get database for context filtering", "error", err)
+		return MCPResponse{
+			Error: &MCPError{
+				Code:    -32000,
+				Message: fmt.Sprintf("Context validation failed: %v", err),
+			},
+		} // Fail closed
+	}
+	defer database.Close()
+
+	contextFilter := db.NewContextFilterAdapter(database)
+
+	// Helper to check if server is enabled in context
+	isServerEnabled := func(serverName string) bool {
+		enabledServers, err := contextFilter.GetEnabledServersForContext(contextName)
+		if err != nil {
+			return false
+		}
+		for _, s := range enabledServers {
+			if s == serverName {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Helper to convert messages to response format
+	convertMessages := func(messages []tools.PromptMessage) MCPResponse {
+		msgs := make([]map[string]interface{}, len(messages))
+		for i, m := range messages {
+			msgs[i] = map[string]interface{}{
+				"role": m.Role,
+				"content": map[string]interface{}{
+					"type": m.Content.Type,
+					"text": m.Content.Text,
+				},
+			}
+		}
+		return MCPResponse{
+			Result: map[string]interface{}{
+				"messages": msgs,
+			},
+		}
+	}
+
+	// Try Google provider
+	if googleProvider != nil && isServerEnabled("google") {
+		if pp, ok := interface{}(googleProvider).(tools.PromptProvider); ok {
+			messages, err := pp.GetPrompt(req.Name, req.Arguments)
+			if err == nil {
+				return convertMessages(messages)
+			}
+		}
+	}
+
+	// Try Discord/notifications provider
+	if notificationsProvider != nil && isServerEnabled("discord") {
+		if pp, ok := interface{}(notificationsProvider).(tools.PromptProvider); ok {
+			messages, err := pp.GetPrompt(req.Name, req.Arguments)
+			if err == nil {
+				return convertMessages(messages)
+			}
+		}
+	}
+
+	// Try built-in jobs prompts
+	if isServerEnabled("jobs") {
+		if messages := getJobsPrompt(req.Name, req.Arguments); messages != nil {
+			return convertMessages(messages)
+		}
+	}
+
+	// Try external MCP servers via proxy (if name has server prefix)
+	if proxy != nil {
+		result, err := proxy.GetPromptForContext(contextName, req.Name, req.Arguments, contextFilter)
+		if err == nil {
+			return MCPResponse{
+				Result: result,
+			}
+		}
+	}
+
+	return MCPResponse{
+		Error: &MCPError{
+			Code:    -32601,
+			Message: fmt.Sprintf("Prompt not found: %s", req.Name),
+		},
+	}
+}
 
 func listPrompts() MCPResponse {
 	var prompts []map[string]interface{}
