@@ -356,7 +356,9 @@ func (c *MCPClient) TriggerAsyncRefresh(timeout time.Duration) bool {
 	return true
 }
 
-// CallTool calls a tool on the MCP server
+// CallTool calls a tool on the MCP server.
+// Uses a 30s timeout (matching SSE/HTTP clients) since tool execution can
+// involve multiple network calls (e.g., batch artifact creation).
 func (c *MCPClient) CallTool(toolName string, arguments map[string]interface{}) (json.RawMessage, error) {
 	params, err := json.Marshal(map[string]interface{}{
 		"name":      toolName,
@@ -366,7 +368,7 @@ func (c *MCPClient) CallTool(toolName string, arguments map[string]interface{}) 
 		return nil, fmt.Errorf("failed to marshal params: %w", err)
 	}
 
-	return c.sendRequest("tools/call", params)
+	return c.sendRequestWithTimeout("tools/call", params, 30*time.Second)
 }
 
 // NotificationChan returns the channel for receiving notifications from this client
