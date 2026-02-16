@@ -173,6 +173,50 @@ func (s *Server) handlePairSlave(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// handleSlavePairStatus handles GET /api/slaves/pair/{code} - check pairing status
+func (s *Server) handleSlavePairStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/slaves/pair/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.Error(w, "Pairing code required", http.StatusBadRequest)
+		return
+	}
+	code := parts[0]
+
+	if s.slaveManager == nil {
+		http.Error(w, "Slave manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	status, cert, err := s.slaveManager.GetPairingService().GetPairingStatus(code)
+	if err != nil {
+		slog.Error("Failed to get pairing status", "code", code, "error", err)
+		http.Error(w, "Failed to get pairing status", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status": status,
+	}
+
+	if status == "approved" && cert != "" {
+		response["certificate"] = cert
+
+		// Also return CA cert
+		caCertPEM, err := s.slaveManager.GetPairingService().GetCACertPEM()
+		if err == nil {
+			response["ca_cert"] = string(caCertPEM)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // handleSlaveApprove handles POST /api/slaves/approve - approve pairing request
 func (s *Server) handleApproveSlave(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -448,6 +492,7 @@ func RegisterSlaveRoutes(mux *http.ServeMux, server *Server) {
 	mux.HandleFunc("/slaves", server.handleSlaves)
 	mux.HandleFunc("/slaves/pending", server.handlePendingSlaves)
 	mux.HandleFunc("/slaves/pair", server.handlePairSlave)
+	mux.HandleFunc("/slaves/pair/", server.handleSlavePairStatus)
 	mux.HandleFunc("/slaves/approve", server.handleApproveSlave)
 	mux.HandleFunc("/slaves/deny", server.handleDenySlave)
 	mux.HandleFunc("/slaves/revoke", server.handleRevokeSlave)

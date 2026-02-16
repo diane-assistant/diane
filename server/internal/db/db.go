@@ -287,6 +287,10 @@ func (db *DB) migrate() error {
 		return err
 	}
 
+	// Migration: Add certificate column to pairing_requests if missing
+	// This handles the case where the table was created before this column was added
+	db.conn.Exec(`ALTER TABLE pairing_requests ADD COLUMN certificate TEXT`)
+
 	// Ensure default context exists
 	return db.ensureDefaultContext()
 }

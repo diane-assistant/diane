@@ -73,14 +73,14 @@ release: build-all
 
 ## Install locally
 install: build build-acp
-	@echo "Installing to ~/.diane/bin/..."
-	@mkdir -p ~/.diane/bin
-	@cp $(BUILD_DIR)/$(BINARY_NAME) ~/.diane/bin/$(BINARY_NAME)
-	@cp $(BUILD_DIR)/$(ACP_BINARY_NAME) ~/.diane/bin/$(ACP_BINARY_NAME)
-	@chmod +x ~/.diane/bin/$(BINARY_NAME)
-	@chmod +x ~/.diane/bin/$(ACP_BINARY_NAME)
-	@echo "Installed: ~/.diane/bin/$(BINARY_NAME)"
-	@echo "Installed: ~/.diane/bin/$(ACP_BINARY_NAME)"
+	@echo "Installing to $(HOME)/.diane/bin/..."
+	@mkdir -p $(HOME)/.diane/bin
+	@cp $(BUILD_DIR)/$(BINARY_NAME) $(HOME)/.diane/bin/$(BINARY_NAME)
+	@cp $(BUILD_DIR)/$(ACP_BINARY_NAME) $(HOME)/.diane/bin/$(ACP_BINARY_NAME)
+	@chmod +x $(HOME)/.diane/bin/$(BINARY_NAME)
+	@chmod +x $(HOME)/.diane/bin/$(ACP_BINARY_NAME)
+	@echo "Installed: $(HOME)/.diane/bin/$(BINARY_NAME)"
+	@echo "Installed: $(HOME)/.diane/bin/$(ACP_BINARY_NAME)"
 
 ## Run tests
 test:

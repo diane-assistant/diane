@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/diane-assistant/diane/internal/api"
@@ -56,10 +57,9 @@ func ctlHandleSlaveCommand(client *api.Client, args []string) {
 		ctlSlavePending(client)
 
 	case "approve":
-		if len(args) < 3 {
-			fmt.Fprintln(os.Stderr, "Error: approve command requires hostname and pairing code")
-			fmt.Fprintln(os.Stderr, "Usage: diane slave approve <hostname> <code 123-456>")
-			os.Exit(1)
+		if len(args) < 2 {
+			ctlSlaveApproveInteractive(client)
+			return
 		}
 		// Allow "123 456" as pairing code (handle space)
 		code := args[2]
@@ -188,67 +188,99 @@ func ctlSlavePair(masterURL string) {
 	fmt.Println("--------------------------------------------------")
 	fmt.Println("\nPlease go to the master server and approve this request:")
 	fmt.Printf("  diane slave approve %s %s\n", hostname, pairResp.PairingCode)
-	fmt.Println("\nWaiting for approval (polling)... (Press Ctrl+C to cancel)")
+	fmt.Println("\nPlease go to the master server and approve this request:")
+	fmt.Printf("  diane slave approve %s %s\n", hostname, pairResp.PairingCode)
+	fmt.Println("\nWaiting for approval... (Press Ctrl+C to cancel)")
 
-	// 4. Poll for approval (simulated for now, user needs to re-run or use start command)
-	// Since we don't have a polling endpoint for "check status of my request" without auth,
-	// we assume the user will approve it. The certificate is returned in the APPROVE response,
-	// but that response goes to the admin on the master.
+	// 4. Poll for approval
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
-	// Wait, the flow is:
-	// 1. Slave requests pairing -> gets code.
-	// 2. Master approves -> gets certificate.
-	// 3. How does slave get certificate?
+	for range ticker.C {
+		statusResp, err := http.Get(u.String() + "/api/slaves/pair/" + pairResp.PairingCode)
+		if err != nil {
+			// Ignore temporary errors
+			continue
+		}
+		defer statusResp.Body.Close()
 
-	// Ah, typically:
-	// A. Slave polls an endpoint with the pairing code to see if it's approved and get cert.
-	// B. Master pushes to slave (impossible, slave is behind NAT/firewall usually).
-	// C. Slave waits for manual install of cert (copy paste).
+		if statusResp.StatusCode != http.StatusOK {
+			continue
+		}
 
-	// I didn't implement a polling endpoint for the slave to get the cert!
-	// `handleApproveSlave` returns the cert to the CALLER (the admin on master).
-	// The admin would have to copy-paste the cert to the slave.
-	// That's annoying.
+		var status struct {
+			Status      string `json:"status"`
+			Certificate string `json:"certificate"`
+			CACert      string `json:"ca_cert"`
+		}
+		if err := json.NewDecoder(statusResp.Body).Decode(&status); err != nil {
+			continue
+		}
 
-	// I should add an endpoint `GET /api/slaves/pair/{code}` that returns the cert if approved.
-	// The slave can poll this.
+		if status.Status == "approved" && status.Certificate != "" {
+			fmt.Println("\n✅ Pairing approved!")
 
-	fmt.Println("\nNOTE: Automatic certificate retrieval is not yet implemented.")
-	fmt.Println("After approval on master, you will receive the certificate PEM.")
-	fmt.Println("Save it to ~/.diane/slave-cert.pem and the key to ~/.diane/slave-key.pem")
+			// Save keys and certs
+			home, _ := os.UserHomeDir()
+			dianeDir := filepath.Join(home, ".diane")
+			os.MkdirAll(dianeDir, 0755)
 
-	// Save key
-	home, _ := os.UserHomeDir()
-	dianeDir := filepath.Join(home, ".diane")
-	os.MkdirAll(dianeDir, 0755)
+			// Save private key
+			keyPath := filepath.Join(dianeDir, "slave-key.pem")
+			keyOut, _ := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+			pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+			keyOut.Close()
+			fmt.Printf("Private key saved to %s\n", keyPath)
 
-	keyPath := filepath.Join(dianeDir, "slave-key.pem")
-	keyOut, _ := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
-	keyOut.Close()
-	fmt.Printf("Private key saved to %s\n", keyPath)
+			// Save client cert
+			certPath := filepath.Join(dianeDir, "slave-cert.pem")
+			os.WriteFile(certPath, []byte(status.Certificate), 0644)
+			fmt.Printf("Certificate saved to %s\n", certPath)
 
-	// Save config
-	// configPath := filepath.Join(dianeDir, "config.json")
-	// cfg := config.Load()
-	// We need to update config. But config package might not have Write capability easily exposed?
-	// I'll just suggest editing it for now.
+			// Save CA cert
+			if status.CACert != "" {
+				caPath := filepath.Join(dianeDir, "slave-ca-cert.pem")
+				os.WriteFile(caPath, []byte(status.CACert), 0644)
+				fmt.Printf("CA Certificate saved to %s\n", caPath)
+			}
 
-	fmt.Println("\nConfiguration:")
-	fmt.Println("Add the following to your ~/.diane/config.json:")
-	fmt.Printf(`{
-  "slave": {
-    "enabled": true,
-    "master_url": "%s"
-  }
-}
-`, u.String())
+			// Update config
+			configPath := filepath.Join(dianeDir, "config.json")
+
+			// Read existing config or create new
+			var cfgMap map[string]interface{}
+			if data, err := os.ReadFile(configPath); err == nil {
+				json.Unmarshal(data, &cfgMap)
+			}
+			if cfgMap == nil {
+				cfgMap = make(map[string]interface{})
+			}
+
+			// Update slave config
+			slaveCfg := map[string]interface{}{
+				"enabled":    true,
+				"master_url": masterURL,
+			}
+			cfgMap["slave"] = slaveCfg
+
+			// Write back
+			data, _ := json.MarshalIndent(cfgMap, "", "  ")
+			os.WriteFile(configPath, data, 0644)
+			fmt.Printf("Configuration updated at %s\n", configPath)
+
+			// Start slave
+			fmt.Println("\nStarting Diane in slave mode...")
+			ctlSlaveStart()
+			return
+		} else if status.Status == "denied" {
+			fmt.Println("\n❌ Pairing request denied by master.")
+			os.Exit(1)
+		}
+	}
 }
 
 func ctlSlaveStart() {
-	fmt.Println("Starting Diane in slave mode...")
-	// This should just run "diane serve" basically, but ensuring config is loaded.
-	// For now, just exec diane serve
+	fmt.Println("Starting Diane daemon...")
 
 	exe, err := os.Executable()
 	if err != nil {
@@ -256,28 +288,16 @@ func ctlSlaveStart() {
 		os.Exit(1)
 	}
 
-	// We assume config is set. If not, we could pass flags if we added them.
-	// But Environment variables work too.
+	// Ensure we pass the 'serve' argument to start the daemon
+	args := []string{"diane", "serve"}
 
 	env := os.Environ()
-	// env = append(env, "DIANE_SLAVE_ENABLED=true") // If we implemented this env var support
 
-	proc, err := os.StartProcess(exe, []string{"diane", "serve"}, &os.ProcAttr{
-		Env:   env,
-		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
-	})
-	if err != nil {
+	// Replace current process with daemon
+	if err := syscall.Exec(exe, args, env); err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting server: %v\n", err)
 		os.Exit(1)
 	}
-
-	state, err := proc.Wait()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error waiting for server: %v\n", err)
-		os.Exit(1)
-	}
-
-	os.Exit(state.ExitCode())
 }
 
 // --- Master-side implementations ---
@@ -317,6 +337,48 @@ func ctlSlaveApprove(client *api.Client, hostname, code string) {
 		fmt.Println("\n--- CERTIFICATE (Copy to slave: ~/.diane/slave-cert.pem) ---")
 		fmt.Println(resp.Certificate)
 		fmt.Println("-----------------------------------------------------------")
+	}
+}
+
+func ctlSlaveApproveInteractive(client *api.Client) {
+	reqs, err := client.GetPendingPairingRequests()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(reqs) == 0 {
+		fmt.Println("No pending pairing requests.")
+		return
+	}
+
+	fmt.Println("Pending Pairing Requests:")
+	for i, r := range reqs {
+		created, _ := time.Parse(time.RFC3339, r.CreatedAt)
+		fmt.Printf("[%d] Host: %s, Code: %s, Time: %s\n", i+1, r.Hostname, r.PairingCode, created.Format(time.Kitchen))
+	}
+
+	fmt.Println()
+	if len(reqs) == 1 {
+		req := reqs[0]
+		fmt.Printf("Approve request from %s (%s)? [Y/n]: ", req.Hostname, req.PairingCode)
+		var response string
+		fmt.Scanln(&response)
+		if response == "" || strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
+			ctlSlaveApprove(client, req.Hostname, req.PairingCode)
+		} else {
+			fmt.Println("Cancelled.")
+		}
+	} else {
+		fmt.Print("Enter number to approve (or 0 to cancel): ")
+		var num int
+		fmt.Scanln(&num)
+		if num > 0 && num <= len(reqs) {
+			req := reqs[num-1]
+			ctlSlaveApprove(client, req.Hostname, req.PairingCode)
+		} else {
+			fmt.Println("Cancelled.")
+		}
 	}
 }
 

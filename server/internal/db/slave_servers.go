@@ -39,6 +39,7 @@ type PairingRequest struct {
 	RequestedAt time.Time
 	ExpiresAt   time.Time
 	Status      string
+	Certificate string // Only present if approved
 }
 
 // CreateSlaveServer creates a new slave server configuration
@@ -220,21 +221,27 @@ func (db *DB) CreatePairingRequest(hostID, pairingCode, csr string, expiresAt ti
 	return err
 }
 
-// GetPairingRequest retrieves a pairing request by host ID and code
-func (db *DB) GetPairingRequest(hostID, pairingCode string) (*PairingRequest, error) {
+// GetPairingRequest retrieves a pairing request by code
+func (db *DB) GetPairingRequest(pairingCode string) (*PairingRequest, error) {
 	var pr PairingRequest
+	var cert sql.NullString
 
+	// Note: We don't filter by status so we can retrieve approved requests
 	err := db.conn.QueryRow(`
-		SELECT id, host_id, pairing_code, csr, requested_at, expires_at, status
+		SELECT id, host_id, pairing_code, csr, requested_at, expires_at, status, certificate
 		FROM pairing_requests
-		WHERE host_id = ? AND pairing_code = ? AND status = 'pending'
-	`, hostID, pairingCode).Scan(&pr.ID, &pr.HostID, &pr.PairingCode, &pr.CSR, &pr.RequestedAt, &pr.ExpiresAt, &pr.Status)
+		WHERE pairing_code = ?
+	`, pairingCode).Scan(&pr.ID, &pr.HostID, &pr.PairingCode, &pr.CSR, &pr.RequestedAt, &pr.ExpiresAt, &pr.Status, &cert)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pairing request: %w", err)
+	}
+
+	if cert.Valid {
+		pr.Certificate = cert.String
 	}
 
 	return &pr, nil
@@ -275,6 +282,17 @@ func (db *DB) UpdatePairingRequestStatus(hostID, pairingCode, status string) err
 		SET status = ?
 		WHERE host_id = ? AND pairing_code = ?
 	`, status, hostID, pairingCode)
+
+	return err
+}
+
+// UpdatePairingRequestApproved marks a request as approved and stores the certificate
+func (db *DB) UpdatePairingRequestApproved(hostID, pairingCode, certPEM string) error {
+	_, err := db.conn.Exec(`
+		UPDATE pairing_requests
+		SET status = 'approved', certificate = ?
+		WHERE host_id = ? AND pairing_code = ?
+	`, certPEM, hostID, pairingCode)
 
 	return err
 }

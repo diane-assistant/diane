@@ -153,8 +153,8 @@ func (ps *PairingService) ApprovePairingRequest(hostID, pairingCode string) (cer
 		return nil, nil, fmt.Errorf("failed to create slave server record: %w", err)
 	}
 
-	// Update request status
-	if err := ps.db.UpdatePairingRequestStatus(hostID, pairingCode, "approved"); err != nil {
+	// Update request status and store certificate
+	if err := ps.db.UpdatePairingRequestApproved(hostID, pairingCode, string(certPEM)); err != nil {
 		// Log error but don't fail
 		fmt.Printf("Warning: failed to update pairing request status: %v\n", err)
 	}
@@ -170,6 +170,34 @@ func (ps *PairingService) ApprovePairingRequest(hostID, pairingCode string) (cer
 	})
 
 	return certPEM, caCertPEM, nil
+}
+
+// GetPairingStatus retrieves the status of a pairing request by code
+func (ps *PairingService) GetPairingStatus(pairingCode string) (string, string, error) {
+	// First check in-memory pending requests
+	ps.mu.RLock()
+	_, ok := ps.pendingRequests[pairingCode]
+	ps.mu.RUnlock()
+
+	if ok {
+		return "pending", "", nil
+	}
+
+	// Check database for approved/denied requests
+	dbReq, err := ps.db.GetPairingRequest(pairingCode)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get pairing request: %w", err)
+	}
+	if dbReq == nil {
+		return "not_found", "", nil
+	}
+
+	return dbReq.Status, dbReq.Certificate, nil
+}
+
+// GetCACertPEM returns the CA certificate PEM
+func (ps *PairingService) GetCACertPEM() ([]byte, error) {
+	return ps.ca.GetCACertPEM()
 }
 
 // DenyPairingRequest denies a pairing request
