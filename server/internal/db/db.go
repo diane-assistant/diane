@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
-// DB wraps the SQLite database connection
+// DB represents the database connection
 type DB struct {
 	conn *sql.DB
 	path string
@@ -56,7 +56,7 @@ func New(path string) (*DB, error) {
 		path = filepath.Join(dianeDir, "cron.db")
 	}
 
-	conn, err := sql.Open("sqlite3", path)
+	conn, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -292,6 +292,12 @@ func (db *DB) migrate() error {
 	// Migration: Add certificate column to pairing_requests if missing
 	// This handles the case where the table was created before this column was added
 	db.conn.Exec(`ALTER TABLE pairing_requests ADD COLUMN certificate TEXT`)
+
+	// Migration: Add platform column to pairing_requests if missing
+	db.conn.Exec(`ALTER TABLE pairing_requests ADD COLUMN platform TEXT DEFAULT ''`)
+
+	// Migration: Add platform column to slave_servers if missing
+	db.conn.Exec(`ALTER TABLE slave_servers ADD COLUMN platform TEXT DEFAULT ''`)
 
 	// Ensure default context exists
 	return db.ensureDefaultContext()
