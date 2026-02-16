@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -1713,6 +1714,15 @@ func main() {
 	// Start the MCP HTTP/SSE server for network-based MCP clients
 	mcpHandler := &MCPHandlerAdapter{statusProvider: statusProvider}
 	mcpHTTPServer = api.NewMCPHTTPServer(statusProvider, mcpHandler, 8765)
+
+	// Register slave routes on the public-facing MCP server so slaves can pair remotely
+	// This exposes /api/slaves/... endpoints
+	mcpHTTPServer.RegisterRoutes(func(mux *http.ServeMux) {
+		slaveMux := http.NewServeMux()
+		api.RegisterSlaveRoutes(slaveMux, apiServer)
+		mux.Handle("/api/", http.StripPrefix("/api", slaveMux))
+	})
+
 	if err := mcpHTTPServer.Start(); err != nil {
 		slog.Warn("Failed to start MCP HTTP server", "error", err)
 	} else {

@@ -14,12 +14,13 @@ import (
 
 // MCPHTTPServer provides an HTTP/SSE endpoint for MCP clients to connect to Diane
 type MCPHTTPServer struct {
-	statusProvider StatusProvider
-	mcpHandler     MCPHandler
-	sessions       map[string]*mcpSession
-	sessionsMu     sync.RWMutex
-	server         *http.Server
-	port           int
+	statusProvider  StatusProvider
+	mcpHandler      MCPHandler
+	sessions        map[string]*mcpSession
+	sessionsMu      sync.RWMutex
+	server          *http.Server
+	port            int
+	routeRegistrars []func(*http.ServeMux)
 }
 
 // MCPHandler interface for handling MCP requests
@@ -66,16 +67,27 @@ type MCPError struct {
 // NewMCPHTTPServer creates a new MCP HTTP server
 func NewMCPHTTPServer(statusProvider StatusProvider, mcpHandler MCPHandler, port int) *MCPHTTPServer {
 	return &MCPHTTPServer{
-		statusProvider: statusProvider,
-		mcpHandler:     mcpHandler,
-		sessions:       make(map[string]*mcpSession),
-		port:           port,
+		statusProvider:  statusProvider,
+		mcpHandler:      mcpHandler,
+		sessions:        make(map[string]*mcpSession),
+		port:            port,
+		routeRegistrars: make([]func(*http.ServeMux), 0),
 	}
+}
+
+// RegisterRoutes adds a custom route registrar function
+func (s *MCPHTTPServer) RegisterRoutes(fn func(*http.ServeMux)) {
+	s.routeRegistrars = append(s.routeRegistrars, fn)
 }
 
 // Start starts the MCP HTTP server
 func (s *MCPHTTPServer) Start() error {
 	mux := http.NewServeMux()
+
+	// Register custom routes
+	for _, fn := range s.routeRegistrars {
+		fn(mux)
+	}
 
 	// MCP endpoints
 	mux.HandleFunc("/mcp", s.handleMCP)             // HTTP Streamable transport
