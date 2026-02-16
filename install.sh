@@ -114,7 +114,9 @@ install_arch() {
 
     # Check dependencies
     if ! command -v makepkg >/dev/null 2>&1; then
-        error "makepkg not found. Please install 'base-devel' group: sudo pacman -S base-devel"
+        warn "makepkg not found. Falling back to manual binary installation."
+        install_generic
+        return
     fi
 
     TMP_DIR=$(mktemp -d)
@@ -200,7 +202,12 @@ EOF
     if command -v sudo >/dev/null 2>&1; then
         sudo pacman -U --noconfirm "${PKG_FILE}"
     else
-        su -c "pacman -U --noconfirm ${PKG_FILE}"
+        # If we are root, run directly
+        if [ "$(id -u)" -eq 0 ]; then
+             pacman -U --noconfirm "${PKG_FILE}"
+        else
+             su -c "pacman -U --noconfirm ${PKG_FILE}"
+        fi
     fi
     
     success "Diane installed successfully via Pacman!"
@@ -280,7 +287,11 @@ uninstall() {
         if command -v sudo >/dev/null 2>&1; then
             sudo pacman -Rns diane
         else
-            su -c "pacman -Rns diane"
+            if [ "$(id -u)" -eq 0 ]; then
+                pacman -Rns diane
+            else
+                su -c "pacman -Rns diane"
+            fi
         fi
         success "Uninstalled."
     else
