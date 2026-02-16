@@ -145,9 +145,86 @@ jobs:
             dist/${{ matrix.name }}.tar.gz
             dist/${{ matrix.name }}.tar.gz.sha256
 
+  build-arch-package:
+    name: Build Arch Package
+    needs: [build-linux]
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm git
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: diane-linux-amd64
+          path: dist-linux
+
+      - name: Prepare Package Build
+        run: |
+          # Extract the binary from the tarball
+          cd dist-linux
+          tar xzf diane-linux-amd64.tar.gz
+          mv diane ../diane-bin
+          mv acp-server ../acp-server-bin
+          cd ..
+
+          # Create build user (makepkg cannot run as root)
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+          chmod 0440 /etc/sudoers.d/builder
+
+          # Prepare build directory
+          mkdir -p build
+          cp pkg/arch/diane.service build/
+          cp pkg/arch/diane.config.json build/
+          cp diane-bin build/diane
+          cp acp-server-bin build/acp-server
+
+          # Generate binary-based PKGBUILD
+          cat > build/PKGBUILD <<EOF
+          # Maintainer: Diane <diane@diane-assistant.com>
+          pkgname=diane
+          pkgver=${GITHUB_REF_NAME#v}
+          pkgrel=1
+          pkgdesc="Diane AI assistant - MCP server and control utility"
+          arch=('x86_64')
+          url="https://github.com/diane-assistant/diane"
+          license=('MIT')
+          depends=('glibc')
+          backup=('etc/diane/config.json')
+          source=("diane" "acp-server" "diane.service" "diane.config.json")
+          sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+          package() {
+              install -Dm755 "\${srcdir}/diane" "\${pkgdir}/usr/bin/diane"
+              install -Dm755 "\${srcdir}/acp-server" "\${pkgdir}/usr/bin/acp-server"
+              install -Dm644 "\${srcdir}/diane.service" "\${pkgdir}/usr/lib/systemd/system/diane.service"
+              install -Dm644 "\${srcdir}/diane.config.json" "\${pkgdir}/etc/diane/config.json"
+              install -dm755 "\${pkgdir}/var/lib/diane"
+          }
+          EOF
+
+          chown -R builder:builder build
+
+      - name: Build Package
+        run: |
+          cd build
+          su builder -c "makepkg -f"
+          ls -la
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: diane-arch-pkg
+          path: build/diane-*.pkg.tar.zst
+
   release:
     name: Release
-    needs: [build-macos, build-linux]
+    needs: [build-macos, build-linux, build-arch-package]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -163,14 +240,18 @@ jobs:
         run: |
           cd dist
           cat *.sha256 > checksums.txt
+          # Add checksum for the arch package
+          sha256sum diane-*.pkg.tar.zst >> checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
+            dist/*.pkg.tar.zst
             dist/checksums.txt
           generate_release_notes: true
+
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
