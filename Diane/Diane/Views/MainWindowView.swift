@@ -156,42 +156,10 @@ struct MainWindowView: View {
             showServerList.toggle()
         }
         .popover(isPresented: $showServerList) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Servers")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                
-                Divider()
-                
-                Button {
-                    showServerList = false
-                } label: {
-                    HStack {
-                        Circle()
-                            .fill(statusColor)
-                            .frame(width: 6, height: 6)
-                        
-                        Text(statusMonitor.serverDisplayName)
-                            .font(.system(size: 13))
-                        
-                        Spacer()
-                        
-                        if case .connected = statusMonitor.connectionState {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.green)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                }
-                .buttonStyle(.plain)
-                .background(Color.primary.opacity(0.05))
-                .padding(.bottom, 8)
-            }
-            .frame(width: 200)
+            ServerListPopover(
+                statusMonitor: statusMonitor,
+                onClose: { showServerList = false }
+            )
         }
         .help("Connected to \(statusMonitor.serverDisplayName)")
     }

@@ -137,6 +137,10 @@
 		1128 /* DianeHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1002 /* DianeHTTPClient.swift */; };
 		1129 /* ServerConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1003 /* ServerConfiguration.swift */; };
 		1130 /* MacServerSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1015 /* MacServerSetupView.swift */; };
+		1501 /* Slave.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1601 /* Slave.swift */; };
+		1502 /* ServerListPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1602 /* ServerListPopover.swift */; };
+		1503 /* Slave.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1601 /* Slave.swift */; };
+		1504 /* ServerListPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1602 /* ServerListPopover.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -218,6 +222,8 @@
 		1013 /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
 		1014 /* IOSSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSettingsView.swift; sourceTree = "<group>"; };
 		1015 /* MacServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacServerSetupView.swift; sourceTree = "<group>"; };
+		1601 /* Slave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Slave.swift; sourceTree = "<group>"; };
+		1602 /* ServerListPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerListPopover.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -332,6 +338,7 @@
 				125 /* MasterDetailView.swift */,
 				121 /* UsageView.swift */,
 				1015 /* MacServerSetupView.swift */,
+				1602 /* ServerListPopover.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -361,6 +368,7 @@
 				117 /* Context.swift */,
 				119 /* Provider.swift */,
 				122 /* MCPServer.swift */,
+				1601 /* Slave.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -672,6 +680,8 @@
 				1128 /* DianeHTTPClient.swift in Sources */,
 				1129 /* ServerConfiguration.swift in Sources */,
 				1130 /* MacServerSetupView.swift in Sources */,
+				1501 /* Slave.swift in Sources */,
+				1502 /* ServerListPopover.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -743,6 +753,8 @@
 				096 /* DesignTokens.swift in Sources */,
 				098 /* EmptyStateView.swift in Sources */,
 				161 /* TimeRangePicker.swift in Sources */,
+				1503 /* Slave.swift in Sources */,
+				1504 /* ServerListPopover.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

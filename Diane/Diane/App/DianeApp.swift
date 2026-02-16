@@ -1,8 +1,18 @@
 import SwiftUI
+import UserNotifications
 
 /// App delegate to handle window activation and lifecycle events
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Request notification permissions for pairing requests
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error = error {
+                print("Error requesting notification permissions: \(error)")
+            } else if granted {
+                print("Notification permissions granted")
+            }
+        }
+        
         // Ensure the main window activates on launch
         NSApp.activate(ignoringOtherApps: true)
     }

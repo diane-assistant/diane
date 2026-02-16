@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import UserNotifications
 import os.log
 
 private let logger = Logger(subsystem: "com.diane.Diane", category: "StatusMonitor")
@@ -15,6 +16,10 @@ class StatusMonitor: ObservableObject {
     @Published var isPaused: Bool = false  // Pause during updates
     @Published var isRemoteMode: Bool = false
     @Published var serverDisplayName: String = "Unknown"
+    
+    // Slave management
+    @Published var slaves: [SlaveInfo] = []
+    @Published var pendingPairingRequests: [PairingRequest] = []
     
     private var client: DianeClientProtocol?
     
@@ -222,6 +227,107 @@ class StatusMonitor: ObservableObject {
                 }
                 lastError = error.localizedDescription
             }
+        }
+        
+        // Refresh slaves and pairing requests (only if connected)
+        if connectionState == .connected {
+            await refreshSlaves()
+            await refreshPairingRequests()
+        }
+    }
+    
+    /// Refresh list of connected slaves
+    private func refreshSlaves() async {
+        guard let client else { return }
+        
+        do {
+            let newSlaves = try await client.getSlaves()
+            slaves = newSlaves
+        } catch {
+            logger.error("Failed to refresh slaves: \(error.localizedDescription)")
+            // Don't clear slaves on error - keep showing last known state
+        }
+    }
+    
+    /// Refresh list of pending pairing requests
+    private func refreshPairingRequests() async {
+        guard let client else { return }
+        
+        do {
+            let newRequests = try await client.getPendingPairingRequests()
+            
+            // Check if there are new requests (for notifications)
+            let previousCodes = Set(pendingPairingRequests.map { $0.pairingCode })
+            let newCodes = Set(newRequests.map { $0.pairingCode })
+            let addedCodes = newCodes.subtracting(previousCodes)
+            
+            pendingPairingRequests = newRequests
+            
+            // Show notification for new pairing requests
+            if !addedCodes.isEmpty {
+                for request in newRequests where addedCodes.contains(request.pairingCode) {
+                    showPairingNotification(for: request)
+                }
+            }
+        } catch {
+            logger.error("Failed to refresh pairing requests: \(error.localizedDescription)")
+            // Don't clear requests on error - keep showing last known state
+        }
+    }
+    
+    /// Show a macOS notification for a new pairing request
+    private func showPairingNotification(for request: PairingRequest) {
+        let content = UNMutableNotificationContent()
+        content.title = "New Pairing Request"
+        content.body = "\(request.hostname) (\(request.platformDisplay)) wants to pair\nCode: \(request.pairingCode)"
+        content.sound = .default
+        content.categoryIdentifier = "PAIRING_REQUEST"
+        
+        let notificationRequest = UNNotificationRequest(
+            identifier: "pairing-\(request.pairingCode)",
+            content: content,
+            trigger: nil // Deliver immediately
+        )
+        
+        UNUserNotificationCenter.current().add(notificationRequest) { error in
+            if let error = error {
+                logger.error("Failed to show pairing notification: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    /// Approve a pairing request
+    func approvePairing(hostname: String, pairingCode: String) async {
+        guard let client else { return }
+        
+        do {
+            try await client.approvePairingRequest(hostname: hostname, pairingCode: pairingCode)
+            
+            // Refresh lists immediately
+            await refreshSlaves()
+            await refreshPairingRequests()
+            
+            logger.info("Approved pairing for \(hostname)")
+        } catch {
+            logger.error("Failed to approve pairing: \(error.localizedDescription)")
+            lastError = "Failed to approve pairing: \(error.localizedDescription)"
+        }
+    }
+    
+    /// Deny a pairing request
+    func denyPairing(hostname: String, pairingCode: String) async {
+        guard let client else { return }
+        
+        do {
+            try await client.denyPairingRequest(hostname: hostname, pairingCode: pairingCode)
+            
+            // Refresh requests immediately
+            await refreshPairingRequests()
+            
+            logger.info("Denied pairing for \(hostname)")
+        } catch {
+            logger.error("Failed to deny pairing: \(error.localizedDescription)")
+            lastError = "Failed to deny pairing: \(error.localizedDescription)"
         }
     }
     

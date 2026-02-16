@@ -553,6 +553,28 @@ class DianeHTTPClient: DianeClientProtocol {
     func deleteGoogleAuth(account: String) async throws {
         throw DianeHTTPClientError.readOnlyMode
     }
+    
+    // MARK: - Slave Management (not available on iOS)
+    
+    func getSlaves() async throws -> [SlaveInfo] {
+        throw DianeHTTPClientError.notAvailableOnIOS
+    }
+    
+    func getPendingPairingRequests() async throws -> [PairingRequest] {
+        throw DianeHTTPClientError.notAvailableOnIOS
+    }
+    
+    func approvePairingRequest(hostname: String, pairingCode: String) async throws {
+        throw DianeHTTPClientError.notAvailableOnIOS
+    }
+    
+    func denyPairingRequest(hostname: String, pairingCode: String) async throws {
+        throw DianeHTTPClientError.notAvailableOnIOS
+    }
+    
+    func revokeSlaveCredentials(hostname: String, reason: String?) async throws {
+        throw DianeHTTPClientError.notAvailableOnIOS
+    }
 }
 
 // MARK: - SwiftUI Environment Support
