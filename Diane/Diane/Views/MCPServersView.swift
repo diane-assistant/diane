@@ -315,37 +315,6 @@ struct MCPServersView: View {
                 Divider()
                 
                 // Capabilities section
-                if let status = statusMonitor.status.mcpServers.first(where: { $0.name == server.name }) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Capabilities")
-                            .font(.headline)
-                        
-                        HStack(spacing: 20) {
-                            CapabilityBadge(
-                                icon: "wrench.fill",
-                                label: "Tools",
-                                count: status.toolCount,
-                                color: .blue
-                            )
-                            CapabilityBadge(
-                                icon: "text.bubble.fill",
-                                label: "Prompts",
-                                count: status.promptCount,
-                                color: .purple
-                            )
-                            CapabilityBadge(
-                                icon: "doc.fill",
-                                label: "Resources",
-                                count: status.resourceCount,
-                                color: .green
-                            )
-                        }
-                    }
-                    
-                    Divider()
-                }
-                
-                // Capabilities section with tabs
                 CapabilitiesSection(serverName: server.name)
                 
                 Divider()
@@ -737,10 +706,34 @@ struct CapabilitiesSection: View {
                 .padding(.vertical, 8)
             } else {
                 VStack(alignment: .leading, spacing: 12) {
-                    // Prompts section
-                    let filteredPrompts = prompts.filter { $0.server == serverName }
-                    let _ = print("CapabilitiesSection for '\(serverName)': total prompts=\(prompts.count), filtered=\(filteredPrompts.count), total resources=\(resources.count), filtered resources=\(resources.filter { $0.server == serverName }.count), total tools=\(tools.count), filtered tools=\(tools.filter { $0.server == serverName }.count)")
-                    if !filteredPrompts.isEmpty {
+                    // Show all prompts (no filtering by server)
+                    let allPrompts = prompts
+                    let allResources = resources
+                    let allTools = tools
+                    
+                    // Debug logging to file
+                    let _ = {
+                        let logPath = "/tmp/diane-capabilities-debug.log"
+                        let timestamp = Date().formatted()
+                        let logEntry = """
+                        [\(timestamp)] CapabilitiesSection Debug (NO FILTERING):
+                          Viewing serverName: '\(serverName)'
+                          Total loaded: tools=\(tools.count), prompts=\(prompts.count), resources=\(resources.count)
+                          Showing all capabilities without server filtering
+                        
+                        """
+                        if let fileHandle = FileHandle(forWritingAtPath: logPath) {
+                            fileHandle.seekToEndOfFile()
+                            if let data = logEntry.data(using: .utf8) {
+                                fileHandle.write(data)
+                            }
+                            fileHandle.closeFile()
+                        } else {
+                            try? logEntry.write(toFile: logPath, atomically: true, encoding: .utf8)
+                        }
+                    }()
+                    
+                    if !allPrompts.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 6) {
                                 Image(systemName: "text.bubble.fill")
@@ -749,13 +742,13 @@ struct CapabilitiesSection: View {
                                 Text("Prompts")
                                     .font(.subheadline)
                                     .fontWeight(.medium)
-                                Text("(\(filteredPrompts.count))")
+                                Text("(\(allPrompts.count))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             
                             VStack(alignment: .leading, spacing: 4) {
-                                ForEach(filteredPrompts) { prompt in
+                                ForEach(allPrompts) { prompt in
                                     CapabilityItemRow(name: prompt.name, description: prompt.description, color: .purple)
                                 }
                             }
@@ -767,7 +760,6 @@ struct CapabilitiesSection: View {
                     }
                     
                     // Resources section
-                    let filteredResources = resources.filter { $0.server == serverName }
                     if !filteredResources.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 6) {
@@ -795,7 +787,6 @@ struct CapabilitiesSection: View {
                     }
                     
                     // Tools section
-                    let filteredTools = tools.filter { $0.server == serverName }
                     if !filteredTools.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 6) {
@@ -823,7 +814,7 @@ struct CapabilitiesSection: View {
                     }
                     
                     // Show empty state if nothing is available
-                    if filteredPrompts.isEmpty && filteredResources.isEmpty && filteredTools.isEmpty {
+                    if allPrompts.isEmpty && filteredResources.isEmpty && filteredTools.isEmpty {
                         Text("No capabilities available for this server")
                             .font(.caption)
                             .foregroundStyle(.secondary)

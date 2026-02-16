@@ -35,7 +35,8 @@ type PairingRequest struct {
 
 // PairRequestBody is the request body for initiating pairing
 type PairRequestBody struct {
-	MasterURL string `json:"master_url"`
+	Hostname string `json:"hostname"`
+	CSR      string `json:"csr"`
 }
 
 // ApproveRequestBody is the request body for approving a pairing request
@@ -137,18 +138,35 @@ func (s *Server) handlePairSlave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.MasterURL == "" {
-		http.Error(w, "master_url is required", http.StatusBadRequest)
+	if req.Hostname == "" {
+		http.Error(w, "hostname is required", http.StatusBadRequest)
 		return
 	}
 
-	// TODO: Implement pairing initiation
-	slog.Info("Pairing requested", "master_url", req.MasterURL)
+	if req.CSR == "" {
+		http.Error(w, "csr is required", http.StatusBadRequest)
+		return
+	}
+
+	if s.slaveManager == nil {
+		http.Error(w, "Slave manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Create pairing request
+	code, err := s.slaveManager.GetPairingService().CreatePairingRequest(req.Hostname, []byte(req.CSR))
+	if err != nil {
+		slog.Error("Failed to create pairing request", "hostname", req.Hostname, "error", err)
+		http.Error(w, fmt.Sprintf("Failed to create pairing request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	slog.Info("Pairing initiated", "hostname", req.Hostname, "code", code)
 
 	response := map[string]interface{}{
-		"success":      false,
-		"message":      "Pairing feature not yet fully implemented",
-		"pairing_code": "123-456", // Placeholder
+		"success":      true,
+		"message":      "Pairing initiated",
+		"pairing_code": code,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
