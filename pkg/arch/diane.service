@@ -1,0 +1,27 @@
+[Unit]
+Description=Diane Assistant Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/diane serve
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=/root
+Environment=HOME=/root
+Environment=DIANE_CONFIG=/etc/diane/config.json
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=diane
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/root/.diane /etc/diane
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

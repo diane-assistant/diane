@@ -31,19 +31,25 @@ type HTTPConfig struct {
 	APIKey string `json:"api_key"`
 }
 
-// Load reads configuration from ~/.diane/config.json, then applies
-// environment variable overrides. Missing file is not an error.
+// Load reads configuration from the config file, then applies
+// environment variable overrides. Config file locations checked in order:
+//  1. DIANE_CONFIG env var (if set)
+//  2. ~/.diane/config.json
+//
+// Missing file is not an error.
 func Load() Config {
 	var cfg Config
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		slog.Warn("Failed to get home directory for config", "error", err)
-		applyEnvOverrides(&cfg)
-		return cfg
+	configPath := os.Getenv("DIANE_CONFIG")
+	if configPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			slog.Warn("Failed to get home directory for config", "error", err)
+			applyEnvOverrides(&cfg)
+			return cfg
+		}
+		configPath = filepath.Join(home, ".diane", "config.json")
 	}
-
-	configPath := filepath.Join(home, ".diane", "config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if !os.IsNotExist(err) {

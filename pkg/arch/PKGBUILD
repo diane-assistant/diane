@@ -1,0 +1,49 @@
+# Maintainer: Diane <diane@diane-assistant.com>
+pkgname=diane
+pkgver=1.6.0
+pkgrel=1
+pkgdesc="Diane AI assistant - MCP server and control utility"
+arch=('x86_64' 'aarch64')
+url="https://github.com/diane-assistant/diane"
+license=('MIT')
+depends=('glibc')
+makedepends=('go' 'git')
+backup=('etc/diane/config.json')
+source=()
+
+# When building from local source, run: makepkg -si
+# The PKGBUILD expects to be run from the repo root or with the repo available
+
+build() {
+    cd "$startdir/../.."
+
+    local _version
+    _version=$(git describe --tags --always --dirty 2>/dev/null || echo "$pkgver")
+
+    echo "Building diane ${_version}..."
+    cd server/mcp
+    CGO_ENABLED=1 go build \
+        -ldflags="-s -w -X main.Version=${_version}" \
+        -o "${srcdir}/diane" .
+
+    echo "Building acp-server..."
+    cd ../cmd/acp-server
+    CGO_ENABLED=1 go build \
+        -ldflags="-s -w -X main.Version=${_version}" \
+        -o "${srcdir}/acp-server" .
+}
+
+package() {
+    # Install binaries
+    install -Dm755 "${srcdir}/diane" "${pkgdir}/usr/bin/diane"
+    install -Dm755 "${srcdir}/acp-server" "${pkgdir}/usr/bin/acp-server"
+
+    # Install systemd service
+    install -Dm644 "${startdir}/diane.service" "${pkgdir}/usr/lib/systemd/system/diane.service"
+
+    # Install default config
+    install -Dm644 "${startdir}/diane.config.json" "${pkgdir}/etc/diane/config.json"
+
+    # Create data directory
+    install -dm755 "${pkgdir}/var/lib/diane"
+}

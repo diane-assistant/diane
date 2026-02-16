@@ -1173,6 +1173,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// If no arguments and stdin is a terminal (interactive), show help.
+	// Stdio MCP mode is only entered when stdin is piped (AI tool spawning the binary).
+	if !serveMode {
+		stat, _ := os.Stdin.Stat()
+		if (stat.Mode() & os.ModeCharDevice) != 0 {
+			// stdin is a terminal — user ran "diane" interactively
+			ctlPrintUsage()
+			os.Exit(0)
+		}
+	}
+
 	// --- Server initialization (shared by both stdio and serve modes) ---
 
 	// Track start time

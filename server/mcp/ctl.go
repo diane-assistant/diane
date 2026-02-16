@@ -1365,8 +1365,8 @@ func ctlPrintUsage() {
 	fmt.Printf(`diane %s - Diane MCP server and control utility
 
 Usage:
-  diane                     Start MCP server (stdio mode, for AI tool integration)
-  diane serve               Start as daemon (HTTP + Unix socket, no stdio)
+  diane                     Show this help (or start MCP stdio mode when piped)
+  diane serve               Start as daemon (HTTP + Unix socket)
   diane <command> [args]    Run a control command
 
 Server Commands:
@@ -1420,7 +1420,7 @@ Agent Gallery (one-click install):
   gallery refresh             Refresh the agent registry
 
 Examples:
-  diane                                                # Start MCP server (stdio)
+  diane                                                # Show help
   diane serve                                          # Start as daemon
   diane info                                           # Show connection guide
   diane mcp install opencode                           # Install MCP config in OpenCode project

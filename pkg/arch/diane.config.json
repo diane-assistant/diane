@@ -1,0 +1,7 @@
+{
+  "http": {
+    "port": 9090,
+    "api_key": ""
+  },
+  "debug": false
+}
