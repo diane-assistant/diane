@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/diane-assistant/diane/internal/api"
+	"github.com/diane-assistant/diane/internal/config"
 	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/logger"
 	"github.com/diane-assistant/diane/internal/mcpproxy"
@@ -1185,11 +1186,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Load configuration from ~/.diane/config.json (with env var overrides)
+	cfg := config.Load()
+
 	// Initialize structured logging
 	logDir := filepath.Join(home, ".diane")
 	if err := logger.Init(logger.Config{
 		LogDir:    logDir,
-		Debug:     os.Getenv("DIANE_DEBUG") == "1",
+		Debug:     cfg.Debug,
 		JSON:      true,
 		Component: "diane",
 	}); err != nil {
@@ -1356,7 +1360,7 @@ func main() {
 
 	// Start the Unix socket API server for companion app
 	statusProvider := &DianeStatusProvider{}
-	apiServer, err = api.NewServer(statusProvider, database)
+	apiServer, err = api.NewServer(statusProvider, database, cfg)
 	if err != nil {
 		slog.Warn("Failed to create API server", "error", err)
 	} else {
@@ -1407,6 +1411,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Diane %s running in serve mode (pid %d)\n", Version, os.Getpid())
 		fmt.Fprintf(os.Stderr, "  Unix socket: ~/.diane/diane.sock\n")
 		fmt.Fprintf(os.Stderr, "  MCP HTTP: http://localhost:8765\n")
+		if cfg.HTTP.Port > 0 {
+			if cfg.HTTP.APIKey != "" {
+				fmt.Fprintf(os.Stderr, "  Remote API: http://0.0.0.0:%d (API key auth)\n", cfg.HTTP.Port)
+			} else {
+				fmt.Fprintf(os.Stderr, "  Remote API: http://0.0.0.0:%d (read-only)\n", cfg.HTTP.Port)
+			}
+		}
 		fmt.Fprintf(os.Stderr, "Press Ctrl+C to stop.\n")
 
 		quit := make(chan os.Signal, 1)

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/diane-assistant/diane/internal/acp"
+	"github.com/diane-assistant/diane/internal/config"
 	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/models"
 )
@@ -145,6 +146,7 @@ type Server struct {
 	listener       net.Listener
 	server         *http.Server
 	httpAddr       string       // optional TCP address for HTTP listener (e.g., ":8080")
+	httpAPIKey     string       // API key for authenticating TCP HTTP requests
 	tcpListener    net.Listener // TCP listener for HTTP access (nil if disabled)
 	httpServer     *http.Server // separate http.Server for TCP listener
 	statusProvider StatusProvider
@@ -156,7 +158,7 @@ type Server struct {
 }
 
 // NewServer creates a new API server
-func NewServer(statusProvider StatusProvider, database *db.DB) (*Server, error) {
+func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config) (*Server, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
@@ -212,7 +214,8 @@ func NewServer(statusProvider StatusProvider, database *db.DB) (*Server, error) 
 
 	return &Server{
 		socketPath:     socketPath,
-		httpAddr:       os.Getenv("DIANE_HTTP_ADDR"),
+		httpAddr:       cfg.HTTPAddr(),
+		httpAPIKey:     cfg.HTTP.APIKey,
 		statusProvider: statusProvider,
 		acpManager:     acpManager,
 		gallery:        gallery,
@@ -223,7 +226,8 @@ func NewServer(statusProvider StatusProvider, database *db.DB) (*Server, error) 
 }
 
 // readOnlyMiddleware wraps a handler to reject non-GET/HEAD requests with 405.
-// This is used on the TCP HTTP listener to enforce read-only access from iOS clients.
+// This is used on the TCP HTTP listener when no API key is configured,
+// enforcing read-only access from remote clients.
 func readOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -231,6 +235,35 @@ func readOnlyMiddleware(next http.Handler) http.Handler {
 			http.Error(w, "Method not allowed (read-only listener)", http.StatusMethodNotAllowed)
 			return
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// apiKeyAuthMiddleware wraps a handler to require a valid API key.
+// The key must be provided via the Authorization header as "Bearer <key>".
+// When an API key is configured, all HTTP methods are allowed (full access).
+func apiKeyAuthMiddleware(apiKey string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth == "" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="diane"`)
+			http.Error(w, "Authorization required", http.StatusUnauthorized)
+			return
+		}
+
+		// Accept "Bearer <key>" format
+		const prefix = "Bearer "
+		if !strings.HasPrefix(auth, prefix) {
+			http.Error(w, "Invalid authorization format (expected: Bearer <api-key>)", http.StatusUnauthorized)
+			return
+		}
+
+		providedKey := strings.TrimPrefix(auth, prefix)
+		if providedKey != apiKey {
+			http.Error(w, "Invalid API key", http.StatusUnauthorized)
+			return
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -291,7 +324,9 @@ func (s *Server) Start() error {
 		}
 	}()
 
-	// Optionally start TCP HTTP listener for remote read-only access (e.g., iOS via Tailscale)
+	// Optionally start TCP HTTP listener for remote access
+	// If API key is configured: full read/write access with API key authentication
+	// If API key is not configured: read-only access (GET/HEAD only, no auth required)
 	if s.httpAddr != "" {
 		tcpListener, err := net.Listen("tcp", s.httpAddr)
 		if err != nil {
@@ -299,13 +334,23 @@ func (s *Server) Start() error {
 			// Non-fatal: Unix socket still works
 		} else {
 			s.tcpListener = tcpListener
-			s.httpServer = &http.Server{Handler: readOnlyMiddleware(mux)}
-			go func() {
-				slog.Info("HTTP listener started (read-only)", "addr", s.httpAddr)
-				if err := s.httpServer.Serve(tcpListener); err != nil && err != http.ErrServerClosed {
-					slog.Error("HTTP listener error", "error", err)
-				}
-			}()
+			if s.httpAPIKey != "" {
+				s.httpServer = &http.Server{Handler: apiKeyAuthMiddleware(s.httpAPIKey, mux)}
+				go func() {
+					slog.Info("HTTP listener started (API key auth, full access)", "addr", s.httpAddr)
+					if err := s.httpServer.Serve(tcpListener); err != nil && err != http.ErrServerClosed {
+						slog.Error("HTTP listener error", "error", err)
+					}
+				}()
+			} else {
+				s.httpServer = &http.Server{Handler: readOnlyMiddleware(mux)}
+				go func() {
+					slog.Info("HTTP listener started (read-only, no auth)", "addr", s.httpAddr)
+					if err := s.httpServer.Serve(tcpListener); err != nil && err != http.ErrServerClosed {
+						slog.Error("HTTP listener error", "error", err)
+					}
+				}()
+			}
 		}
 	}
 
