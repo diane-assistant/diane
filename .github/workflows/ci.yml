@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test-server:
+    name: Test & Build (server)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Vet
+        working-directory: server
+        run: go vet ./...
+
+      - name: Test
+        working-directory: server
+        env:
+          CGO_ENABLED: 1
+        run: go test ./...
+
+      - name: Build diane
+        working-directory: server/mcp
+        env:
+          CGO_ENABLED: 1
+        run: go build -ldflags="-s -w" -o ../../dist/diane .
+
+      - name: Build diane-ctl
+        working-directory: server/cmd/diane-ctl
+        env:
+          CGO_ENABLED: 1
+        run: go build -ldflags="-s -w" -o ../../../dist/diane-ctl .
+
+      - name: Build acp-server
+        working-directory: server/cmd/acp-server
+        env:
+          CGO_ENABLED: 1
+        run: go build -ldflags="-s -w" -o ../../../dist/acp-server .
+
+  test-specmcp:
+    name: Test & Build (specmcp)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/specmcp/go.mod
+          cache-dependency-path: server/specmcp/go.sum
+
+      - name: Vet
+        working-directory: server/specmcp
+        run: go vet ./...
+
+      - name: Test
+        working-directory: server/specmcp
+        run: go test ./...
+
+      - name: Build specmcp
+        working-directory: server/specmcp
+        run: go build -ldflags="-s -w" -o ../../dist/specmcp ./cmd/specmcp/
