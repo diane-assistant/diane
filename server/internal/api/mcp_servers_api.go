@@ -5,18 +5,20 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/diane-assistant/diane/internal/db"
 )
 
 // MCPServersAPI handles MCP server configuration endpoints
 type MCPServersAPI struct {
-	db *db.DB
+	db             *db.DB
+	statusProvider StatusProvider
 }
 
 // NewMCPServersAPI creates a new MCPServersAPI
-func NewMCPServersAPI(database *db.DB) *MCPServersAPI {
-	return &MCPServersAPI{db: database}
+func NewMCPServersAPI(database *db.DB, statusProvider StatusProvider) *MCPServersAPI {
+	return &MCPServersAPI{db: database, statusProvider: statusProvider}
 }
 
 // MCPServerResponse represents an MCP server in API responses
@@ -56,8 +58,31 @@ func (api *MCPServersAPI) handleMCPServers(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// listServers returns all MCP servers
+// listServers returns all MCP servers (builtin + configured)
 func (api *MCPServersAPI) listServers(w http.ResponseWriter, r *http.Request) {
+	var response []MCPServerResponse
+
+	// Add builtin servers from status provider (with negative IDs to distinguish)
+	if api.statusProvider != nil {
+		mcpServers := api.statusProvider.GetMCPServers()
+		now := time.Now().Format("2006-01-02T15:04:05Z07:00")
+		builtinID := int64(-1)
+		for _, s := range mcpServers {
+			if s.Builtin {
+				response = append(response, MCPServerResponse{
+					ID:        builtinID,
+					Name:      s.Name,
+					Enabled:   s.Enabled,
+					Type:      "builtin",
+					CreatedAt: now,
+					UpdatedAt: now,
+				})
+				builtinID--
+			}
+		}
+	}
+
+	// Add configured servers from database
 	servers, err := api.db.ListMCPServers()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -65,9 +90,8 @@ func (api *MCPServersAPI) listServers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := make([]MCPServerResponse, len(servers))
-	for i, s := range servers {
-		response[i] = MCPServerResponse{
+	for _, s := range servers {
+		response = append(response, MCPServerResponse{
 			ID:        s.ID,
 			Name:      s.Name,
 			Enabled:   s.Enabled,
@@ -80,8 +104,9 @@ func (api *MCPServersAPI) listServers(w http.ResponseWriter, r *http.Request) {
 			OAuth:     s.OAuth,
 			CreatedAt: s.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			UpdatedAt: s.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		}
+		})
 	}
+
 	json.NewEncoder(w).Encode(response)
 }
 
