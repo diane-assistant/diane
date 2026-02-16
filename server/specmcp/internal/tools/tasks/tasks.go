@@ -233,16 +233,23 @@ func (t *GetAvailableTasks) Execute(ctx context.Context, params json.RawMessage)
 		return nil, fmt.Errorf("listing tasks: %w", err)
 	}
 
-	// Build task ID→status map
+	// Build task ID→status map, dual-indexed by both ID and CanonicalID
+	// so that edge endpoints from ExpandGraph (which may use either variant) always resolve.
 	taskStatus := make(map[string]string)
+	taskByAnyID := make(map[string]*emergent.Task) // dual-indexed for resolving edge IDs to task.ID
 	for _, task := range tasks {
 		taskStatus[task.ID] = task.Status
+		taskByAnyID[task.ID] = task
+		if task.CanonicalID != "" && task.CanonicalID != task.ID {
+			taskStatus[task.CanonicalID] = task.Status
+			taskByAnyID[task.CanonicalID] = task
+		}
 	}
 
 	// Batch-fetch all blocks and assigned_to relationships in one ExpandGraph call
 	// from the change, depth 2 (change → tasks → blocks/assigned_to targets)
-	blockedByMap := make(map[string][]string) // taskID → []blockerIDs
-	assignedSet := make(map[string]bool)      // taskIDs that have assignments
+	blockedByMap := make(map[string][]string) // task.ID → []blocker task.IDs
+	assignedSet := make(map[string]bool)      // task.IDs that have assignments
 
 	resp, err := t.client.ExpandGraph(ctx, &graph.GraphExpandRequest{
 		RootIDs:           []string{p.ChangeID},
@@ -261,13 +268,15 @@ func (t *GetAvailableTasks) Execute(ctx context.Context, params json.RawMessage)
 		for _, edge := range resp.Edges {
 			switch edge.Type {
 			case emergent.RelBlocks:
-				// edge.SrcID blocks edge.DstID
-				if _, ok := taskStatus[edge.DstID]; ok {
-					blockedByMap[edge.DstID] = append(blockedByMap[edge.DstID], edge.SrcID)
+				// edge.SrcID blocks edge.DstID — normalize to task.ID from ListTasks
+				srcTask := taskByAnyID[edge.SrcID]
+				dstTask := taskByAnyID[edge.DstID]
+				if srcTask != nil && dstTask != nil {
+					blockedByMap[dstTask.ID] = append(blockedByMap[dstTask.ID], srcTask.ID)
 				}
 			case emergent.RelAssignedTo:
-				if _, ok := taskStatus[edge.SrcID]; ok {
-					assignedSet[edge.SrcID] = true
+				if at := taskByAnyID[edge.SrcID]; at != nil {
+					assignedSet[at.ID] = true
 				}
 			}
 		}
@@ -300,8 +309,10 @@ func (t *GetAvailableTasks) Execute(ctx context.Context, params json.RawMessage)
 			continue
 		}
 
-		// Check if blocked by any incomplete task
-		if blockers, ok := blockedByMap[task.ID]; ok {
+		// Check if blocked by any incomplete task.
+		// blockedByMap is keyed by task.ID (normalized at source from ExpandGraph).
+		blockers := blockedByMap[task.ID]
+		if len(blockers) > 0 {
 			isBlocked := false
 			for _, blockerID := range blockers {
 				status, ok := taskStatus[blockerID]
@@ -315,7 +326,7 @@ func (t *GetAvailableTasks) Execute(ctx context.Context, params json.RawMessage)
 			}
 		}
 
-		// Check if already assigned
+		// Check if already assigned (normalized at source, keyed by task.ID)
 		if assignedSet[task.ID] {
 			continue
 		}
@@ -681,9 +692,14 @@ func (t *GetCriticalPath) Execute(ctx context.Context, params json.RawMessage) (
 	}
 
 	// Build adjacency graph: task blocks → task
+	// Dual-index by both ID and CanonicalID so that ExpandGraph edge endpoints
+	// (which may use a different ID variant) always resolve to the correct task.
 	taskByID := make(map[string]*emergent.Task)
 	for _, task := range tasks {
 		taskByID[task.ID] = task
+		if task.CanonicalID != "" && task.CanonicalID != task.ID {
+			taskByID[task.CanonicalID] = task
+		}
 	}
 
 	// Get all blocks relationships among these tasks using a single ExpandGraph call
@@ -704,11 +720,13 @@ func (t *GetCriticalPath) Execute(ctx context.Context, params json.RawMessage) (
 
 		for _, edge := range expandResp.Edges {
 			if edge.Type == emergent.RelBlocks {
-				if _, ok := taskByID[edge.SrcID]; ok {
-					if _, ok := taskByID[edge.DstID]; ok {
-						blocksGraph[edge.SrcID] = append(blocksGraph[edge.SrcID], edge.DstID)
-						blockedBy[edge.DstID] = append(blockedBy[edge.DstID], edge.SrcID)
-					}
+				srcTask := taskByID[edge.SrcID]
+				dstTask := taskByID[edge.DstID]
+				if srcTask != nil && dstTask != nil {
+					// Use task.ID (from ListTasks) as the canonical key so that
+					// later iterations over tasks[] can look up by task.ID consistently.
+					blocksGraph[srcTask.ID] = append(blocksGraph[srcTask.ID], dstTask.ID)
+					blockedBy[dstTask.ID] = append(blockedBy[dstTask.ID], srcTask.ID)
 				}
 			}
 		}
