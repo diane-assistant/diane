@@ -50,18 +50,27 @@ type Status struct {
 
 // ToolInfo represents information about a tool
 type ToolInfo struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Server      string                 `json:"server"`
+	Builtin     bool                   `json:"builtin"`
+	InputSchema map[string]interface{} `json:"input_schema,omitempty"`
+}
+
+// PromptArgument represents an argument for a prompt
+type PromptArgument struct {
 	Name        string `json:"name"`
-	Description string `json:"description"`
-	Server      string `json:"server"`
-	Builtin     bool   `json:"builtin"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
 }
 
 // PromptInfo represents information about a prompt
 type PromptInfo struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Server      string `json:"server"`
-	Builtin     bool   `json:"builtin"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Server      string           `json:"server"`
+	Builtin     bool             `json:"builtin"`
+	Arguments   []PromptArgument `json:"arguments,omitempty"`
 }
 
 // ResourceInfo represents information about a resource
@@ -120,6 +129,8 @@ type StatusProvider interface {
 	GetAllTools() []ToolInfo
 	GetAllPrompts() []PromptInfo
 	GetAllResources() []ResourceInfo
+	GetPromptContent(serverName string, promptName string) (json.RawMessage, error)
+	ReadResourceContent(serverName string, uri string) (json.RawMessage, error)
 	RestartMCPServer(name string) error
 	ReloadConfig() error
 	GetJobs() ([]Job, error)
@@ -235,7 +246,7 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 	// Initialize MCP Servers API (uses same database)
 	var mcpServersAPI *MCPServersAPI
 	if database != nil {
-		mcpServersAPI = NewMCPServersAPI(database)
+		mcpServersAPI = NewMCPServersAPI(database, statusProvider)
 	}
 
 	return &Server{
@@ -248,8 +259,8 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 		contextsAPI:    contextsAPI,
 		providersAPI:   providersAPI,
 		mcpServersAPI:  mcpServersAPI,
-		pairLimiter:    pairing.NewRateLimiter(),
 		slaveManager:   slaveManager,
+		pairLimiter:    pairing.NewRateLimiter(),
 	}, nil
 }
 
@@ -259,7 +270,8 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 // The /pair endpoint is exempt to allow pairing without auth.
 func readOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/pair" {
+		// Allow pairing endpoints without auth
+		if r.URL.Path == "/pair" || r.URL.Path == "/slaves/pair" || strings.HasPrefix(r.URL.Path, "/slaves/pair/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -278,8 +290,8 @@ func readOnlyMiddleware(next http.Handler) http.Handler {
 // The /pair endpoint is exempt from auth to allow pairing code exchange.
 func apiKeyAuthMiddleware(apiKey string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Allow pairing endpoint without auth
-		if r.URL.Path == "/pair" {
+		// Allow pairing endpoints without auth
+		if r.URL.Path == "/pair" || r.URL.Path == "/slaves/pair" || strings.HasPrefix(r.URL.Path, "/slaves/pair/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -327,7 +339,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/tools", s.handleTools)
 	mux.HandleFunc("/prompts", s.handlePrompts)
+	mux.HandleFunc("/prompts/get", s.handlePromptGet)
 	mux.HandleFunc("/resources", s.handleResources)
+	mux.HandleFunc("/resources/read", s.handleResourceRead)
 	mux.HandleFunc("/mcp-servers", s.handleMCPServers)
 	mux.HandleFunc("/mcp-servers/", s.handleMCPServerAction)
 	mux.HandleFunc("/reload", s.handleReload)
@@ -342,15 +356,6 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/auth", s.handleAuth)
 	mux.HandleFunc("/auth/", s.handleAuthAction)
 	mux.HandleFunc("/pair", s.handlePair)
-	mux.HandleFunc("/slaves", s.handleSlaves)
-	mux.HandleFunc("/slaves/pending", s.handlePendingSlaves)
-	mux.HandleFunc("/slaves/pair", s.handlePairSlave)
-	mux.HandleFunc("/slaves/approve", s.handleApproveSlave)
-	mux.HandleFunc("/slaves/deny", s.handleDenySlave)
-	mux.HandleFunc("/slaves/revoke", s.handleRevokeSlave)
-	mux.HandleFunc("/slaves/revoked", s.handleRevokedSlaves)
-	mux.HandleFunc("/slaves/health", s.handleSlaveHealth)
-	mux.HandleFunc("/slaves/", s.handleSlaveAction)
 
 	// Register Contexts API routes
 	if s.contextsAPI != nil {
@@ -690,6 +695,54 @@ func (s *Server) handleResources(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resources)
+}
+
+// handlePromptGet returns the full content of a specific prompt
+func (s *Server) handlePromptGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	serverName := r.URL.Query().Get("server")
+	promptName := r.URL.Query().Get("name")
+	if serverName == "" || promptName == "" {
+		http.Error(w, "server and name query parameters are required", http.StatusBadRequest)
+		return
+	}
+
+	result, err := s.statusProvider.GetPromptContent(serverName, promptName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(result)
+}
+
+// handleResourceRead returns the full content of a specific resource
+func (s *Server) handleResourceRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	serverName := r.URL.Query().Get("server")
+	uri := r.URL.Query().Get("uri")
+	if serverName == "" || uri == "" {
+		http.Error(w, "server and uri query parameters are required", http.StatusBadRequest)
+		return
+	}
+
+	result, err := s.statusProvider.ReadResourceContent(serverName, uri)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(result)
 }
 
 // handleMCPServers returns the list of MCP servers

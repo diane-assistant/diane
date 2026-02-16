@@ -37,7 +37,7 @@ import (
 var Version = "dev"
 
 var proxy *mcpproxy.Proxy
-var slaveManager *slave.Manager // Distributed MCP slave manager
+var slaveManager *slave.Manager
 var globalEncoder *json.Encoder // For sending notifications
 var appleProvider *apple.Provider
 var googleProvider *google.Provider
@@ -625,6 +625,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 				Description: tool.Description,
 				Server:      "apple",
 				Builtin:     true,
+				InputSchema: tool.InputSchema,
 			})
 		}
 	}
@@ -637,6 +638,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 				Description: tool.Description,
 				Server:      "google",
 				Builtin:     true,
+				InputSchema: tool.InputSchema,
 			})
 		}
 	}
@@ -649,6 +651,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 				Description: tool.Description,
 				Server:      "infrastructure",
 				Builtin:     true,
+				InputSchema: tool.InputSchema,
 			})
 		}
 	}
@@ -661,6 +664,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 				Description: tool.Description,
 				Server:      "discord",
 				Builtin:     true,
+				InputSchema: tool.InputSchema,
 			})
 		}
 	}
@@ -673,6 +677,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 				Description: tool.Description,
 				Server:      "finance",
 				Builtin:     true,
+				InputSchema: tool.InputSchema,
 			})
 		}
 	}
@@ -685,6 +690,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 				Description: tool.Description,
 				Server:      "places",
 				Builtin:     true,
+				InputSchema: tool.InputSchema,
 			})
 		}
 	}
@@ -697,6 +703,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 				Description: tool.Description,
 				Server:      "weather",
 				Builtin:     true,
+				InputSchema: tool.InputSchema,
 			})
 		}
 	}
@@ -709,6 +716,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 				Description: tool.Description,
 				Server:      "github-bot",
 				Builtin:     true,
+				InputSchema: tool.InputSchema,
 			})
 		}
 	}
@@ -721,6 +729,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 				Description: tool.Description,
 				Server:      "downloads",
 				Builtin:     true,
+				InputSchema: tool.InputSchema,
 			})
 		}
 	}
@@ -733,6 +742,7 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 				Description: tool.Description,
 				Server:      "file_registry",
 				Builtin:     true,
+				InputSchema: tool.InputSchema,
 			})
 		}
 	}
@@ -745,11 +755,13 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 				name, _ := t["name"].(string)
 				desc, _ := t["description"].(string)
 				server, _ := t["_server"].(string)
+				schema, _ := t["inputSchema"].(map[string]interface{})
 				tools = append(tools, api.ToolInfo{
 					Name:        name,
 					Description: desc,
 					Server:      server,
 					Builtin:     false,
+					InputSchema: schema,
 				})
 			}
 		}
@@ -780,11 +792,20 @@ func (d *DianeStatusProvider) GetAllPrompts() []api.PromptInfo {
 	// Google prompts
 	if googleProvider != nil {
 		for _, prompt := range googleProvider.Prompts() {
+			args := make([]api.PromptArgument, 0, len(prompt.Arguments))
+			for _, a := range prompt.Arguments {
+				args = append(args, api.PromptArgument{
+					Name:        a.Name,
+					Description: a.Description,
+					Required:    a.Required,
+				})
+			}
 			prompts = append(prompts, api.PromptInfo{
 				Name:        prompt.Name,
 				Description: prompt.Description,
 				Server:      "google",
 				Builtin:     true,
+				Arguments:   args,
 			})
 		}
 	}
@@ -792,11 +813,20 @@ func (d *DianeStatusProvider) GetAllPrompts() []api.PromptInfo {
 	// Notifications prompts
 	if notificationsProvider != nil {
 		for _, prompt := range notificationsProvider.Prompts() {
+			args := make([]api.PromptArgument, 0, len(prompt.Arguments))
+			for _, a := range prompt.Arguments {
+				args = append(args, api.PromptArgument{
+					Name:        a.Name,
+					Description: a.Description,
+					Required:    a.Required,
+				})
+			}
 			prompts = append(prompts, api.PromptInfo{
 				Name:        prompt.Name,
 				Description: prompt.Description,
 				Server:      "discord",
 				Builtin:     true,
+				Arguments:   args,
 			})
 		}
 	}
@@ -809,11 +839,29 @@ func (d *DianeStatusProvider) GetAllPrompts() []api.PromptInfo {
 				name, _ := p["name"].(string)
 				desc, _ := p["description"].(string)
 				server, _ := p["_server"].(string)
+				var args []api.PromptArgument
+				if rawArgs, ok := p["arguments"].([]interface{}); ok {
+					for _, ra := range rawArgs {
+						if argMap, ok := ra.(map[string]interface{}); ok {
+							arg := api.PromptArgument{
+								Name: fmt.Sprintf("%v", argMap["name"]),
+							}
+							if d, ok := argMap["description"].(string); ok {
+								arg.Description = d
+							}
+							if r, ok := argMap["required"].(bool); ok {
+								arg.Required = r
+							}
+							args = append(args, arg)
+						}
+					}
+				}
 				prompts = append(prompts, api.PromptInfo{
 					Name:        name,
 					Description: desc,
 					Server:      server,
 					Builtin:     false,
+					Arguments:   args,
 				})
 			}
 		}
@@ -877,6 +925,107 @@ func (d *DianeStatusProvider) GetAllResources() []api.ResourceInfo {
 	}
 
 	return resources
+}
+
+// GetPromptContent returns the full content of a prompt by calling the appropriate provider
+func (d *DianeStatusProvider) GetPromptContent(serverName string, promptName string) (json.RawMessage, error) {
+	// Check builtin providers first
+	switch serverName {
+	case "jobs":
+		// Builtin job prompts don't have real content, return a simple message
+		return json.Marshal(map[string]interface{}{
+			"messages": []map[string]interface{}{
+				{
+					"role": "assistant",
+					"content": map[string]interface{}{
+						"type": "text",
+						"text": "This is a builtin prompt template. Use it by name with the MCP client.",
+					},
+				},
+			},
+		})
+	case "google":
+		if googleProvider != nil {
+			if pp, ok := interface{}(googleProvider).(interface {
+				GetPrompt(string, map[string]string) ([]tools.PromptMessage, error)
+			}); ok {
+				msgs, err := pp.GetPrompt(promptName, map[string]string{})
+				if err != nil {
+					return nil, err
+				}
+				return json.Marshal(map[string]interface{}{"messages": msgs})
+			}
+		}
+		return nil, fmt.Errorf("google provider not available")
+	case "discord":
+		if notificationsProvider != nil {
+			if pp, ok := interface{}(notificationsProvider).(interface {
+				GetPrompt(string, map[string]string) ([]tools.PromptMessage, error)
+			}); ok {
+				msgs, err := pp.GetPrompt(promptName, map[string]string{})
+				if err != nil {
+					return nil, err
+				}
+				return json.Marshal(map[string]interface{}{"messages": msgs})
+			}
+		}
+		return nil, fmt.Errorf("discord provider not available")
+	}
+
+	// External MCP server - use proxy
+	if proxy != nil {
+		// The proxy expects the prefixed name: serverName_promptName
+		prefixedName := serverName + "_" + promptName
+		return proxy.GetPrompt(prefixedName, map[string]string{})
+	}
+
+	return nil, fmt.Errorf("prompt not found: %s/%s", serverName, promptName)
+}
+
+// ReadResourceContent returns the full content of a resource
+func (d *DianeStatusProvider) ReadResourceContent(serverName string, uri string) (json.RawMessage, error) {
+	// Check builtin providers first
+	switch serverName {
+	case "google":
+		if googleProvider != nil {
+			if rp, ok := interface{}(googleProvider).(interface {
+				ReadResource(string) (*tools.ResourceContent, error)
+			}); ok {
+				content, err := rp.ReadResource(uri)
+				if err != nil {
+					return nil, err
+				}
+				return json.Marshal(map[string]interface{}{
+					"contents": []interface{}{content},
+				})
+			}
+		}
+		return nil, fmt.Errorf("google provider not available")
+	case "downloads":
+		if downloadsProvider != nil {
+			if rp, ok := interface{}(downloadsProvider).(interface {
+				ReadResource(string) (*tools.ResourceContent, error)
+			}); ok {
+				content, err := rp.ReadResource(uri)
+				if err != nil {
+					return nil, err
+				}
+				return json.Marshal(map[string]interface{}{
+					"contents": []interface{}{content},
+				})
+			}
+		}
+		return nil, fmt.Errorf("downloads provider not available")
+	}
+
+	// External MCP server - use proxy
+	if proxy != nil {
+		// The proxy expects the prefixed URI: serverName://actualURI
+		prefixedURI := serverName + "://" + uri
+		return proxy.ReadResource(prefixedURI)
+	}
+
+	return nil, fmt.Errorf("resource not found: %s/%s", serverName, uri)
 }
 
 // GetToolsForContext returns tools filtered by context settings
@@ -1083,11 +1232,13 @@ func (d *DianeStatusProvider) GetToolsForContext(contextName string) []api.ToolI
 				name, _ := t["name"].(string)
 				desc, _ := t["description"].(string)
 				server, _ := t["_server"].(string)
+				schema, _ := t["inputSchema"].(map[string]interface{})
 				tools = append(tools, api.ToolInfo{
 					Name:        name,
 					Description: desc,
 					Server:      server,
 					Builtin:     false,
+					InputSchema: schema,
 				})
 			}
 		}
@@ -1414,36 +1565,6 @@ func main() {
 	defer func() {
 		if proxy != nil {
 			proxy.Close()
-		}
-	}()
-
-	// Initialize Slave Manager (for distributed MCP)
-	if database != nil && proxy != nil {
-		// Initialize Certificate Authority
-		caDir := filepath.Join(home, ".diane")
-		ca, err := slave.NewCertificateAuthority(caDir)
-		if err != nil {
-			slog.Warn("Failed to initialize slave CA", "error", err)
-		} else {
-			// Create Slave Manager
-			var managerErr error
-			slaveManager, managerErr = slave.NewManager(database, proxy, ca)
-			if managerErr != nil {
-				slog.Warn("Failed to create slave manager", "error", managerErr)
-			} else {
-				// Start WebSocket server for slave connections
-				wsAddr := ":8765" // TODO: Make configurable via flag/env
-				if err := slaveManager.StartServer(wsAddr, ca); err != nil {
-					slog.Warn("Failed to start slave WebSocket server", "error", err)
-				} else {
-					slog.Info("Slave manager initialized successfully", "address", wsAddr)
-				}
-			}
-		}
-	}
-	defer func() {
-		if slaveManager != nil {
-			slaveManager.Stop()
 		}
 	}()
 

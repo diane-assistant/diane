@@ -152,25 +152,54 @@ func ctlSlavePair(masterURL string) {
 
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 
-	// 3. Send request to master
+	// 3. Send request to master (with retry loop)
 	reqBody := map[string]string{
 		"hostname": hostname,
 		"csr":      string(csrPEM),
 	}
 	jsonBody, _ := json.Marshal(reqBody)
 
-	resp, err := http.Post(u.String()+"/api/slaves/pair", "application/json", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error connecting to master: %v\n", err)
-		os.Exit(1)
+	fmt.Println("\nConnecting to master...")
+	var resp *http.Response
+
+	for {
+		resp, err = http.Post(u.String()+"/api/slaves/pair", "application/json", bytes.NewBuffer(jsonBody))
+		if err == nil {
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+
+			// Handle non-200 responses
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			// If 404, server might be running but old version or wrong port
+			if resp.StatusCode == http.StatusNotFound {
+				fmt.Printf("\r\033[KError: Master returned 404 (Not Found).\n")
+				fmt.Println("Possible causes:")
+				fmt.Println("1. Master is running an old version (upgrade to v1.10.0+)")
+				fmt.Println("2. You are connecting to the wrong port (try 8765 for pairing)")
+				fmt.Println("3. API endpoint path is incorrect")
+			} else if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+				fmt.Printf("\r\033[KError: Master returned %d (Unauthorized/Forbidden).\n", resp.StatusCode)
+				fmt.Println("The master might require authentication for this port.")
+				fmt.Println("Try connecting to the WebSocket port (default 8765) which handles pairing.")
+			} else {
+				fmt.Printf("\r\033[KError from master: %s (Status %d)\n", string(body), resp.StatusCode)
+			}
+		} else {
+			// Connection error
+			fmt.Printf("\r\033[KWaiting for master at %s... (%v)", u.String(), err)
+		}
+
+		fmt.Println("\n\nEnsure master is running:")
+		fmt.Println("1. Check if 'diane serve' is running on the master machine")
+		fmt.Println("2. Verify port 8765 is open and accessible")
+		fmt.Println("3. Ensure master version is v1.10.0 or later")
+		fmt.Println("\nRetrying in 5 seconds...")
+		time.Sleep(5 * time.Second)
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		fmt.Fprintf(os.Stderr, "Error from master: %s\n", string(body))
-		os.Exit(1)
-	}
 
 	var pairResp struct {
 		Success     bool   `json:"success"`

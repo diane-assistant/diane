@@ -37,7 +37,7 @@ func NewManager(database *db.DB, proxy *mcpproxy.Proxy, ca *CertificateAuthority
 
 // StartServer starts the WebSocket server for slave connections
 func (m *Manager) StartServer(addr string, ca *CertificateAuthority) error {
-	server, err := Start(addr, ca, m.registry, m.db)
+	server, err := Start(addr, ca, m.registry, m.db, m.pairing)
 	if err != nil {
 		return fmt.Errorf("failed to start slave server: %w", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ type Server struct {
 	ca              *CertificateAuthority
 	registry        *Registry
 	db              *db.DB
+	pairing         *PairingService
 	upgrader        websocket.Upgrader
 	server          *http.Server
 	ctx             context.Context
@@ -28,9 +30,9 @@ type Server struct {
 	wg              sync.WaitGroup
 	connMu          sync.RWMutex
 	connections     map[string]*slaveConnection // hostname -> connection
-	heartbeatTicker *time.Ticker
+	pendingCalls    map[string]chan slavetypes.Message
 	responseMu      sync.RWMutex
-	pendingCalls    map[string]chan slavetypes.Message // callID -> response channel
+	heartbeatTicker *time.Ticker
 }
 
 // slaveConnection represents an active WebSocket connection to a slave
@@ -44,13 +46,14 @@ type slaveConnection struct {
 }
 
 // NewServer creates a new slave WebSocket server
-func NewServer(ca *CertificateAuthority, registry *Registry, database *db.DB) *Server {
+func NewServer(ca *CertificateAuthority, registry *Registry, database *db.DB, pairing *PairingService) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Server{
 		ca:       ca,
 		registry: registry,
 		db:       database,
+		pairing:  pairing,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				// Client cert auth handles authorization
@@ -65,12 +68,13 @@ func NewServer(ca *CertificateAuthority, registry *Registry, database *db.DB) *S
 }
 
 // Start begins listening for slave connections
-func Start(addr string, ca *CertificateAuthority, registry *Registry, database *db.DB) (*Server, error) {
-	srv := NewServer(ca, registry, database)
+func Start(addr string, ca *CertificateAuthority, registry *Registry, database *db.DB, pairing *PairingService) (*Server, error) {
+	srv := NewServer(ca, registry, database, pairing)
 
-	// Create TLS config with client certificate authentication
+	// Create TLS config with optional client certificate authentication
+	// This allows pairing requests (without cert) to proceed
 	tlsConfig := &tls.Config{
-		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientAuth: tls.VerifyClientCertIfGiven,
 		ClientCAs:  x509.NewCertPool(),
 		MinVersion: tls.VersionTLS12,
 	}
@@ -82,9 +86,11 @@ func Start(addr string, ca *CertificateAuthority, registry *Registry, database *
 	}
 	tlsConfig.ClientCAs.AddCert(caCert)
 
-	// Setup HTTP server with WebSocket handler
+	// Setup HTTP server with WebSocket handler and pairing endpoints
 	mux := http.NewServeMux()
 	mux.HandleFunc("/slave/connect", srv.handleConnect)
+	mux.HandleFunc("/api/slaves/pair", srv.handlePair)
+	mux.HandleFunc("/api/slaves/pair/", srv.handlePairStatus)
 
 	srv.server = &http.Server{
 		Addr:      addr,
@@ -187,6 +193,78 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	s.registry.Disconnect(hostname)
 	slog.Info("Slave disconnected", "hostname", hostname)
+}
+
+// handlePair handles pairing requests
+func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Hostname string `json:"hostname"`
+		CSR      string `json:"csr"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Hostname == "" || req.CSR == "" {
+		http.Error(w, "hostname and csr are required", http.StatusBadRequest)
+		return
+	}
+
+	code, err := s.pairing.CreatePairingRequest(req.Hostname, []byte(req.CSR))
+	if err != nil {
+		slog.Error("Failed to create pairing request", "error", err)
+		http.Error(w, "Failed to create pairing request", http.StatusInternalServerError)
+		return
+	}
+
+	slog.Info("Pairing initiated via public port", "hostname", req.Hostname, "code", code)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":      true,
+		"pairing_code": code,
+	})
+}
+
+// handlePairStatus handles checking pairing status
+func (s *Server) handlePairStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/slaves/pair/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.Error(w, "Pairing code required", http.StatusBadRequest)
+		return
+	}
+	code := parts[0]
+
+	status, cert, err := s.pairing.GetPairingStatus(code)
+	if err != nil {
+		slog.Error("Failed to get pairing status", "error", err)
+		http.Error(w, "Failed to get pairing status", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status": status,
+	}
+
+	if status == "approved" && cert != "" {
+		response["certificate"] = cert
+		caCertPEM, err := s.pairing.GetCACertPEM()
+		if err == nil {
+			response["ca_cert"] = string(caCertPEM)
+		}
+	}
+
+	json.NewEncoder(w).Encode(response)
 }
 
 // handleConnection processes messages from a slave connection
@@ -423,60 +501,24 @@ func (s *Server) checkHeartbeats() {
 	}
 	s.connMu.RUnlock()
 
-	// Close stale connections
 	for _, conn := range staleConns {
-		slog.Warn("Closing stale connection", "hostname", conn.hostname,
-			"last_heartbeat", conn.lastHeartbeat)
-		conn.cancel()
+		slog.Warn("Slave heartbeat timeout, disconnecting", "hostname", conn.hostname)
+		conn.conn.Close()
+
+		s.connMu.Lock()
+		delete(s.connections, conn.hostname)
+		s.connMu.Unlock()
+
+		s.registry.Disconnect(conn.hostname)
 	}
 }
 
-// Stop gracefully shuts down the server
+// Stop stops the server
 func (s *Server) Stop() error {
-	slog.Info("Stopping slave WebSocket server")
-
-	// Cancel context
 	s.cancel()
-
-	// Close all connections
-	s.connMu.Lock()
-	for _, conn := range s.connections {
-		conn.cancel()
+	if s.server != nil {
+		return s.server.Close()
 	}
-	s.connMu.Unlock()
-
-	// Shutdown HTTP server
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := s.server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("server shutdown failed: %w", err)
-	}
-
-	// Wait for goroutines
 	s.wg.Wait()
-
 	return nil
-}
-
-// GetConnection returns the WebSocket connection for a hostname
-func (s *Server) GetConnection(hostname string) (*websocket.Conn, bool) {
-	s.connMu.RLock()
-	defer s.connMu.RUnlock()
-
-	conn, ok := s.connections[hostname]
-	if !ok {
-		return nil, false
-	}
-
-	return conn.conn, true
-}
-
-// IsConnected checks if a slave is currently connected
-func (s *Server) IsConnected(hostname string) bool {
-	s.connMu.RLock()
-	defer s.connMu.RUnlock()
-
-	_, ok := s.connections[hostname]
-	return ok
 }
