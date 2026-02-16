@@ -372,6 +372,11 @@ func (s *Server) Start() error {
 		s.mcpServersAPI.RegisterRoutes(mux)
 	}
 
+	// Register Slave Management API routes
+	if s.slaveManager != nil {
+		RegisterSlaveRoutes(mux, s)
+	}
+
 	s.server = &http.Server{Handler: mux}
 
 	go func() {
