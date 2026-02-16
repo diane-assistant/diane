@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -113,10 +114,16 @@ func ctlHandleSlaveCommand(client *api.Client, args []string) {
 
 // ctlSlavePair initiates pairing with a master Diane instance
 func ctlSlavePair(masterURL string) {
-	// Normalize URL
+	// Normalize URL - default to HTTPS for port 8765 (WebSocket server)
 	if !strings.HasPrefix(masterURL, "http://") && !strings.HasPrefix(masterURL, "https://") {
-		masterURL = "http://" + masterURL
+		masterURL = "https://" + masterURL
 	}
+	// If user explicitly specified http:// with port 8765, upgrade to https://
+	if strings.HasPrefix(masterURL, "http://") && strings.Contains(masterURL, ":8765") {
+		masterURL = strings.Replace(masterURL, "http://", "https://", 1)
+		fmt.Println("Note: Upgrading connection to HTTPS for WebSocket server")
+	}
+
 	u, err := url.Parse(masterURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: invalid master URL: %v\n", err)
@@ -124,6 +131,17 @@ func ctlSlavePair(masterURL string) {
 	}
 
 	fmt.Printf("Initiating pairing with master: %s\n", u.String())
+
+	// Create HTTP client that accepts self-signed certificates
+	// This is necessary because the master uses a self-signed CA cert
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // Accept self-signed certs during pairing
+			},
+		},
+		Timeout: 10 * time.Second,
+	}
 
 	// 1. Generate key pair
 	fmt.Println("Generating key pair...")
@@ -163,7 +181,7 @@ func ctlSlavePair(masterURL string) {
 	var resp *http.Response
 
 	for {
-		resp, err = http.Post(u.String()+"/api/slaves/pair", "application/json", bytes.NewBuffer(jsonBody))
+		resp, err = httpClient.Post(u.String()+"/api/slaves/pair", "application/json", bytes.NewBuffer(jsonBody))
 		if err == nil {
 			if resp.StatusCode == http.StatusOK {
 				break
@@ -183,7 +201,7 @@ func ctlSlavePair(masterURL string) {
 			} else if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 				fmt.Printf("\r\033[KError: Master returned %d (Unauthorized/Forbidden).\n", resp.StatusCode)
 				fmt.Println("You are likely connecting to the HTTP API port instead of the pairing port.")
-				fmt.Println("Use port 8765 for pairing: diane slave pair http://master-hostname:8765")
+				fmt.Println("Use HTTPS port 8765 for pairing: diane slave pair https://master-hostname:8765")
 			} else {
 				fmt.Printf("\r\033[KError from master: %s (Status %d)\n", string(body), resp.StatusCode)
 			}
@@ -226,7 +244,7 @@ func ctlSlavePair(masterURL string) {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		statusResp, err := http.Get(u.String() + "/api/slaves/pair/" + pairResp.PairingCode)
+		statusResp, err := httpClient.Get(u.String() + "/api/slaves/pair/" + pairResp.PairingCode)
 		if err != nil {
 			// Ignore temporary errors
 			continue

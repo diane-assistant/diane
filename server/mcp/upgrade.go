@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -139,7 +140,15 @@ func ctlHandleUpgradeCommand(args []string) {
 	os.Remove(backupExe)
 
 	fmt.Printf("Successfully upgraded to %s\n", latestVersion)
-	fmt.Printf("Run 'diane version' to verify.\n")
+
+	// Verify the upgrade by checking the version
+	fmt.Println("\nVerifying installation...")
+	verifyUpgrade(realExe, latestVersion)
+
+	// If running on Linux, restart the daemon
+	if runtime.GOOS == "linux" {
+		restartLinuxDaemon()
+	}
 }
 
 func getLatestRelease() (*GitHubRelease, error) {
@@ -248,4 +257,88 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(out, in)
 	return err
+}
+
+// verifyUpgrade checks the installed binary version and validates it's correct
+func verifyUpgrade(binaryPath, expectedVersion string) {
+	cmd := exec.Command(binaryPath, "version")
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Could not verify installation: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Please run 'diane version' manually to verify.\n")
+		return
+	}
+
+	installedVersion := strings.TrimSpace(string(output))
+	cleanExpected := strings.TrimPrefix(expectedVersion, "v")
+	cleanInstalled := strings.TrimPrefix(installedVersion, "v")
+
+	if cleanInstalled == cleanExpected {
+		fmt.Printf("✓ Version verified: %s\n", installedVersion)
+	} else {
+		fmt.Fprintf(os.Stderr, "⚠ Warning: Version mismatch!\n")
+		fmt.Fprintf(os.Stderr, "  Expected: %s\n", expectedVersion)
+		fmt.Fprintf(os.Stderr, "  Installed: %s\n", installedVersion)
+
+		// Check if there might be another binary in PATH
+		pathBinary, err := exec.LookPath("diane")
+		if err == nil && pathBinary != binaryPath {
+			resolvedPath, _ := filepath.EvalSymlinks(pathBinary)
+			fmt.Fprintf(os.Stderr, "\n⚠ Multiple diane binaries detected:\n")
+			fmt.Fprintf(os.Stderr, "  Upgraded: %s\n", binaryPath)
+			fmt.Fprintf(os.Stderr, "  In PATH:  %s\n", resolvedPath)
+			fmt.Fprintf(os.Stderr, "\nConsider removing the old binary or updating your PATH.\n")
+		}
+	}
+}
+
+// restartLinuxDaemon attempts to restart the diane systemd service on Linux
+func restartLinuxDaemon() {
+	fmt.Println("\nDetecting Linux daemon...")
+
+	// Check if systemd is available
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		fmt.Println("systemctl not found, skipping daemon restart")
+		return
+	}
+
+	// Check if diane service exists
+	cmd := exec.Command("systemctl", "status", "diane")
+	if err := cmd.Run(); err != nil {
+		fmt.Println("diane.service not found or not running, skipping restart")
+		return
+	}
+
+	fmt.Println("Attempting to restart diane.service...")
+
+	// Try to restart the service
+	cmd = exec.Command("systemctl", "restart", "diane")
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ Warning: Failed to restart daemon: %v\n", err)
+		fmt.Fprintf(os.Stderr, "You may need to restart manually:\n")
+		fmt.Fprintf(os.Stderr, "  sudo systemctl restart diane\n")
+		return
+	}
+
+	fmt.Println("✓ diane.service restarted successfully")
+
+	// Give it a moment to start
+	time.Sleep(2 * time.Second)
+
+	// Check status
+	cmd = exec.Command("systemctl", "is-active", "diane")
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ Service may not have started properly\n")
+		fmt.Fprintf(os.Stderr, "Check status with: systemctl status diane\n")
+		return
+	}
+
+	status := strings.TrimSpace(string(output))
+	if status == "active" {
+		fmt.Println("✓ diane.service is running")
+	} else {
+		fmt.Fprintf(os.Stderr, "⚠ Service status: %s\n", status)
+		fmt.Fprintf(os.Stderr, "Check logs with: journalctl -u diane -n 50\n")
+	}
 }
