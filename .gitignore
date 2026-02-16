@@ -5,7 +5,6 @@ build/
 default.profraw
 
 # Go binaries (but not Go source directories)
-server/diane-ctl
 *.test
 *.out
 

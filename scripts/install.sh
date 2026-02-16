@@ -64,10 +64,10 @@ echo ""
 echo ""
 
 # Also build the additional CLI tools
-print_step "Building additional CLI tools (diane-ctl, acp-server)..."
+print_step "Building additional CLI tools (acp-server)..."
 cd "$PROJECT_ROOT"
-make build-ctl build-acp
-print_success "Built diane-ctl and acp-server"
+make build-acp
+print_success "Built acp-server"
 echo ""
 
 # Step 2: Stop running Diane if any
@@ -131,10 +131,9 @@ print_success "Created symlink: ~/.diane/bin/diane -> $BUNDLED_DIANE"
 
 # Step 7: Install additional CLI tools
 print_step "Installing additional CLI tools..."
-cp "$BUILD_DIR/diane-ctl" "$DIANE_BIN/diane-ctl"
 cp "$BUILD_DIR/acp-server" "$DIANE_BIN/acp-server"
-chmod +x "$DIANE_BIN/diane-ctl" "$DIANE_BIN/acp-server"
-print_success "Installed diane-ctl and acp-server"
+chmod +x "$DIANE_BIN/acp-server"
+print_success "Installed acp-server"
 
 # Step 8: Check PATH
 print_step "Checking PATH configuration..."
@@ -162,7 +161,6 @@ echo ""
 echo "Installed components:"
 echo "  • Diane.app    → $INSTALL_APP_DIR/Diane.app"
 echo "  • diane CLI        → ~/.diane/bin/diane (symlink to app)"
-echo "  • diane-ctl        → ~/.diane/bin/diane-ctl"
 echo "  • acp-server       → ~/.diane/bin/acp-server"
 echo ""
 echo "Version: $VERSION"

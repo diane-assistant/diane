@@ -3,11 +3,9 @@
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BINARY_NAME := diane
-CTL_BINARY_NAME := diane-ctl
 ACP_BINARY_NAME := acp-server
 BUILD_DIR := dist
 SERVER_DIR := server/mcp
-CTL_DIR := server/cmd/diane-ctl
 ACP_DIR := server/cmd/acp-server
 SCRIPTS_DIR := scripts
 
@@ -18,10 +16,10 @@ CGO_ENABLED := 1
 # Platforms
 PLATFORMS := darwin-arm64 darwin-amd64 linux-amd64 linux-arm64
 
-.PHONY: all build build-ctl build-acp clean install test release help app install-app
+.PHONY: all build build-acp clean install test release help app install-app
 
 ## Default target
-all: build build-ctl build-acp
+all: build build-acp
 
 ## Build for current platform
 build:
@@ -31,9 +29,8 @@ build:
 
 ## Build diane-ctl for current platform
 build-ctl:
-	@echo "Building $(CTL_BINARY_NAME)..."
-	cd $(CTL_DIR) && go build -ldflags="$(LDFLAGS)" -o ../../../$(BUILD_DIR)/$(CTL_BINARY_NAME) .
-	@echo "Built: $(BUILD_DIR)/$(CTL_BINARY_NAME)"
+	@echo "NOTE: diane-ctl is now part of the diane binary. Use 'make build' instead."
+	@echo "Subcommands: diane status, diane health, diane info, etc."
 
 ## Build acp-server for current platform
 build-acp:
@@ -75,17 +72,14 @@ release: build-all
 	@echo "Release archives created in $(BUILD_DIR)/"
 
 ## Install locally
-install: build build-ctl build-acp
+install: build build-acp
 	@echo "Installing to ~/.diane/bin/..."
 	@mkdir -p ~/.diane/bin
 	@cp $(BUILD_DIR)/$(BINARY_NAME) ~/.diane/bin/$(BINARY_NAME)
-	@cp $(BUILD_DIR)/$(CTL_BINARY_NAME) ~/.diane/bin/$(CTL_BINARY_NAME)
 	@cp $(BUILD_DIR)/$(ACP_BINARY_NAME) ~/.diane/bin/$(ACP_BINARY_NAME)
 	@chmod +x ~/.diane/bin/$(BINARY_NAME)
-	@chmod +x ~/.diane/bin/$(CTL_BINARY_NAME)
 	@chmod +x ~/.diane/bin/$(ACP_BINARY_NAME)
 	@echo "Installed: ~/.diane/bin/$(BINARY_NAME)"
-	@echo "Installed: ~/.diane/bin/$(CTL_BINARY_NAME)"
 	@echo "Installed: ~/.diane/bin/$(ACP_BINARY_NAME)"
 
 ## Run tests
@@ -125,7 +119,6 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  build       Build diane for current platform"
-	@echo "  build-ctl   Build diane-ctl for current platform"
 	@echo "  build-acp   Build acp-server for current platform"
 	@echo "  build-all   Build for all platforms (darwin/linux, arm64/amd64)"
 	@echo "  app         Build Diane.app with embedded diane binary (macOS)"
@@ -139,7 +132,7 @@ help:
 	@echo "  help        Show this help"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make                    # Build diane, diane-ctl, and acp-server"
+	@echo "  make                    # Build diane and acp-server"
 	@echo "  make app                # Build Diane.app bundle"
 	@echo "  make install-app        # Build and install everything (macOS)"
 	@echo "  make install            # Install CLI binaries only"

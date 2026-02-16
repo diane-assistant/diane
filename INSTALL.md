@@ -55,7 +55,7 @@ Add to your `opencode.json`:
 Or install automatically with:
 
 ```bash
-diane-ctl mcp install opencode
+diane mcp install opencode
 ```
 
 ### Claude Desktop

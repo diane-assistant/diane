@@ -85,14 +85,6 @@ jobs:
         working-directory: server/mcp
         run: go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o ../../dist/diane .
 
-      - name: Build diane-ctl
-        env:
-          GOOS: darwin
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 1
-        working-directory: server/cmd/diane-ctl
-        run: go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o ../../../dist/diane-ctl .
-
       - name: Build acp-server
         env:
           GOOS: darwin
@@ -111,7 +103,7 @@ jobs:
       - name: Compress binaries
         run: |
           cd dist
-          tar -czvf ${{ matrix.name }}.tar.gz diane diane-ctl acp-server specmcp
+          tar -czvf ${{ matrix.name }}.tar.gz diane acp-server specmcp
           shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
 
       - name: Upload artifact
@@ -162,15 +154,6 @@ jobs:
         working-directory: server/mcp
         run: go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o ../../dist/diane .
 
-      - name: Build diane-ctl
-        env:
-          GOOS: linux
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 1
-          CC: ${{ matrix.cc || 'gcc' }}
-        working-directory: server/cmd/diane-ctl
-        run: go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o ../../../dist/diane-ctl .
-
       - name: Build acp-server
         env:
           GOOS: linux
@@ -190,7 +173,7 @@ jobs:
       - name: Compress binaries
         run: |
           cd dist
-          tar -czvf ${{ matrix.name }}.tar.gz diane diane-ctl acp-server specmcp
+          tar -czvf ${{ matrix.name }}.tar.gz diane acp-server specmcp
           sha256sum ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
 
       - name: Upload artifact

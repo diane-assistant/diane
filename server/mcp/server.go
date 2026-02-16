@@ -1152,6 +1152,28 @@ func releaseLock(file *os.File, lockPath string) {
 }
 
 func main() {
+	// --- Subcommand dispatch (before any server initialization) ---
+	// CTL commands (status, health, info, etc.) only need the API client,
+	// not the full server. Dispatch them immediately and exit.
+	if runCTLCommand(os.Args) {
+		// runCTLCommand calls os.Exit internally for handled commands.
+		// If we get here, it means the command was handled but didn't exit
+		// (shouldn't happen, but be safe).
+		return
+	}
+
+	// Determine run mode: "serve" = daemon (no stdio), default = stdio MCP
+	serveMode := len(os.Args) >= 2 && os.Args[1] == "serve"
+
+	// If there are unrecognized subcommands, show usage and exit
+	if len(os.Args) >= 2 && !serveMode {
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", os.Args[1])
+		ctlPrintUsage()
+		os.Exit(1)
+	}
+
+	// --- Server initialization (shared by both stdio and serve modes) ---
+
 	// Track start time
 	startTime = time.Now()
 
@@ -1175,7 +1197,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("Diane server starting", "version", Version, "pid", os.Getpid())
+	mode := "stdio"
+	if serveMode {
+		mode = "serve"
+	}
+	slog.Info("Diane server starting", "version", Version, "pid", os.Getpid(), "mode", mode)
 
 	// Single instance check: try to acquire exclusive lock on lock file
 	lockFile := filepath.Join(home, ".diane", "diane.lock")
@@ -1360,16 +1386,6 @@ func main() {
 		}
 	}()
 
-	// MCP servers communicate via stdin/stdout
-	decoder := json.NewDecoder(os.Stdin)
-	encoder := json.NewEncoder(os.Stdout)
-	globalEncoder = encoder // Store for notification forwarding
-
-	// Start notification forwarder if proxy is available
-	if proxy != nil {
-		go forwardProxiedNotifications(proxy)
-	}
-
 	// Setup signal handler for reload (SIGUSR1)
 	if proxy != nil {
 		sigChan := make(chan os.Signal, 1)
@@ -1382,6 +1398,34 @@ func main() {
 				}
 			}
 		}()
+	}
+
+	if serveMode {
+		// --- Serve mode: daemon without stdio ---
+		// Block until SIGINT or SIGTERM for graceful shutdown.
+		slog.Info("Diane running in serve mode (no stdio). Press Ctrl+C to stop.")
+		fmt.Fprintf(os.Stderr, "Diane %s running in serve mode (pid %d)\n", Version, os.Getpid())
+		fmt.Fprintf(os.Stderr, "  Unix socket: ~/.diane/diane.sock\n")
+		fmt.Fprintf(os.Stderr, "  MCP HTTP: http://localhost:8765\n")
+		fmt.Fprintf(os.Stderr, "Press Ctrl+C to stop.\n")
+
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+		sig := <-quit
+		slog.Info("Received shutdown signal", "signal", sig)
+		fmt.Fprintf(os.Stderr, "\nShutting down...\n")
+		// Deferred cleanup runs on return
+		return
+	}
+
+	// --- Stdio mode: MCP JSON-RPC over stdin/stdout (default) ---
+	decoder := json.NewDecoder(os.Stdin)
+	encoder := json.NewEncoder(os.Stdout)
+	globalEncoder = encoder // Store for notification forwarding
+
+	// Start notification forwarder if proxy is available
+	if proxy != nil {
+		go forwardProxiedNotifications(proxy)
 	}
 
 	for {

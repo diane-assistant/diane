@@ -33,7 +33,7 @@ Add to your `opencode.json`:
 Or install automatically with:
 
 ```bash
-diane-ctl mcp install opencode
+diane mcp install opencode
 ```
 
 **Note:** This connects to a running Diane instance via SSE. Make sure Diane is running (via Diane or command line) before starting OpenCode.
@@ -379,19 +379,19 @@ Connect to an MCP server via Server-Sent Events transport.
 After adding or updating MCP server configuration, reload without restarting:
 
 ```bash
-diane-ctl reload
+diane reload
 ```
 
 ### Check Server Status
 
 ```bash
-diane-ctl mcp-servers
+diane mcp-servers
 ```
 
 ### Restart a Specific Server
 
 ```bash
-diane-ctl restart <server-name>
+diane restart <server-name>
 ```
 
 ---
@@ -414,7 +414,7 @@ Builtin Diane tools (apple, google, weather, etc.) are not prefixed.
 Check the error message in the Diane app or via:
 
 ```bash
-diane-ctl mcp-servers
+diane mcp-servers
 ```
 
 Common issues:

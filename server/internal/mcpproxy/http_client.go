@@ -216,7 +216,7 @@ func (c *HTTPClient) initialize() error {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		// Check if this is an auth error
 		if resp.StatusCode == http.StatusUnauthorized && c.oauthConfig != nil {
-			return fmt.Errorf("authentication required: run 'diane-ctl auth login %s' to authenticate", c.name)
+			return fmt.Errorf("authentication required: run 'diane auth login %s' to authenticate", c.name)
 		}
 		return fmt.Errorf("initialize failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
