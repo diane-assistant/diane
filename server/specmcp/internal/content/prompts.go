@@ -157,13 +157,19 @@ The proposal captures the **intent** of the change — why it needs to happen.
    - Who is affected?
    - What is the expected impact?
 
+4. **Mark ready**: Once reviewed, call ` + "`spec_mark_ready`" + ` with the proposal's entity_id.
+   The proposal must be marked **ready** before you can add specs.
+
 ### Guardrails
 - Change name must be **kebab-case** (hard block)
 - A **Constitution** must exist (hard block — use ` + "`spec_create_constitution`" + ` to bootstrap)
 - **Patterns** should be seeded (soft block, override with force=true)
 
+### Tips
+- Use ` + "`spec_status`" + ` with change_id to see readiness state and next steps at any time.
+
 ### Next stage
-Once the proposal is created, move to **specs** stage.
+Once the proposal is **ready**, move to **specs** stage.
 `
 }
 
@@ -189,12 +195,23 @@ Specs define **what** the change needs to do. Each spec is a domain-specific con
    Call ` + "`spec_artifact`" + ` with artifact_type="scenario"
    - Provide: name, given/when/then (BDD format)
 
+4. **Mark ready (bottom-up)**: Readiness cascades upward, so mark children ready first:
+   - Mark each **Scenario** ready: ` + "`spec_mark_ready`" + ` with entity_id
+   - Mark each **Requirement** ready (requires all its Scenarios to be ready)
+   - Mark each **Spec** ready (requires all its Requirements to be ready)
+   If any child is not ready, the parent will be blocked with a list of unready children.
+
 ### Guardrails
-- Proposal **must exist** before adding specs (hard block)
+- Proposal must be **ready** before adding specs (hard block)
 - Each requirement should have at least one scenario
+- Adding a new Requirement to a ready Spec reverts the Spec to **draft**
+- Adding a new Scenario to a ready Requirement reverts the Requirement to **draft**
+
+### Tips
+- Use ` + "`spec_status`" + ` to see which specs/requirements/scenarios still need to be marked ready.
 
 ### Next stage
-Once specs capture all behavioral requirements, move to **design** stage.
+Once all specs are **ready**, move to **design** stage.
 `
 }
 
@@ -215,12 +232,15 @@ The design describes **how** the specs will be implemented.
 2. **Check patterns**: Call ` + "`spec_suggest_patterns`" + ` to see which patterns apply
 3. **Apply patterns**: Call ` + "`spec_apply_pattern`" + ` for each relevant pattern
 
+4. **Mark ready**: Once reviewed, call ` + "`spec_mark_ready`" + ` with the design's entity_id.
+   The design must be marked **ready** before you can add tasks.
+
 ### Guardrails
-- Proposal and at least one spec **must exist** before adding a design (hard block)
+- Proposal must be **ready** and all specs must be **ready** before adding a design (hard block)
 - Design should reference existing patterns where applicable
 
 ### Next stage
-Once the design is complete, move to **tasks** stage.
+Once the design is **ready**, move to **tasks** stage.
 `
 }
 
@@ -245,7 +265,7 @@ Tasks break the design into concrete, implementable steps.
 4. **View critical path**: Call ` + "`spec_get_critical_path`" + ` to see the dependency chain
 
 ### Guardrails
-- A **design must exist** before adding tasks (hard block)
+- A **design must be ready** before adding tasks (hard block)
 - Complexity uses **1-10 points**, NOT hours
 
 ### Next stage
@@ -330,9 +350,9 @@ Proposal (Why) → Specs (What) → Design (How) → Tasks (Steps)
 ` + "```" + `
 
 Each stage builds on the previous one, enforced by guardrails:
-- You cannot add specs without a proposal
-- You cannot add a design without at least one spec
-- You cannot add tasks without a design
+- You cannot add specs without a **ready** proposal
+- You cannot add a design without a **ready** proposal and all specs **ready**
+- You cannot add tasks without a **ready** design
 
 ## Entity Model
 
@@ -391,11 +411,13 @@ SpecMCP enforces guardrails at three points:
 
 ## Tools Reference
 
-### Workflow (4 tools)
+### Workflow (6 tools)
 - **spec_new** — Create a new change container
 - **spec_artifact** — Add any artifact type to a change (16 types supported)
 - **spec_archive** — Archive a completed change
 - **spec_verify** — Verify completeness, correctness, and coherence
+- **spec_mark_ready** — Mark a workflow artifact as ready (with cascading validation)
+- **spec_status** — Get readiness status and next steps for a change
 
 ### Query (8 tools)
 - **spec_list_changes** — List all changes (filter by status)
@@ -438,7 +460,8 @@ SpecMCP enforces guardrails at three points:
    - ` + "`spec_new`" + ` with a kebab-case name
 
 3. **Define the change** (follow the artifact workflow):
-   - Proposal → Specs → Requirements → Scenarios → Design → Tasks
+   - Proposal → mark ready → Specs → Requirements → Scenarios → mark ready (bottom-up) → Design → mark ready → Tasks
+   - Use ` + "`spec_status`" + ` to check readiness and see next steps at any stage
 
 4. **Implement**:
    - Work through tasks in dependency order using task management tools
@@ -452,21 +475,34 @@ const guideWorkflowSection = `# SpecMCP Artifact Workflow
 
 Every change follows a structured artifact progression, each stage building on the previous:
 
+## Readiness Gating
+
+Workflow progression is gated on **readiness**, not just existence. Each workflow artifact (Proposal, Spec, Requirement, Scenario, Design) has a status of **draft** or **ready**.
+
+- New artifacts start as **draft**
+- Use ` + "`spec_mark_ready`" + ` to mark an artifact as **ready**
+- Readiness cascades: a Spec can't be ready unless all its Requirements are ready; a Requirement can't be ready unless all its Scenarios are ready
+- Adding a child to a ready parent (e.g., a new Requirement to a ready Spec) automatically reverts the parent to **draft**
+- Use ` + "`spec_status`" + ` to see overall readiness and next steps
+
 ## Proposal (Why)
 Captures the **intent** — why this change needs to happen.
 - Fields: intent (required), scope, impact
 - Created via: spec_artifact with artifact_type="proposal"
+- Must be marked **ready** before adding specs
 
 ## Specs (What)
 Define **what** the change does. Each spec is a domain-specific container.
 - Fields: name, domain, purpose, delta_type
 - Contains: Requirements (MUST/SHOULD/MAY)
 - Requirements contain: Scenarios (Given/When/Then BDD format)
+- Mark ready **bottom-up**: Scenarios → Requirements → Specs
 
 ## Design (How)
 Describes **how** specs will be implemented.
 - Fields: approach, decisions, data_flow, file_changes
 - Should reference applicable patterns
+- Must be marked **ready** before adding tasks
 
 ## Tasks (Steps)
 Break the design into concrete, implementable steps.
@@ -475,10 +511,10 @@ Break the design into concrete, implementable steps.
 - Auto-generation available via spec_generate_tasks
 
 ## Enforcement
-The workflow order is enforced by guardrails:
-- Specs require a Proposal (hard block)
-- Design requires Proposal + Specs (hard block)
-- Tasks require a Design (hard block)
+The workflow order is enforced by readiness-based guardrails:
+- Specs require a **ready** Proposal (hard block)
+- Design requires **ready** Proposal + all Specs **ready** (hard block)
+- Tasks require a **ready** Design (hard block)
 `
 
 const guideGuardrailsSection = `# SpecMCP Guardrails
@@ -502,9 +538,12 @@ Guardrails are automated checks that run at key points in the workflow to preven
 5. **component_discovery** [SUGGESTION] — Map reusable components first
 
 ## Artifact Guards (run on spec_artifact)
-1. **proposal_before_spec** [HARD_BLOCK] — Proposal must exist before specs
-2. **spec_before_design** [HARD_BLOCK] — At least one spec must exist before design
-3. **design_before_tasks** [HARD_BLOCK] — Design must exist before tasks
+
+These guards check **readiness**, not just existence. Use ` + "`spec_mark_ready`" + ` to mark artifacts as ready.
+
+1. **proposal_before_spec** [HARD_BLOCK] — Proposal must be **ready** before adding specs
+2. **spec_before_design** [HARD_BLOCK] — Proposal must be **ready** and all specs must be **ready** before adding design
+3. **design_before_tasks** [HARD_BLOCK] — Design must be **ready** before adding tasks
 
 ## Archive Guards (run on spec_archive)
 1. **artifact_completeness** [SOFT_BLOCK] — All core artifacts should exist
@@ -526,6 +565,8 @@ const guideToolsSection = `# SpecMCP Tools Reference
 | spec_artifact | Add any artifact type to a change |
 | spec_archive | Archive a completed change |
 | spec_verify | Verify change completeness/correctness/coherence |
+| spec_mark_ready | Mark a workflow artifact as ready (cascading validation) |
+| spec_status | Get readiness status and next steps for a change |
 
 ## Query Tools
 | Tool | Purpose |

@@ -82,6 +82,28 @@ const (
 	StatusBlocked    = "blocked"
 )
 
+// Artifact readiness status constants.
+// Workflow artifacts (Proposal, Spec, Requirement, Scenario, Design) start as
+// draft and must be explicitly marked ready before the next workflow stage can proceed.
+const (
+	StatusDraft = "draft"
+	StatusReady = "ready"
+)
+
+// WorkflowArtifactTypes lists the entity types that participate in readiness tracking.
+var WorkflowArtifactTypes = map[string]bool{
+	TypeProposal:    true,
+	TypeSpec:        true,
+	TypeRequirement: true,
+	TypeScenario:    true,
+	TypeDesign:      true,
+}
+
+// IsWorkflowArtifactType returns true if the entity type participates in readiness tracking.
+func IsWorkflowArtifactType(typeName string) bool {
+	return WorkflowArtifactTypes[typeName]
+}
+
 // Change represents a feature, bug fix, or refactoring effort.
 type Change struct {
 	ID         string   `json:"id,omitempty"`
@@ -94,6 +116,7 @@ type Change struct {
 // Proposal represents the intent of a change.
 type Proposal struct {
 	ID     string   `json:"id,omitempty"`
+	Status string   `json:"status,omitempty"`
 	Intent string   `json:"intent"`
 	Scope  string   `json:"scope,omitempty"`
 	Impact string   `json:"impact,omitempty"`
@@ -103,6 +126,7 @@ type Proposal struct {
 // Spec represents a domain-specific specification container.
 type Spec struct {
 	ID        string   `json:"id,omitempty"`
+	Status    string   `json:"status,omitempty"`
 	Name      string   `json:"name"`
 	Domain    string   `json:"domain,omitempty"`
 	Purpose   string   `json:"purpose,omitempty"`
@@ -113,6 +137,7 @@ type Spec struct {
 // Requirement represents a specific behavior the system must have.
 type Requirement struct {
 	ID          string   `json:"id,omitempty"`
+	Status      string   `json:"status,omitempty"`
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Strength    string   `json:"strength,omitempty"`
@@ -123,6 +148,7 @@ type Requirement struct {
 // Scenario represents a concrete example of a requirement.
 type Scenario struct {
 	ID      string   `json:"id,omitempty"`
+	Status  string   `json:"status,omitempty"`
 	Name    string   `json:"name"`
 	Title   string   `json:"title,omitempty"`
 	Given   string   `json:"given,omitempty"`
@@ -143,6 +169,7 @@ type ScenarioStep struct {
 // Design represents the technical approach for a change.
 type Design struct {
 	ID          string   `json:"id,omitempty"`
+	Status      string   `json:"status,omitempty"`
 	Approach    string   `json:"approach,omitempty"`
 	Decisions   string   `json:"decisions,omitempty"`
 	DataFlow    string   `json:"data_flow,omitempty"`

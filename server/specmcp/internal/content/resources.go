@@ -57,14 +57,14 @@ func (r *GuardrailsResource) Read() (*mcp.ResourcesReadResult, error) {
 
 // --- specmcp://tool-reference resource ---
 
-// ToolReferenceResource exposes a quick-reference card for all 25 tools.
+// ToolReferenceResource exposes a quick-reference card for all 27 tools.
 type ToolReferenceResource struct{}
 
 func (r *ToolReferenceResource) Definition() mcp.ResourceDefinition {
 	return mcp.ResourceDefinition{
 		URI:         "specmcp://tool-reference",
 		Name:        "SpecMCP Tool Reference",
-		Description: "Quick-reference card for all 25 SpecMCP tools with parameters and usage notes",
+		Description: "Quick-reference card for all 27 SpecMCP tools with parameters and usage notes",
 		MimeType:    "text/markdown",
 	}
 }
@@ -100,24 +100,24 @@ Top-level container for a feature, bug fix, or refactoring effort.
 
 ### Proposal
 Captures the intent of a change — why it exists.
-- **Properties**: intent (string, required), scope (string), impact (string), tags ([]string)
+- **Properties**: intent (string, required), scope (string), impact (string), status (string: draft/ready), tags ([]string)
 - **Relationships**: (linked from Change via has_proposal)
 
 ### Spec
 Domain-specific specification container holding requirements.
-- **Properties**: name (string, required), domain (string), purpose (string), delta_type (string), tags ([]string)
+- **Properties**: name (string, required), domain (string), purpose (string), delta_type (string), status (string: draft/ready), tags ([]string)
 - **Relationships**:
   - has_requirement → Requirement (1:N)
 
 ### Requirement
 Specific behavior the system must have.
-- **Properties**: name (string, required), description (string, required), strength (string: MUST/SHOULD/MAY), delta_type (string), tags ([]string)
+- **Properties**: name (string, required), description (string, required), strength (string: MUST/SHOULD/MAY), delta_type (string), status (string: draft/ready), tags ([]string)
 - **Relationships**:
   - has_scenario → Scenario (1:N)
 
 ### Scenario
 Concrete example of a requirement in BDD format.
-- **Properties**: name (string, required), title (string), given (string), when (string), then (string), and_also ([]string), tags ([]string)
+- **Properties**: name (string, required), title (string), given (string), when (string), then (string), and_also ([]string), status (string: draft/ready), tags ([]string)
 - **Relationships**:
   - has_step → ScenarioStep (1:N, for complex scenarios)
   - tested_by → TestCase
@@ -128,7 +128,7 @@ Individual step in a complex scenario.
 
 ### Design
 Technical approach for implementing the change.
-- **Properties**: approach (string), decisions (string), data_flow (string), file_changes ([]string), tags ([]string)
+- **Properties**: approach (string), decisions (string), data_flow (string), file_changes ([]string), status (string: draft/ready), tags ([]string)
 - **Relationships**: (linked from Change via has_design)
 
 ### Task
@@ -252,6 +252,8 @@ Tags use namespaced conventions:
 |--------|---------|
 | active | Change |
 | archived | Change |
+| draft | Proposal, Spec, Requirement, Scenario, Design |
+| ready | Proposal, Spec, Requirement, Scenario, Design |
 | pending | Task, GraphSync |
 | in_progress | Task, GraphSync |
 | completed | Task, GraphSync |
@@ -288,11 +290,13 @@ Each guard returns a result with one of four severity levels.
 
 ### Artifact Guards (run on spec_artifact)
 
+These guards check **readiness**, not just existence. Use ` + "`spec_mark_ready`" + ` to mark artifacts as ready before progressing.
+
 | # | Guard | Severity | Checks |
 |---|-------|----------|--------|
-| 1 | proposal_before_spec | HARD_BLOCK | Change has a Proposal before adding Spec/Requirement/Scenario |
-| 2 | spec_before_design | HARD_BLOCK | Change has Proposal + Spec before adding Design |
-| 3 | design_before_tasks | HARD_BLOCK | Change has a Design before adding Tasks |
+| 1 | proposal_before_spec | HARD_BLOCK | Change has a **ready** Proposal before adding Spec/Requirement/Scenario |
+| 2 | spec_before_design | HARD_BLOCK | Change has **ready** Proposal + all Specs **ready** before adding Design |
+| 3 | design_before_tasks | HARD_BLOCK | Change has a **ready** Design before adding Tasks |
 
 ### Archive Guards (run on spec_archive)
 
@@ -326,6 +330,7 @@ The spec_verify tool performs deeper analysis across three dimensions:
 Guards receive a populated GuardContext containing:
 - Project-level state: HasConstitution, HasPatterns, ContextCount, ComponentCount
 - Change-level state: ChangeName, ArtifactType, HasProposal, HasSpec, HasDesign, HasTasks, TaskCount, CompletedTasks
+- Readiness state: ProposalReady, AllSpecsReady, DesignReady
 
 The context is populated once via graph queries, then shared across all guards to avoid N+1 query patterns.
 `
@@ -357,6 +362,17 @@ Archive a completed change.
 Verify change completeness, correctness, and coherence.
 - **Required**: change_name (string)
 - **Returns**: structured report with issues by dimension and severity
+
+### spec_mark_ready
+Mark a workflow artifact (Proposal, Spec, Requirement, Scenario, Design) as ready.
+- **Required**: entity_id (string)
+- **Cascading validation**: For Specs, all Requirements must be ready. For Requirements, all Scenarios must be ready.
+- **Returns**: success confirmation, or blockers list with unready children (id, type, name, status)
+
+### spec_status
+Get readiness status and next steps for a change.
+- **Required**: change_id (string)
+- **Returns**: workflow stage, per-artifact readiness summaries, prioritized next_steps, ready_to_archive boolean
 
 ## Query Tools
 

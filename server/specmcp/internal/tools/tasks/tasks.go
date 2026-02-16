@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/diane-assistant/diane/server/specmcp/internal/emergent"
+	"github.com/diane-assistant/diane/server/specmcp/internal/guards"
 	"github.com/diane-assistant/diane/server/specmcp/internal/mcp"
 	"github.com/emergent-company/emergent/apps/server-go/pkg/sdk/graph"
 )
@@ -90,10 +91,24 @@ func (t *GenerateTasks) Execute(ctx context.Context, params json.RawMessage) (*m
 		return mcp.ErrorResult("at least one task is required"), nil
 	}
 
-	// Verify change exists and has a design
+	// Verify change exists and has a ready design
 	_, err := t.client.GetChange(ctx, p.ChangeID)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("change not found: %v", err)), nil
+	}
+
+	// Run artifact guards to ensure design is ready before generating tasks
+	gctx := &guards.GuardContext{
+		ChangeID:     p.ChangeID,
+		ArtifactType: "task",
+	}
+	if err := guards.PopulateChangeState(ctx, t.client, gctx); err != nil {
+		return nil, fmt.Errorf("populating change state: %w", err)
+	}
+	runner := guards.NewRunner()
+	outcome := runner.Run(ctx, gctx, guards.ArtifactGuards())
+	if outcome.Blocked {
+		return mcp.ErrorResult(outcome.FormatBlockMessage()), nil
 	}
 
 	// Create all tasks first to build a number→ID map

@@ -330,10 +330,17 @@ func (t *SpecArtifact) addTask(ctx context.Context, changeID string, content map
 }
 
 // addRequirement creates a Requirement linked to a Spec (spec_id in content).
+// If the parent Spec is already status=ready, it is reverted to draft.
 func (t *SpecArtifact) addRequirement(ctx context.Context, content map[string]any) (*mcp.ToolsCallResult, error) {
 	specID := getString(content, "spec_id")
 	if specID == "" {
 		return mcp.ErrorResult("content.spec_id is required for requirement artifacts"), nil
+	}
+
+	// Revert parent Spec to draft if it's currently ready
+	parentReverted, err := t.revertParentToDraft(ctx, specID)
+	if err != nil {
+		return nil, fmt.Errorf("checking parent readiness: %w", err)
 	}
 
 	req, err := t.client.CreateRequirement(ctx, specID, &emergent.Requirement{
@@ -347,19 +354,32 @@ func (t *SpecArtifact) addRequirement(ctx context.Context, content map[string]an
 		return nil, fmt.Errorf("creating requirement: %w", err)
 	}
 
-	return mcp.JSONResult(map[string]any{
+	result := map[string]any{
 		"type":    "requirement",
 		"id":      req.ID,
 		"name":    req.Name,
 		"message": fmt.Sprintf("Created requirement %q", req.Name),
-	})
+	}
+	if parentReverted {
+		result["parent_reverted"] = true
+		result["parent_revert_message"] = "Parent Spec was ready and has been reverted to draft"
+	}
+
+	return mcp.JSONResult(result)
 }
 
 // addScenario creates a Scenario linked to a Requirement (requirement_id in content).
+// If the parent Requirement is already status=ready, it is reverted to draft.
 func (t *SpecArtifact) addScenario(ctx context.Context, content map[string]any) (*mcp.ToolsCallResult, error) {
 	reqID := getString(content, "requirement_id")
 	if reqID == "" {
 		return mcp.ErrorResult("content.requirement_id is required for scenario artifacts"), nil
+	}
+
+	// Revert parent Requirement to draft if it's currently ready
+	parentReverted, err := t.revertParentToDraft(ctx, reqID)
+	if err != nil {
+		return nil, fmt.Errorf("checking parent readiness: %w", err)
 	}
 
 	scen, err := t.client.CreateScenario(ctx, reqID, &emergent.Scenario{
@@ -374,12 +394,18 @@ func (t *SpecArtifact) addScenario(ctx context.Context, content map[string]any) 
 		return nil, fmt.Errorf("creating scenario: %w", err)
 	}
 
-	return mcp.JSONResult(map[string]any{
+	result := map[string]any{
 		"type":    "scenario",
 		"id":      scen.ID,
 		"name":    scen.Name,
 		"message": fmt.Sprintf("Created scenario %q", scen.Name),
-	})
+	}
+	if parentReverted {
+		result["parent_reverted"] = true
+		result["parent_revert_message"] = "Parent Requirement was ready and has been reverted to draft"
+	}
+
+	return mcp.JSONResult(result)
 }
 
 // addScenarioStep creates a ScenarioStep linked to a Scenario.
@@ -895,6 +921,30 @@ func (t *SpecArtifact) hasRelType(ctx context.Context, changeID, relType string)
 }
 
 // --- Helpers ---
+
+// revertParentToDraft checks if the parent entity is status=ready, and if so,
+// reverts it to draft. This is called when adding a child artifact (e.g.,
+// adding a Requirement to a Spec or a Scenario to a Requirement).
+// Returns true if the parent was reverted, false if it was already draft.
+func (t *SpecArtifact) revertParentToDraft(ctx context.Context, parentID string) (bool, error) {
+	obj, err := t.client.GetObject(ctx, parentID)
+	if err != nil {
+		return false, fmt.Errorf("getting parent object %s: %w", parentID, err)
+	}
+
+	status, _ := obj.Properties["status"].(string)
+	if status != emergent.StatusReady {
+		return false, nil
+	}
+
+	// Parent is ready — revert to draft
+	_, err = t.client.UpdateObject(ctx, obj.ID, map[string]any{"status": emergent.StatusDraft}, nil)
+	if err != nil {
+		return false, fmt.Errorf("reverting parent %s to draft: %w", parentID, err)
+	}
+
+	return true, nil
+}
 
 func getString(m map[string]any, key string) string {
 	v, _ := m[key].(string)

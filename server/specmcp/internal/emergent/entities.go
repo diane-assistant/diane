@@ -128,6 +128,9 @@ func (c *Client) ListChanges(ctx context.Context, status string) ([]*Change, err
 
 // CreateProposal creates a Proposal and links it to a Change.
 func (c *Client) CreateProposal(ctx context.Context, changeID string, p *Proposal) (*Proposal, error) {
+	if p.Status == "" {
+		p.Status = StatusDraft
+	}
 	props, err := toProps(p)
 	if err != nil {
 		return nil, err
@@ -152,6 +155,9 @@ func (c *Client) CreateProposal(ctx context.Context, changeID string, p *Proposa
 
 // CreateSpec creates a Spec and links it to a Change.
 func (c *Client) CreateSpec(ctx context.Context, changeID string, s *Spec) (*Spec, error) {
+	if s.Status == "" {
+		s.Status = StatusDraft
+	}
 	props, err := toProps(s)
 	if err != nil {
 		return nil, err
@@ -175,6 +181,9 @@ func (c *Client) CreateSpec(ctx context.Context, changeID string, s *Spec) (*Spe
 
 // CreateRequirement creates a Requirement and links it to a Spec.
 func (c *Client) CreateRequirement(ctx context.Context, specID string, r *Requirement) (*Requirement, error) {
+	if r.Status == "" {
+		r.Status = StatusDraft
+	}
 	props, err := toProps(r)
 	if err != nil {
 		return nil, err
@@ -198,6 +207,9 @@ func (c *Client) CreateRequirement(ctx context.Context, specID string, r *Requir
 
 // CreateScenario creates a Scenario and links it to a Requirement.
 func (c *Client) CreateScenario(ctx context.Context, requirementID string, s *Scenario) (*Scenario, error) {
+	if s.Status == "" {
+		s.Status = StatusDraft
+	}
 	props, err := toProps(s)
 	if err != nil {
 		return nil, err
@@ -221,6 +233,9 @@ func (c *Client) CreateScenario(ctx context.Context, requirementID string, s *Sc
 
 // CreateDesign creates a Design and links it to a Change.
 func (c *Client) CreateDesign(ctx context.Context, changeID string, d *Design) (*Design, error) {
+	if d.Status == "" {
+		d.Status = StatusDraft
+	}
 	props, err := toProps(d)
 	if err != nil {
 		return nil, err

@@ -87,6 +87,8 @@ func run() error {
 	registry.Register(workflow.NewSpecBatchArtifact(specArtifact))
 	registry.Register(workflow.NewSpecArchive(emClient))
 	registry.Register(workflow.NewSpecVerify(emClient))
+	registry.Register(workflow.NewSpecMarkReady(emClient))
+	registry.Register(workflow.NewSpecStatus(emClient))
 
 	// Register query tools
 	registry.Register(query.NewListChanges(emClient))

@@ -80,8 +80,9 @@ var KebabCaseName = NewGuardFunc("kebab_case_name", func(_ context.Context, gctx
 
 // --- Artifact Workflow Guards ---
 // These guards enforce the Proposal → Spec → Design → Tasks dependency chain.
+// Each stage requires the previous stage's artifact to exist AND be marked ready.
 
-// ProposalBeforeSpec ensures a Proposal exists before Specs can be added.
+// ProposalBeforeSpec ensures a Proposal exists and is ready before Specs can be added.
 var ProposalBeforeSpec = NewGuardFunc("proposal_before_spec", func(_ context.Context, gctx *GuardContext) Result {
 	// Only applies to spec-related artifacts
 	switch gctx.ArtifactType {
@@ -89,16 +90,22 @@ var ProposalBeforeSpec = NewGuardFunc("proposal_before_spec", func(_ context.Con
 	default:
 		return Pass("proposal_before_spec")
 	}
-	if gctx.HasProposal {
-		return Pass("proposal_before_spec")
+	if !gctx.HasProposal {
+		return Fail("proposal_before_spec", HardBlock,
+			"Change must have a Proposal before adding Specs. The proposal captures the intent (why) before defining the specifications (what).",
+			"Add a proposal first using spec_artifact with artifact_type='proposal'.",
+		)
 	}
-	return Fail("proposal_before_spec", HardBlock,
-		"Change must have a Proposal before adding Specs. The proposal captures the intent (why) before defining the specifications (what).",
-		"Add a proposal first using spec_artifact with artifact_type='proposal'.",
-	)
+	if !gctx.ProposalReady {
+		return Fail("proposal_before_spec", HardBlock,
+			"Proposal must be marked ready before adding Specs. Review the proposal and mark it ready using spec_mark_ready.",
+			"Use spec_mark_ready with the proposal's entity_id.",
+		)
+	}
+	return Pass("proposal_before_spec")
 })
 
-// SpecBeforeDesign ensures at least one Spec exists before a Design can be added.
+// SpecBeforeDesign ensures at least one Spec exists and all specs are ready before a Design can be added.
 var SpecBeforeDesign = NewGuardFunc("spec_before_design", func(_ context.Context, gctx *GuardContext) Result {
 	if gctx.ArtifactType != "design" {
 		return Pass("spec_before_design")
@@ -109,16 +116,28 @@ var SpecBeforeDesign = NewGuardFunc("spec_before_design", func(_ context.Context
 			"Add a proposal first using spec_artifact with artifact_type='proposal'.",
 		)
 	}
+	if !gctx.ProposalReady {
+		return Fail("spec_before_design", HardBlock,
+			"Proposal must be marked ready before adding a Design.",
+			"Use spec_mark_ready with the proposal's entity_id.",
+		)
+	}
 	if !gctx.HasSpec {
 		return Fail("spec_before_design", HardBlock,
 			"Change must have at least one Spec before adding a Design. Specs define what changes are needed; the design defines how.",
 			"Add specs first using spec_artifact with artifact_type='spec'.",
 		)
 	}
+	if !gctx.AllSpecsReady {
+		return Fail("spec_before_design", HardBlock,
+			"All Specs (including their Requirements and Scenarios) must be marked ready before adding a Design. This ensures the specifications are complete and reviewed.",
+			"Use spec_mark_ready to mark all specs, requirements, and scenarios as ready.",
+		)
+	}
 	return Pass("spec_before_design")
 })
 
-// DesignBeforeTasks ensures a Design exists before Tasks can be added.
+// DesignBeforeTasks ensures a Design exists and is ready before Tasks can be added.
 var DesignBeforeTasks = NewGuardFunc("design_before_tasks", func(_ context.Context, gctx *GuardContext) Result {
 	if gctx.ArtifactType != "task" {
 		return Pass("design_before_tasks")
@@ -127,6 +146,12 @@ var DesignBeforeTasks = NewGuardFunc("design_before_tasks", func(_ context.Conte
 		return Fail("design_before_tasks", HardBlock,
 			"Change must have a Design before adding Tasks. The design defines the technical approach; tasks break it into implementable steps.",
 			"Add a design first using spec_artifact with artifact_type='design'.",
+		)
+	}
+	if !gctx.DesignReady {
+		return Fail("design_before_tasks", HardBlock,
+			"Design must be marked ready before adding Tasks. Review the design and mark it ready using spec_mark_ready.",
+			"Use spec_mark_ready with the design's entity_id.",
 		)
 	}
 	return Pass("design_before_tasks")

@@ -188,8 +188,11 @@ type GuardContext struct {
 	HasPatterns     bool // At least one Pattern entity exists
 	PatternCount    int  // Number of Pattern entities
 	HasProposal     bool // Change has a linked Proposal
+	ProposalReady   bool // Proposal has status=ready
 	HasSpec         bool // Change has at least one linked Spec
+	AllSpecsReady   bool // All Specs (and their Requirements and Scenarios) have status=ready
 	HasDesign       bool // Change has a linked Design
+	DesignReady     bool // Design has status=ready
 	HasTasks        bool // Change has at least one linked Task
 	SpecCount       int  // Number of Specs for this change
 	TaskCount       int  // Total tasks for this change
