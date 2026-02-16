@@ -16,6 +16,7 @@ struct IOSSettingsView: View {
                 }
                 InfoRow(label: "Host", value: config.host)
                 InfoRow(label: "Port", value: "\(config.port)")
+                InfoRow(label: "Auth", value: config.apiKey.isEmpty ? "None" : "API Key")
 
                 HStack {
                     Text("Status")
@@ -57,8 +58,8 @@ struct IOSSettingsView: View {
             // About
             Section("About") {
                 InfoRow(label: "App", value: "Diane iOS")
-                InfoRow(label: "Mode", value: "Read-Only")
-                InfoRow(label: "Connection", value: "HTTP (Tailscale)")
+                InfoRow(label: "Mode", value: config.apiKey.isEmpty ? "Read-Only" : "Full Access")
+                InfoRow(label: "Connection", value: "HTTP")
             }
         }
         .navigationTitle("Settings")

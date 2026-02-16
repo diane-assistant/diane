@@ -34,7 +34,8 @@ struct DianeIOSApp: App {
 
     private func setupClient() {
         guard let url = config.baseURL else { return }
-        let newClient = DianeHTTPClient(baseURL: url)
+        let key = config.apiKey.isEmpty ? nil : config.apiKey
+        let newClient = DianeHTTPClient(baseURL: url, apiKey: key)
         let newMonitor = IOSStatusMonitor(client: newClient)
         self.client = newClient
         self.monitor = newMonitor

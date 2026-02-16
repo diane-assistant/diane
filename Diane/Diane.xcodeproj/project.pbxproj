@@ -1060,8 +1060,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 74LC88G9SC;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Diane/App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Diane;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -1092,8 +1093,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 74LC88G9SC;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Diane/App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Diane;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
