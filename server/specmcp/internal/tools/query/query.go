@@ -741,7 +741,11 @@ func buildEntityResponse(obj *graph.GraphObject, expanded *graph.GraphExpandResp
 		entity["name"] = *obj.Key
 	}
 
-	// Group related entities by relationship type
+	// Group related entities by relationship type.
+	// Only include edges that directly connect to the root entity (skip
+	// cross-edges between non-root nodes that appear at depth > 1).
+	// Deduplicate by (relType, entityID) so the same entity appears at
+	// most once per relationship type.
 	relationships := make(map[string][]map[string]any)
 	if expanded != nil && expanded.Edges != nil {
 		// Build node lookup from ExpandNode types.
@@ -757,10 +761,27 @@ func buildEntityResponse(obj *graph.GraphObject, expanded *graph.GraphExpandResp
 			}
 		}
 
+		// Also treat canonical_id of the root as "the root" for edge matching,
+		// since edges may reference either the version ID or canonical ID.
+		rootIDs := map[string]bool{obj.ID: true}
+		if obj.CanonicalID != "" {
+			rootIDs[obj.CanonicalID] = true
+		}
+
+		// Track seen (relType, entityID) pairs to deduplicate.
+		seen := make(map[string]bool)
+
 		for _, edge := range expanded.Edges {
+			// Only process edges that have the root entity as one endpoint.
+			srcIsRoot := rootIDs[edge.SrcID]
+			dstIsRoot := rootIDs[edge.DstID]
+			if !srcIsRoot && !dstIsRoot {
+				continue // cross-edge between non-root nodes at depth > 1
+			}
+
 			// Find the "other" end of the relationship
 			otherID := edge.DstID
-			if edge.DstID == obj.ID {
+			if dstIsRoot {
 				otherID = edge.SrcID
 			}
 
@@ -768,6 +789,14 @@ func buildEntityResponse(obj *graph.GraphObject, expanded *graph.GraphExpandResp
 			if other == nil {
 				continue
 			}
+
+			// Deduplicate: skip if we've already recorded this entity
+			// under this relationship type.
+			dedupeKey := edge.Type + "|" + other.ID
+			if seen[dedupeKey] {
+				continue
+			}
+			seen[dedupeKey] = true
 
 			entry := map[string]any{
 				"id":   other.ID,
