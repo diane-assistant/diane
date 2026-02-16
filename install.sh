@@ -169,9 +169,27 @@ package() {
 EOF
 
     info "Building package..."
-    # -s: Install missing dependencies
-    # --noconfirm: Non-interactive
-    makepkg -s --noconfirm
+    
+    # Check if running as root
+    if [ "$(id -u)" -eq 0 ]; then
+        warn "Running as root. Creating temporary build user..."
+        
+        # Create temp user if not exists
+        if ! id -u diane-builder >/dev/null 2>&1; then
+            useradd -m -d /tmp/diane-builder diane-builder || true
+        fi
+        
+        # Ensure build dir ownership
+        chown -R diane-builder:diane-builder "${TMP_DIR}"
+        
+        # Run makepkg as diane-builder
+        # We assume dependencies (base-devel) are already installed since we checked for makepkg
+        su - diane-builder -c "cd ${TMP_DIR} && makepkg --noconfirm"
+    else
+        # -s: Install missing dependencies (will ask for sudo password if needed)
+        # --noconfirm: Non-interactive
+        makepkg -s --noconfirm
+    fi
     
     PKG_FILE=$(ls diane-*.pkg.tar.zst | head -1)
     if [ -z "$PKG_FILE" ]; then
