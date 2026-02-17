@@ -131,6 +131,51 @@ class DianeHTTPClient: DianeClientProtocol {
         logger.info("GET \(path) succeeded, \(data.count) bytes")
         return data
     }
+    
+    /// Make an HTTP POST/PUT/DELETE request with a body and return the response data
+    private func requestWithBody(_ path: String, method: String, body: Data? = nil) async throws -> Data {
+        guard let url = URL(string: path, relativeTo: baseURL) else {
+            throw DianeHTTPClientError.invalidURL(path: path)
+        }
+
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = method
+        
+        // Add API key auth header if configured
+        if let apiKey, !apiKey.isEmpty {
+            urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        
+        // Add body if provided
+        if let body = body {
+            urlRequest.httpBody = body
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+
+        logger.info("\(method) \(url.absoluteString)")
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: urlRequest)
+        } catch {
+            logger.error("Connection failed for \(path): \(error.localizedDescription)")
+            throw DianeHTTPClientError.connectionFailed(underlying: error)
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw DianeHTTPClientError.connectionFailed(underlying: URLError(.badServerResponse))
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            logger.error("Server error \(httpResponse.statusCode) for \(path): \(body)")
+            throw DianeHTTPClientError.serverError(statusCode: httpResponse.statusCode, body: body)
+        }
+
+        logger.info("\(method) \(path) succeeded, \(data.count) bytes")
+        return data
+    }
 
     /// Decode data using the Go-compatible decoder, wrapping errors
     private func decodeGo<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
@@ -217,11 +262,11 @@ class DianeHTTPClient: DianeClientProtocol {
         return try decodeGo(MCPServer.self, from: data)
     }
 
-    func createMCPServerConfig(name: String, type: String, enabled: Bool, command: String?, args: [String]?, env: [String: String]?, url: String?, headers: [String: String]?, oauth: OAuthConfig?) async throws -> MCPServer {
+    func createMCPServerConfig(name: String, type: String, enabled: Bool, command: String?, args: [String]?, env: [String: String]?, url: String?, headers: [String: String]?, oauth: OAuthConfig?, nodeID: String?, nodeMode: String?) async throws -> MCPServer {
         throw DianeHTTPClientError.readOnlyMode
     }
 
-    func updateMCPServerConfig(id: Int64, name: String?, type: String?, enabled: Bool?, command: String?, args: [String]?, env: [String: String]?, url: String?, headers: [String: String]?, oauth: OAuthConfig?) async throws -> MCPServer {
+    func updateMCPServerConfig(id: Int64, name: String?, type: String?, enabled: Bool?, command: String?, args: [String]?, env: [String: String]?, url: String?, headers: [String: String]?, oauth: OAuthConfig?, nodeID: String?, nodeMode: String?) async throws -> MCPServer {
         throw DianeHTTPClientError.readOnlyMode
     }
 
@@ -554,26 +599,51 @@ class DianeHTTPClient: DianeClientProtocol {
         throw DianeHTTPClientError.readOnlyMode
     }
     
-    // MARK: - Slave Management (not available on iOS)
+    // MARK: - Slave Management
     
     func getSlaves() async throws -> [SlaveInfo] {
-        throw DianeHTTPClientError.notAvailableOnIOS
+        let data = try await request("/slaves")
+        return try JSONDecoder().decode([SlaveInfo].self, from: data)
     }
     
     func getPendingPairingRequests() async throws -> [PairingRequest] {
-        throw DianeHTTPClientError.notAvailableOnIOS
+        let data = try await request("/slaves/pending")
+        return try JSONDecoder().decode([PairingRequest].self, from: data)
     }
     
     func approvePairingRequest(hostname: String, pairingCode: String) async throws {
-        throw DianeHTTPClientError.notAvailableOnIOS
+        let body: [String: Any] = [
+            "hostname": hostname,
+            "pairing_code": pairingCode
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        _ = try await requestWithBody("/slaves/approve", method: "POST", body: bodyData)
     }
     
     func denyPairingRequest(hostname: String, pairingCode: String) async throws {
-        throw DianeHTTPClientError.notAvailableOnIOS
+        let body: [String: Any] = [
+            "hostname": hostname,
+            "pairing_code": pairingCode
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        _ = try await requestWithBody("/slaves/deny", method: "POST", body: bodyData)
     }
     
     func revokeSlaveCredentials(hostname: String, reason: String?) async throws {
-        throw DianeHTTPClientError.notAvailableOnIOS
+        var body: [String: Any] = ["hostname": hostname]
+        if let reason = reason {
+            body["reason"] = reason
+        }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        _ = try await requestWithBody("/slaves/revoke", method: "POST", body: bodyData)
+    }
+    
+    func restartSlave(hostname: String) async throws {
+        _ = try await requestWithBody("/slaves/restart/\(hostname)", method: "POST", body: Data())
+    }
+    
+    func upgradeSlave(hostname: String) async throws {
+        _ = try await requestWithBody("/slaves/upgrade/\(hostname)", method: "POST", body: Data())
     }
 }
 

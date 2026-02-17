@@ -6,6 +6,7 @@ struct SlaveInfo: Codable, Identifiable, Hashable {
     
     let hostname: String
     let status: String
+    let version: String?
     let toolCount: Int
     let lastSeen: String?
     let connectedAt: String?
@@ -18,6 +19,7 @@ struct SlaveInfo: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case hostname
         case status
+        case version
         case toolCount = "tool_count"
         case lastSeen = "last_seen"
         case connectedAt = "connected_at"

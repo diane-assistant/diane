@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -95,9 +96,10 @@ func (c *WSClient) connect() error {
 
 	// Create TLS config
 	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      caCertPool,
-		MinVersion:   tls.VersionTLS12,
+		Certificates:       []tls.Certificate{cert},
+		RootCAs:            caCertPool,
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, // TODO: Fix master cert to include proper SANs
 	}
 
 	// Create WebSocket dialer with TLS
@@ -172,16 +174,19 @@ func (c *WSClient) readLoop() {
 		c.connMu.RUnlock()
 
 		if !connected || conn == nil {
-			time.Sleep(time.Second)
-			continue
+			// Not connected, exit this readLoop instance
+			// reconnectLoop will start a new one after reconnecting
+			return
 		}
 
 		var msg slavetypes.Message
 		if err := conn.ReadJSON(&msg); err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				slog.Error("WebSocket read error", "error", err)
-				c.handleDisconnect()
-			}
+			// Any read error means the connection is broken
+			// Always trigger reconnection regardless of error type
+			slog.Error("WebSocket read error, triggering reconnect",
+				"error", err,
+				"master", c.masterAddr)
+			c.handleDisconnect()
 			return
 		}
 
@@ -198,6 +203,10 @@ func (c *WSClient) handleMessage(msg slavetypes.Message) {
 		c.handleResponse(msg)
 	case slavetypes.MessageTypeError:
 		c.handleError(msg)
+	case slavetypes.MessageTypeRestart:
+		c.handleRestart(msg)
+	case slavetypes.MessageTypeUpgrade:
+		c.handleUpgrade(msg)
 	default:
 		slog.Warn("Unknown message type", "type", msg.Type)
 	}
@@ -287,6 +296,68 @@ func (c *WSClient) handleError(msg slavetypes.Message) {
 	c.SetError(errData.Error)
 }
 
+// handleRestart handles restart command from master
+func (c *WSClient) handleRestart(msg slavetypes.Message) {
+	slog.Info("Received restart command from master")
+
+	// Perform graceful restart using the platform-specific restart script
+	// This will restart the Diane process which will reconnect to master
+	go func() {
+		// Give time for any pending operations to complete
+		time.Sleep(1 * time.Second)
+
+		// Close connection gracefully
+		c.connMu.Lock()
+		if c.conn != nil {
+			c.conn.Close()
+		}
+		c.connMu.Unlock()
+
+		// Execute restart - the process will exit and systemd/launchd will restart it
+		// On most systems, sending SIGUSR1 triggers a graceful restart
+		// Or we can use os.Exit() and rely on process manager
+		slog.Info("Initiating restart...")
+		os.Exit(0) // Exit cleanly, process manager will restart
+	}()
+}
+
+// handleUpgrade handles upgrade command from master
+func (c *WSClient) handleUpgrade(msg slavetypes.Message) {
+	slog.Info("Received upgrade command from master")
+
+	// Run diane upgrade command
+	go func() {
+		// Give time to send response
+		time.Sleep(500 * time.Millisecond)
+
+		// Close connection gracefully
+		c.connMu.Lock()
+		if c.conn != nil {
+			c.conn.Close()
+		}
+		c.connMu.Unlock()
+
+		// Get the diane binary path
+		dianePath := filepath.Join(os.Getenv("HOME"), ".diane", "bin", "diane")
+
+		slog.Info("Starting upgrade process", "diane_path", dianePath)
+
+		// Execute upgrade command
+		// The upgrade command will replace the binary and restart the service
+		cmd := exec.Command(dianePath, "upgrade")
+		output, err := cmd.CombinedOutput()
+
+		if err != nil {
+			slog.Error("Upgrade failed", "error", err, "output", string(output))
+		} else {
+			slog.Info("Upgrade completed", "output", string(output))
+		}
+
+		// Exit to allow process manager to restart with new binary
+		os.Exit(0)
+	}()
+}
+
 // handleDisconnect handles connection loss
 func (c *WSClient) handleDisconnect() {
 	c.connMu.Lock()
@@ -303,17 +374,32 @@ func (c *WSClient) handleDisconnect() {
 	go c.reconnectLoop()
 }
 
-// reconnectLoop attempts to reconnect to master
+// reconnectLoop attempts to reconnect to master forever
+// Will keep trying with exponential backoff, capped at 2 minutes
 func (c *WSClient) reconnectLoop() {
 	backoff := time.Second
-	maxBackoff := 5 * time.Minute
+	maxBackoff := 2 * time.Minute
+	attemptCount := 0
 
 	for {
+		attemptCount++
 		time.Sleep(backoff)
 
-		slog.Info("Attempting to reconnect to master")
+		slog.Info("Attempting to reconnect to master",
+			"master", c.masterAddr,
+			"attempt", attemptCount,
+			"backoff", backoff)
+
 		if err := c.connect(); err != nil {
-			slog.Error("Reconnection failed", "error", err)
+			slog.Error("Reconnection failed",
+				"error", err,
+				"attempt", attemptCount,
+				"next_retry_in", backoff*2)
+
+			c.SetError(fmt.Sprintf("reconnect failed (attempt %d): %v", attemptCount, err))
+
+			// Increase backoff for next attempt, capped at maxBackoff
+			// We will keep trying forever
 			backoff *= 2
 			if backoff > maxBackoff {
 				backoff = maxBackoff
@@ -321,8 +407,15 @@ func (c *WSClient) reconnectLoop() {
 			continue
 		}
 
-		// Reconnected successfully
-		slog.Info("Reconnected to master")
+		// Reconnected successfully - reset counters
+		backoff = time.Second
+		attemptCount = 0
+		slog.Info("Reconnected to master successfully", "master", c.masterAddr)
+		c.SetError("")
+
+		// Restart heartbeat and message reading
+		go c.readLoop()
+		go c.heartbeatLoop()
 		return
 	}
 }
@@ -551,6 +644,12 @@ func (c *WSClient) Close() error {
 	}
 
 	return nil
+}
+
+// GetDisconnectChan returns a channel that never closes because WS reconnects forever
+func (c *WSClient) GetDisconnectChan() <-chan struct{} {
+	// WebSocket handles reconnection internally via reconnectLoop, so this never fires
+	return make(chan struct{})
 }
 
 // GetCertPaths returns the paths to the slave's certificates

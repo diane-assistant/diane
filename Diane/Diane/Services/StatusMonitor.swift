@@ -21,6 +21,11 @@ class StatusMonitor: ObservableObject {
     @Published var slaves: [SlaveInfo] = []
     @Published var pendingPairingRequests: [PairingRequest] = []
     
+    // Restart/Upgrade tracking
+    @Published var restartingMaster: Bool = false
+    @Published var restartingSlaves: Set<String> = []
+    @Published var upgradingSlaves: Set<String> = []
+    
     private var client: DianeClientProtocol?
     
     /// The configured client instance for use by ViewModels
@@ -243,6 +248,7 @@ class StatusMonitor: ObservableObject {
         do {
             let newSlaves = try await client.getSlaves()
             slaves = newSlaves
+            logger.info("Refreshed slaves: \(newSlaves.count) slaves connected")
         } catch {
             logger.error("Failed to refresh slaves: \(error.localizedDescription)")
             // Don't clear slaves on error - keep showing last known state
@@ -281,9 +287,13 @@ class StatusMonitor: ObservableObject {
     private func showPairingNotification(for request: PairingRequest) {
         let content = UNMutableNotificationContent()
         content.title = "New Pairing Request"
-        content.body = "\(request.hostname) (\(request.platformDisplay)) wants to pair\nCode: \(request.pairingCode)"
+        content.body = "\(request.hostname) (\(request.platformDisplay)) wants to connect\nCode: \(request.pairingCode)"
         content.sound = .default
         content.categoryIdentifier = "PAIRING_REQUEST"
+        content.userInfo = [
+            "hostname": request.hostname,
+            "pairing_code": request.pairingCode
+        ]
         
         let notificationRequest = UNNotificationRequest(
             identifier: "pairing-\(request.pairingCode)",
@@ -330,6 +340,107 @@ class StatusMonitor: ObservableObject {
         } catch {
             logger.error("Failed to deny pairing: \(error.localizedDescription)")
             lastError = "Failed to deny pairing: \(error.localizedDescription)"
+        }
+    }
+    
+    /// Revoke credentials for a slave server
+    func revokeSlaveCredentials(hostname: String) async {
+        guard let client else { return }
+        
+        do {
+            try await client.revokeSlaveCredentials(hostname: hostname, reason: "Revoked from Diane app")
+            
+            // Refresh slaves list immediately
+            await refreshSlaves()
+            
+            logger.info("Revoked credentials for \(hostname)")
+        } catch {
+            logger.error("Failed to revoke slave: \(error.localizedDescription)")
+            lastError = "Failed to revoke slave: \(error.localizedDescription)"
+        }
+    }
+    
+    func restartSlave(hostname: String) async throws {
+        guard let client else { 
+            throw NSError(domain: "StatusMonitor", code: -1, userInfo: [NSLocalizedDescriptionKey: "Client not initialized"])
+        }
+        
+        // Mark slave as restarting
+        restartingSlaves.insert(hostname)
+        
+        do {
+            try await client.restartSlave(hostname: hostname)
+            
+            logger.info("Restart command sent to \(hostname)")
+            FileLogger.shared.info("Restart command sent to \(hostname)", category: "StatusMonitor")
+            
+            // Monitor restart progress - poll for 30 seconds
+            let startTime = Date()
+            let timeout: TimeInterval = 30
+            
+            while Date().timeIntervalSince(startTime) < timeout {
+                try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                
+                // Refresh slaves list
+                await refreshSlaves()
+                
+                // Check if slave is back online
+                if let slave = slaves.first(where: { $0.hostname == hostname }), slave.isConnected {
+                    logger.info("Slave \(hostname) is back online")
+                    restartingSlaves.remove(hostname)
+                    return
+                }
+            }
+            
+            // Timeout - remove from restarting set anyway
+            logger.warning("Slave \(hostname) restart timed out")
+            restartingSlaves.remove(hostname)
+            
+        } catch {
+            restartingSlaves.remove(hostname)
+            throw error
+        }
+    }
+    
+    func upgradeSlave(hostname: String) async throws {
+        guard let client else { 
+            throw NSError(domain: "StatusMonitor", code: -1, userInfo: [NSLocalizedDescriptionKey: "Client not initialized"])
+        }
+        
+        // Mark slave as upgrading
+        upgradingSlaves.insert(hostname)
+        
+        do {
+            try await client.upgradeSlave(hostname: hostname)
+            
+            logger.info("Upgrade command sent to \(hostname)")
+            FileLogger.shared.info("Upgrade command sent to \(hostname)", category: "StatusMonitor")
+            
+            // Monitor upgrade progress - poll for 60 seconds (upgrade takes longer than restart)
+            let startTime = Date()
+            let timeout: TimeInterval = 60
+            
+            while Date().timeIntervalSince(startTime) < timeout {
+                try await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                
+                // Refresh slaves list
+                await refreshSlaves()
+                
+                // Check if slave is back online
+                if let slave = slaves.first(where: { $0.hostname == hostname }), slave.isConnected {
+                    logger.info("Slave \(hostname) is back online after upgrade")
+                    upgradingSlaves.remove(hostname)
+                    return
+                }
+            }
+            
+            // Timeout - remove from upgrading set anyway
+            logger.warning("Slave \(hostname) upgrade timed out")
+            upgradingSlaves.remove(hostname)
+            
+        } catch {
+            upgradingSlaves.remove(hostname)
+            throw error
         }
     }
     
@@ -424,16 +535,43 @@ class StatusMonitor: ObservableObject {
     /// Restart Diane (local mode only)
     func restartDiane() async {
         guard let client, !isRemoteMode else { return }
+        restartingMaster = true
         isLoading = true
-        defer { isLoading = false }
+        defer { 
+            isLoading = false
+        }
         
         do {
             try await client.restartDiane()
-            // Wait for startup
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            await refresh()
+            
+            logger.info("Restart command sent to master")
+            FileLogger.shared.info("Restart command sent to master", category: "StatusMonitor")
+            
+            // Monitor restart progress - poll for 30 seconds
+            let startTime = Date()
+            let timeout: TimeInterval = 30
+            
+            while Date().timeIntervalSince(startTime) < timeout {
+                try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                
+                // Refresh status
+                await refresh()
+                
+                // Check if master is back online
+                if case .connected = connectionState {
+                    logger.info("Master is back online")
+                    restartingMaster = false
+                    return
+                }
+            }
+            
+            // Timeout - clear flag anyway
+            logger.warning("Master restart timed out")
+            restartingMaster = false
+            
         } catch {
             lastError = error.localizedDescription
+            restartingMaster = false
         }
     }
     

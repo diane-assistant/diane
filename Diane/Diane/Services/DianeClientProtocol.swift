@@ -63,10 +63,10 @@ protocol DianeClientProtocol {
     func getMCPServerConfig(id: Int64) async throws -> MCPServer
 
     /// Create a new MCP server configuration
-    func createMCPServerConfig(name: String, type: String, enabled: Bool, command: String?, args: [String]?, env: [String: String]?, url: String?, headers: [String: String]?, oauth: OAuthConfig?) async throws -> MCPServer
+    func createMCPServerConfig(name: String, type: String, enabled: Bool, command: String?, args: [String]?, env: [String: String]?, url: String?, headers: [String: String]?, oauth: OAuthConfig?, nodeID: String?, nodeMode: String?) async throws -> MCPServer
 
     /// Update an MCP server configuration
-    func updateMCPServerConfig(id: Int64, name: String?, type: String?, enabled: Bool?, command: String?, args: [String]?, env: [String: String]?, url: String?, headers: [String: String]?, oauth: OAuthConfig?) async throws -> MCPServer
+    func updateMCPServerConfig(id: Int64, name: String?, type: String?, enabled: Bool?, command: String?, args: [String]?, env: [String: String]?, url: String?, headers: [String: String]?, oauth: OAuthConfig?, nodeID: String?, nodeMode: String?) async throws -> MCPServer
 
     /// Delete an MCP server configuration
     func deleteMCPServerConfig(id: Int64) async throws
@@ -270,4 +270,10 @@ protocol DianeClientProtocol {
 
     /// Revoke slave credentials
     func revokeSlaveCredentials(hostname: String, reason: String?) async throws
+    
+    /// Restart a slave server
+    func restartSlave(hostname: String) async throws
+    
+    /// Upgrade a slave server to the latest version
+    func upgradeSlave(hostname: String) async throws
 }

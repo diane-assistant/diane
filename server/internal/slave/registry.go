@@ -160,6 +160,7 @@ func (r *Registry) GetAllSlaves() ([]*SlaveInfo, error) {
 			HostID:     dbSlave.HostID,
 			CertSerial: dbSlave.CertSerial,
 			Platform:   dbSlave.Platform,
+			Version:    dbSlave.Version,
 			IssuedAt:   dbSlave.IssuedAt,
 			ExpiresAt:  dbSlave.ExpiresAt,
 			Enabled:    dbSlave.Enabled,
@@ -311,6 +312,7 @@ type SlaveInfo struct {
 	HostID        string
 	CertSerial    string
 	Platform      string
+	Version       string
 	IssuedAt      time.Time
 	ExpiresAt     time.Time
 	LastHeartbeat *time.Time

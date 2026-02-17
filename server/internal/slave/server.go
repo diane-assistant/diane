@@ -323,12 +323,21 @@ func (s *Server) handleRegister(conn *slaveConnection, msg slavetypes.Message) {
 	}
 
 	slog.Info("Slave registered",
-		"hostname", reg.Hostname,
+		"cert_hostname", conn.hostname,
+		"reported_hostname", reg.Hostname,
 		"version", reg.Version,
 		"tools", len(reg.Tools))
 
-	// Update registry
-	s.registry.Connect(reg.Hostname, reg.Tools, conn.conn)
+	// Use certificate CN as authoritative hostname (not the reported hostname)
+	// This ensures consistency even if the system hostname changes
+	s.registry.Connect(conn.hostname, reg.Tools, conn.conn)
+
+	// Update slave version in database
+	if reg.Version != "" {
+		if err := s.db.UpdateSlaveVersion(conn.hostname, reg.Version); err != nil {
+			slog.Error("Failed to update slave version", "hostname", conn.hostname, "error", err)
+		}
+	}
 
 	// Send acknowledgment
 	s.sendMessage(conn, slavetypes.Message{
@@ -433,6 +442,56 @@ func (s *Server) SendToolCall(hostname, callID, tool string, arguments map[strin
 	case <-time.After(30 * time.Second):
 		return nil, fmt.Errorf("tool call timed out")
 	}
+}
+
+// SendRestartCommand sends a restart command to a slave
+func (s *Server) SendRestartCommand(hostname string) error {
+	s.connMu.RLock()
+	conn, ok := s.connections[hostname]
+	s.connMu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("slave not connected: %s", hostname)
+	}
+
+	msg := slavetypes.Message{
+		Type:      slavetypes.MessageTypeRestart,
+		ID:        fmt.Sprintf("restart-%s-%d", hostname, time.Now().UnixNano()),
+		Timestamp: time.Now(),
+	}
+
+	// Send restart message (fire and forget - slave will restart and reconnect)
+	if err := s.sendMessage(conn, msg); err != nil {
+		return fmt.Errorf("failed to send restart command: %w", err)
+	}
+
+	slog.Info("Restart command sent to slave", "hostname", hostname)
+	return nil
+}
+
+// SendUpgradeCommand sends an upgrade command to a slave
+func (s *Server) SendUpgradeCommand(hostname string) error {
+	s.connMu.RLock()
+	conn, ok := s.connections[hostname]
+	s.connMu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("slave not connected: %s", hostname)
+	}
+
+	msg := slavetypes.Message{
+		Type:      slavetypes.MessageTypeUpgrade,
+		ID:        fmt.Sprintf("upgrade-%s-%d", hostname, time.Now().UnixNano()),
+		Timestamp: time.Now(),
+	}
+
+	// Send upgrade message (fire and forget - slave will upgrade and restart)
+	if err := s.sendMessage(conn, msg); err != nil {
+		return fmt.Errorf("failed to send upgrade command: %w", err)
+	}
+
+	slog.Info("Upgrade command sent to slave", "hostname", hostname)
+	return nil
 }
 
 // sendMessage sends a message to a slave connection

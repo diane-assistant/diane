@@ -161,6 +161,24 @@ func (m *Manager) ListRevokedCredentials() ([]*db.RevokedCredential, error) {
 	return m.db.ListRevokedCredentials()
 }
 
+// RestartSlave sends a restart command to a connected slave
+func (m *Manager) RestartSlave(hostname string) error {
+	if m.server == nil {
+		return fmt.Errorf("slave server not initialized")
+	}
+
+	return m.server.SendRestartCommand(hostname)
+}
+
+// UpgradeSlave sends an upgrade command to a specific slave
+func (m *Manager) UpgradeSlave(hostname string) error {
+	if m.server == nil {
+		return fmt.Errorf("slave server not initialized")
+	}
+
+	return m.server.SendUpgradeCommand(hostname)
+}
+
 // Stop stops the slave manager and server
 func (m *Manager) Stop() error {
 	if m.server != nil {

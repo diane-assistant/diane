@@ -15,6 +15,7 @@ import (
 type SlaveInfo struct {
 	Hostname    string `json:"hostname"`
 	Status      string `json:"status"`
+	Version     string `json:"version,omitempty"`
 	ToolCount   int    `json:"tool_count"`
 	LastSeen    string `json:"last_seen,omitempty"`
 	ConnectedAt string `json:"connected_at,omitempty"`
@@ -78,6 +79,7 @@ func (s *Server) handleSlaves(w http.ResponseWriter, r *http.Request) {
 		info := SlaveInfo{
 			Hostname:   slave.HostID,
 			Status:     string(slave.Status),
+			Version:    slave.Version,
 			ToolCount:  slave.ToolCount,
 			CertSerial: slave.CertSerial,
 			Platform:   slave.Platform,
@@ -498,6 +500,84 @@ func (s *Server) handleSlaveHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// handleSlaveRestart handles POST /api/slaves/restart/{hostname} - restart a slave
+func (s *Server) handleSlaveRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract hostname from path: /api/slaves/restart/{hostname}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/slaves/restart/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.Error(w, "Hostname required", http.StatusBadRequest)
+		return
+	}
+
+	hostname := parts[0]
+
+	if s.slaveManager == nil {
+		http.Error(w, "Slave manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	slog.Info("Slave restart requested", "hostname", hostname)
+
+	// Send restart command to the slave
+	if err := s.slaveManager.RestartSlave(hostname); err != nil {
+		slog.Error("Failed to restart slave", "hostname", hostname, "error", err)
+		http.Error(w, fmt.Sprintf("Failed to restart slave: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Restart command sent to %s", hostname),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleSlaveUpgrade handles POST /api/slaves/upgrade/{hostname}
+func (s *Server) handleSlaveUpgrade(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract hostname from path: /api/slaves/upgrade/{hostname}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/slaves/upgrade/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.Error(w, "Hostname required", http.StatusBadRequest)
+		return
+	}
+
+	hostname := parts[0]
+
+	if s.slaveManager == nil {
+		http.Error(w, "Slave manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	slog.Info("Slave upgrade requested", "hostname", hostname)
+
+	// Send upgrade command to the slave
+	if err := s.slaveManager.UpgradeSlave(hostname); err != nil {
+		slog.Error("Failed to upgrade slave", "hostname", hostname, "error", err)
+		http.Error(w, fmt.Sprintf("Failed to upgrade slave: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Upgrade command sent to %s", hostname),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // RegisterSlaveRoutes registers all slave management routes
 func RegisterSlaveRoutes(mux *http.ServeMux, server *Server) {
 	mux.HandleFunc("/slaves", server.handleSlaves)
@@ -509,6 +589,8 @@ func RegisterSlaveRoutes(mux *http.ServeMux, server *Server) {
 	mux.HandleFunc("/slaves/revoke", server.handleRevokeSlave)
 	mux.HandleFunc("/slaves/revoked", server.handleRevokedSlaves)
 	mux.HandleFunc("/slaves/health", server.handleSlaveHealth)
+	mux.HandleFunc("/slaves/restart/", server.handleSlaveRestart)
+	mux.HandleFunc("/slaves/upgrade/", server.handleSlaveUpgrade)
 	mux.HandleFunc("/slaves/", server.handleSlaveAction)
 }
 

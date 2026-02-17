@@ -271,55 +271,63 @@ struct PairingRequestRow: View {
 }
 
 #Preview("With Slaves and Requests") {
-    let monitor = StatusMonitor()
-    monitor.serverDisplayName = "Local"
-    monitor.connectionState = .connected
-    monitor.slaves = [
-        SlaveInfo(
-            hostname: "macbook-pro",
-            status: "connected",
-            toolCount: 12,
-            lastSeen: nil,
-            connectedAt: ISO8601DateFormatter().string(from: Date()),
-            certSerial: "123456",
-            issuedAt: ISO8601DateFormatter().string(from: Date()),
-            expiresAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(86400 * 365)),
-            enabled: true,
-            platform: "darwin"
-        ),
-        SlaveInfo(
-            hostname: "linux-server",
-            status: "connected",
-            toolCount: 8,
-            lastSeen: nil,
-            connectedAt: ISO8601DateFormatter().string(from: Date()),
-            certSerial: "789012",
-            issuedAt: ISO8601DateFormatter().string(from: Date()),
-            expiresAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(86400 * 365)),
-            enabled: true,
-            platform: "linux"
-        )
-    ]
-    monitor.pendingPairingRequests = [
-        PairingRequest(
-            hostname: "new-macbook",
-            pairingCode: "123-456",
-            status: "pending",
-            createdAt: ISO8601DateFormatter().string(from: Date()),
-            expiresAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(600)),
-            platform: "darwin"
-        )
-    ]
+    let monitor: StatusMonitor = {
+        let m = StatusMonitor()
+        m.serverDisplayName = "Local"
+        m.connectionState = .connected
+        m.slaves = [
+            SlaveInfo(
+                hostname: "macbook-pro",
+                status: "connected",
+                version: "1.0.0",
+                toolCount: 12,
+                lastSeen: nil,
+                connectedAt: ISO8601DateFormatter().string(from: Date()),
+                certSerial: "123456",
+                issuedAt: ISO8601DateFormatter().string(from: Date()),
+                expiresAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(86400 * 365)),
+                enabled: true,
+                platform: "darwin"
+            ),
+            SlaveInfo(
+                hostname: "linux-server",
+                status: "connected",
+                version: "0.9.5",
+                toolCount: 8,
+                lastSeen: nil,
+                connectedAt: ISO8601DateFormatter().string(from: Date()),
+                certSerial: "789012",
+                issuedAt: ISO8601DateFormatter().string(from: Date()),
+                expiresAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(86400 * 365)),
+                enabled: true,
+                platform: "linux"
+            )
+        ]
+        m.pendingPairingRequests = [
+            PairingRequest(
+                hostname: "new-macbook",
+                pairingCode: "123-456",
+                status: "pending",
+                createdAt: ISO8601DateFormatter().string(from: Date()),
+                expiresAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(600)),
+                platform: "darwin"
+            )
+        ]
+        return m
+    }()
     
-    return ServerListPopover(statusMonitor: monitor, onClose: {})
+    ServerListPopover(statusMonitor: monitor, onClose: {})
         .frame(width: 300, height: 500)
 }
 
 #Preview("Master Only") {
-    let monitor = StatusMonitor()
-    monitor.serverDisplayName = "Local"
-    monitor.connectionState = .connected
+    let monitor: StatusMonitor = {
+        let m = StatusMonitor()
+        m.serverDisplayName = "Local"
+        m.connectionState = .connected
+        return m
+    }()
     
-    return ServerListPopover(statusMonitor: monitor, onClose: {})
+    ServerListPopover(statusMonitor: monitor, onClose: {})
         .frame(width: 300, height: 200)
 }

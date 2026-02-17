@@ -249,6 +249,7 @@ func (db *DB) migrate() error {
 		last_seen DATETIME,
 		enabled INTEGER NOT NULL DEFAULT 1,
 		platform TEXT DEFAULT '',
+		version TEXT DEFAULT '',
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
@@ -298,6 +299,13 @@ func (db *DB) migrate() error {
 
 	// Migration: Add platform column to slave_servers if missing
 	db.conn.Exec(`ALTER TABLE slave_servers ADD COLUMN platform TEXT DEFAULT ''`)
+
+	// Migration: Add node-aware columns to mcp_servers if missing
+	db.conn.Exec(`ALTER TABLE mcp_servers ADD COLUMN node_id TEXT`)
+	db.conn.Exec(`ALTER TABLE mcp_servers ADD COLUMN node_mode TEXT DEFAULT 'master'`)
+
+	// Create index for efficient node-based queries
+	db.conn.Exec(`CREATE INDEX IF NOT EXISTS idx_mcp_servers_node ON mcp_servers(node_id, node_mode)`)
 
 	// Ensure default context exists
 	return db.ensureDefaultContext()

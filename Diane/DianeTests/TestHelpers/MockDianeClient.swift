@@ -116,7 +116,8 @@ final class MockDianeClient: DianeClientProtocol {
     func createMCPServerConfig(
         name: String, type: String, enabled: Bool,
         command: String?, args: [String]?, env: [String: String]?,
-        url: String?, headers: [String: String]?, oauth: OAuthConfig?
+        url: String?, headers: [String: String]?, oauth: OAuthConfig?,
+        nodeID: String?, nodeMode: String?
     ) async throws -> MCPServer {
         record("createMCPServerConfig")
         try throwIfNeeded()
@@ -134,6 +135,8 @@ final class MockDianeClient: DianeClientProtocol {
             url: url,
             headers: headers,
             oauth: oauth,
+            nodeID: nodeID,
+            nodeMode: nodeMode,
             createdAt: now,
             updatedAt: now
         )
@@ -145,7 +148,8 @@ final class MockDianeClient: DianeClientProtocol {
     func updateMCPServerConfig(
         id: Int64, name: String?, type: String?, enabled: Bool?,
         command: String?, args: [String]?, env: [String: String]?,
-        url: String?, headers: [String: String]?, oauth: OAuthConfig?
+        url: String?, headers: [String: String]?, oauth: OAuthConfig?,
+        nodeID: String?, nodeMode: String?
     ) async throws -> MCPServer {
         record("updateMCPServerConfig")
         try throwIfNeeded()
@@ -157,6 +161,8 @@ final class MockDianeClient: DianeClientProtocol {
         var server = serverConfigs[index]
         if let name = name { server.name = name }
         if let enabled = enabled { server.enabled = enabled }
+        if let nodeID = nodeID { server.nodeID = nodeID }
+        if let nodeMode = nodeMode { server.nodeMode = nodeMode }
         serverConfigs[index] = server
         return server
     }
@@ -660,6 +666,41 @@ final class MockDianeClient: DianeClientProtocol {
 
     func deleteGoogleAuth(account: String) async throws {
         record("deleteGoogleAuth"); try throwIfNeeded()
+    }
+    
+    // MARK: - Slave Management
+    
+    var slaves: [SlaveInfo] = []
+    var pendingPairingRequests: [PairingRequest] = []
+    
+    func getSlaves() async throws -> [SlaveInfo] {
+        record("getSlaves"); try throwIfNeeded()
+        return slaves
+    }
+    
+    func getPendingPairingRequests() async throws -> [PairingRequest] {
+        record("getPendingPairingRequests"); try throwIfNeeded()
+        return pendingPairingRequests
+    }
+    
+    func approvePairingRequest(hostname: String, pairingCode: String) async throws {
+        record("approvePairingRequest"); try throwIfNeeded()
+    }
+    
+    func denyPairingRequest(hostname: String, pairingCode: String) async throws {
+        record("denyPairingRequest"); try throwIfNeeded()
+    }
+    
+    func revokeSlaveCredentials(hostname: String, reason: String?) async throws {
+        record("revokeSlaveCredentials"); try throwIfNeeded()
+    }
+    
+    func restartSlave(hostname: String) async throws {
+        record("restartSlave"); try throwIfNeeded()
+    }
+    
+    func upgradeSlave(hostname: String) async throws {
+        record("upgradeSlave"); try throwIfNeeded()
     }
 }
 

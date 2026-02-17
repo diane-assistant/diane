@@ -657,7 +657,7 @@ class DianeClient: DianeClientProtocol {
     }
     
     /// Create a new MCP server configuration
-    func createMCPServerConfig(name: String, type: String, enabled: Bool = true, command: String? = nil, args: [String]? = nil, env: [String: String]? = nil, url: String? = nil, headers: [String: String]? = nil, oauth: OAuthConfig? = nil) async throws -> MCPServer {
+    func createMCPServerConfig(name: String, type: String, enabled: Bool = true, command: String? = nil, args: [String]? = nil, env: [String: String]? = nil, url: String? = nil, headers: [String: String]? = nil, oauth: OAuthConfig? = nil, nodeID: String? = nil, nodeMode: String? = nil) async throws -> MCPServer {
         var body: [String: Any] = [
             "name": name,
             "type": type,
@@ -681,6 +681,12 @@ class DianeClient: DianeClientProtocol {
         if let oauth = oauth {
             body["oauth"] = try? JSONEncoder().encode(oauth)
         }
+        if let nodeID = nodeID {
+            body["node_id"] = nodeID
+        }
+        if let nodeMode = nodeMode {
+            body["node_mode"] = nodeMode
+        }
         
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         let data = try await request("/mcp-servers-config", method: "POST", body: bodyData)
@@ -688,7 +694,7 @@ class DianeClient: DianeClientProtocol {
     }
     
     /// Update an MCP server configuration
-    func updateMCPServerConfig(id: Int64, name: String? = nil, type: String? = nil, enabled: Bool? = nil, command: String? = nil, args: [String]? = nil, env: [String: String]? = nil, url: String? = nil, headers: [String: String]? = nil, oauth: OAuthConfig? = nil) async throws -> MCPServer {
+    func updateMCPServerConfig(id: Int64, name: String? = nil, type: String? = nil, enabled: Bool? = nil, command: String? = nil, args: [String]? = nil, env: [String: String]? = nil, url: String? = nil, headers: [String: String]? = nil, oauth: OAuthConfig? = nil, nodeID: String? = nil, nodeMode: String? = nil) async throws -> MCPServer {
         var body: [String: Any] = [:]
         if let name = name {
             body["name"] = name
@@ -716,6 +722,12 @@ class DianeClient: DianeClientProtocol {
         }
         if let oauth = oauth {
             body["oauth"] = try? JSONEncoder().encode(oauth)
+        }
+        if let nodeID = nodeID {
+            body["node_id"] = nodeID
+        }
+        if let nodeMode = nodeMode {
+            body["node_mode"] = nodeMode
         }
         
         guard !body.isEmpty else {
@@ -981,6 +993,14 @@ class DianeClient: DianeClientProtocol {
         }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         _ = try await request("/slaves/revoke", method: "POST", timeout: 10, body: bodyData)
+    }
+    
+    func restartSlave(hostname: String) async throws {
+        _ = try await request("/slaves/restart/\(hostname)", method: "POST", timeout: 10)
+    }
+    
+    func upgradeSlave(hostname: String) async throws {
+        _ = try await request("/slaves/upgrade/\(hostname)", method: "POST", timeout: 10)
     }
     
     /// Make a request that accepts non-200 status codes (for polling)

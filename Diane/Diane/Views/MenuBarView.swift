@@ -5,11 +5,6 @@ struct MenuBarView: View {
     @EnvironmentObject var statusMonitor: StatusMonitor
     @EnvironmentObject var updateChecker: UpdateChecker
     @Environment(\.dismiss) private var dismiss
-    @State private var isMCPServersExpanded = true
-    @State private var authInProgress: String? = nil  // Server name being authenticated
-    @State private var showingAuthAlert = false
-    @State private var authUserCode: String = ""
-    @State private var currentAuthServer: String? = nil
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -21,43 +16,215 @@ struct MenuBarView: View {
                     .padding(.vertical, 8)
             }
             
-            // Header with status and controls
-            headerSection
-            
-            Divider()
-                .padding(.vertical, 8)
-            
-            // Stats (only when connected)
+            // Master/Slave status section
             if case .connected = statusMonitor.connectionState {
-                statsSection
+                serverStatusSection
                 
                 Divider()
                     .padding(.vertical, 8)
                 
-                // MCP Servers
-                mcpServersSection
+                // Open Diane button
+                openDianeButton
                 
                 Divider()
                     .padding(.vertical, 8)
             } else {
-                // Debug: show connection state
-                Text("Connection: \(String(describing: statusMonitor.connectionState))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 4)
+                // Disconnected state
+                disconnectedSection
+                
+                Divider()
+                    .padding(.vertical, 8)
             }
             
             // Footer
             footerSection
         }
         .padding(12)
-        .frame(width: 280)
-        .alert("Enter this code", isPresented: $showingAuthAlert) {
-            Button("OK") { }
-        } message: {
-            Text("Code copied to clipboard:\n\n\(authUserCode)")
-                .font(.body.monospaced())
+        .frame(width: 300)
+    }
+    
+    // MARK: - Server Status Section
+    
+    private var serverStatusSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Master server (local/current)
+            MasterServerRowWithRestart(
+                displayName: statusMonitor.serverDisplayName,
+                isConnected: statusMonitor.connectionState == .connected,
+                isRemoteMode: statusMonitor.isRemoteMode,
+                isRestarting: statusMonitor.restartingMaster,
+                onRestart: {
+                    Task { await statusMonitor.restartDiane() }
+                }
+            )
+            
+            // Connected slaves
+            if !statusMonitor.slaves.isEmpty {
+                ForEach(statusMonitor.slaves) { slave in
+                    SlaveServerRowWithActions(
+                        slave: slave,
+                        isRestarting: statusMonitor.restartingSlaves.contains(slave.hostname),
+                        isUpgrading: statusMonitor.upgradingSlaves.contains(slave.hostname),
+                        onRestart: {
+                            Task {
+                                do {
+                                    try await statusMonitor.restartSlave(hostname: slave.hostname)
+                                } catch {
+                                    print("Failed to restart slave \(slave.hostname): \(error)")
+                                }
+                            }
+                        },
+                        onUpgrade: {
+                            Task {
+                                do {
+                                    try await statusMonitor.upgradeSlave(hostname: slave.hostname)
+                                } catch {
+                                    print("Failed to upgrade slave \(slave.hostname): \(error)")
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+            
+            // Pending pairing requests indicator
+            if !statusMonitor.pendingPairingRequests.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.orange)
+                    
+                    Text("\(statusMonitor.pendingPairingRequests.count) pending pairing request(s)")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    
+                    Spacer()
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(6)
+            }
         }
+    }
+    
+    // MARK: - Disconnected Section
+    
+    private var disconnectedSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 10, height: 10)
+                
+                Text(statusMonitor.connectionState.description)
+                    .font(.headline)
+                
+                Spacer()
+                
+                // Control buttons
+                controlButtons
+            }
+        }
+    }
+    
+    private var controlButtons: some View {
+        HStack(spacing: 2) {
+            if statusMonitor.isRemoteMode {
+                // Remote mode: no start/stop/restart controls
+                if case .connected = statusMonitor.connectionState {
+                    Image(systemName: "network")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .help("Connected to remote server")
+                }
+            } else if statusMonitor.isLoading {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(width: 24, height: 24)
+            } else if case .connected = statusMonitor.connectionState {
+                // Restart button
+                Button {
+                    Task { await statusMonitor.restartDiane() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Restart Diane")
+                
+                // Stop button
+                Button {
+                    Task { await statusMonitor.stopDiane() }
+                } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 10))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Stop Diane")
+            } else {
+                // Start button
+                Button {
+                    Task { await statusMonitor.startDiane() }
+                } label: {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 12))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Start Diane")
+            }
+        }
+    }
+    
+    private var statusColor: Color {
+        switch statusMonitor.connectionState {
+        case .unknown:
+            return .gray
+        case .connected:
+            return .green
+        case .disconnected:
+            return .gray
+        case .error:
+            return .orange
+        }
+    }
+    
+    // MARK: - Open Diane Button
+    
+    private var openDianeButton: some View {
+        Button {
+            // Properly dismiss the menu bar popover
+            dismiss()
+            
+            // Small delay to ensure popover closes before opening window
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                MainWindowView.openMainWindow()
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "macwindow")
+                    .font(.subheadline)
+                    .foregroundStyle(.blue)
+                Text("Open Diane")
+                    .font(.subheadline.weight(.medium))
+                
+                Spacer()
+                
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .background(Color.blue.opacity(0.1))
+            .cornerRadius(6)
+        }
+        .buttonStyle(.plain)
+        .help("Open Diane main window")
     }
     
     // MARK: - Update Banner
@@ -132,410 +299,11 @@ struct MenuBarView: View {
         }
     }
     
-    // MARK: - Header
-    
-    private var headerSection: some View {
-        HStack(spacing: 10) {
-            // Status indicator
-            Circle()
-                .fill(statusColor)
-                .frame(width: 10, height: 10)
-            
-            // Status text and info
-            VStack(alignment: .leading, spacing: 2) {
-                Text(statusMonitor.connectionState.description)
-                    .font(.headline)
-                
-                if case .connected = statusMonitor.connectionState {
-                    Text("\(statusMonitor.status.version) \u{2022} up \(statusMonitor.status.uptime)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            
-            Spacer()
-            
-            // Control buttons
-            controlButtons
-        }
-    }
-    
-    private var controlButtons: some View {
-        HStack(spacing: 2) {
-            if statusMonitor.isRemoteMode {
-                // Remote mode: no start/stop/restart controls
-                if case .connected = statusMonitor.connectionState {
-                    Image(systemName: "network")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
-                        .help("Connected to remote server")
-                }
-            } else if statusMonitor.isLoading {
-                ProgressView()
-                    .scaleEffect(0.6)
-                    .frame(width: 24, height: 24)
-            } else if case .connected = statusMonitor.connectionState {
-                // Restart button
-                Button {
-                    Task { await statusMonitor.restartDiane() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .help("Restart Diane")
-                
-                // Stop button
-                Button {
-                    Task { await statusMonitor.stopDiane() }
-                } label: {
-                    Image(systemName: "stop.fill")
-                        .font(.system(size: 10))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .help("Stop Diane")
-            } else {
-                // Start button
-                Button {
-                    Task { await statusMonitor.startDiane() }
-                } label: {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 12))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .help("Start Diane")
-            }
-        }
-    }
-    
-    private var statusColor: Color {
-        switch statusMonitor.connectionState {
-        case .unknown:
-            return .gray
-        case .connected:
-            return .green
-        case .disconnected:
-            return .gray
-        case .error:
-            return .orange
-        }
-    }
-    
-    // MARK: - Stats
-    
-    private var statsSection: some View {
-        VStack(spacing: 4) {
-            // Open Main Window button
-            Button {
-                // Properly dismiss the menu bar popover
-                dismiss()
-                
-                // Small delay to ensure popover closes before opening window
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    MainWindowView.openMainWindow()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "macwindow")
-                        .font(.subheadline)
-                        .foregroundStyle(.blue)
-                    Text("Open Diane")
-                        .font(.subheadline.weight(.medium))
-                    
-                    Spacer()
-                }
-                .padding(.vertical, 6)
-                .padding(.horizontal, 8)
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-            .help("Open Diane main window")
-            
-            // Tools row
-            Button {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    MainWindowView.openMainWindow()
-                }
-            } label: {
-                HStack(spacing: 16) {
-                    // Tools count
-                    HStack(spacing: 4) {
-                        Image(systemName: "wrench.and.screwdriver")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("\(statusMonitor.status.totalTools) tools")
-                            .font(.subheadline)
-                    }
-                    
-                    // MCP servers count
-                    HStack(spacing: 4) {
-                        Image(systemName: "server.rack")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        let connectedCount = statusMonitor.status.mcpServers.filter { $0.connected }.count
-                        let totalCount = statusMonitor.status.mcpServers.count
-                        Text("\(connectedCount)/\(totalCount) MCP")
-                            .font(.subheadline)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 6)
-                .background(Color.primary.opacity(0.05))
-                .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-            .help("Browse all tools")
-            
-            // Scheduler row
-            Button {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    MainWindowView.openMainWindow()
-                }
-            } label: {
-                HStack(spacing: 16) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "calendar.badge.clock")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("Scheduler")
-                            .font(.subheadline)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 6)
-                .background(Color.primary.opacity(0.05))
-                .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-            .help("View scheduled jobs")
-            
-            // Agents row
-            Button {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    MainWindowView.openMainWindow()
-                }
-            } label: {
-                HStack(spacing: 16) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "person.3.fill")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("ACP Agents")
-                            .font(.subheadline)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 6)
-                .background(Color.primary.opacity(0.05))
-                .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-            .help("Manage ACP agents")
-            
-            // Contexts row
-            Button {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    MainWindowView.openMainWindow()
-                }
-            } label: {
-                HStack(spacing: 16) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "square.stack.3d.up")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("Contexts")
-                            .font(.subheadline)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 6)
-                .background(Color.primary.opacity(0.05))
-                .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-            .help("Manage MCP server contexts")
-            
-            // Providers row
-            Button {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    MainWindowView.openMainWindow()
-                }
-            } label: {
-                HStack(spacing: 16) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "cpu")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("Providers")
-                            .font(.subheadline)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 6)
-                .background(Color.primary.opacity(0.05))
-                .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-            .help("Manage embedding and LLM providers")
-            
-            // Usage row
-            Button {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    MainWindowView.openMainWindow()
-                }
-            } label: {
-                HStack(spacing: 16) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chart.bar.doc.horizontal")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("Usage")
-                            .font(.subheadline)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 6)
-                .background(Color.primary.opacity(0.05))
-                .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-            .help("View usage and costs")
-            
-            HStack {
-                Spacer()
-                
-                // Reload config button
-                Button {
-                    Task { await statusMonitor.reloadConfig() }
-                } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.caption)
-                }
-                .buttonStyle(.plain)
-                .help("Reload Configuration")
-                .disabled(statusMonitor.isLoading)
-            }
-        }
-    }
-    
-    // MARK: - MCP Servers
-    
-    private var mcpServersSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isMCPServersExpanded.toggle()
-                }
-            } label: {
-                HStack {
-                    Image(systemName: isMCPServersExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption2)
-                        .frame(width: 10)
-                    Text("MCP Servers")
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                }
-            }
-            .buttonStyle(.plain)
-            
-            if isMCPServersExpanded {
-                if statusMonitor.status.mcpServers.isEmpty {
-                    Text("No MCP servers configured")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 14)
-                } else {
-                    ForEach(statusMonitor.status.mcpServers) { server in
-                        MCPServerRow(
-                            server: server,
-                            onRestart: {
-                                Task {
-                                    await statusMonitor.restartMCPServer(name: server.name)
-                                }
-                            },
-                            onSignIn: {
-                                startAuthFlow(serverName: server.name)
-                            }
-                        )
-                    }
-                    .padding(.leading, 14)
-                }
-            }
-        }
-    }
-    
     // MARK: - Footer
     
     private var footerSection: some View {
         HStack {
-            SettingsLink {
-                Label("Settings", systemImage: "gear")
-            }
-            
             Spacer()
-            
-            // Check for updates button
-            Button {
-                Task { await updateChecker.checkForUpdates() }
-            } label: {
-                if updateChecker.isChecking {
-                    ProgressView()
-                        .scaleEffect(0.5)
-                        .frame(width: 14, height: 14)
-                } else {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                }
-            }
-            .buttonStyle(.plain)
-            .help("Check for updates")
-            .disabled(updateChecker.isChecking)
             
             Button("Quit Diane") {
                 // Force quit by calling exit() since terminate is intercepted
@@ -546,144 +314,218 @@ struct MenuBarView: View {
         }
         .font(.subheadline)
     }
+}
+
+// MARK: - Server Rows with Restart on Hover
+
+/// Master server row with restart button on hover
+struct MasterServerRowWithRestart: View {
+    let displayName: String
+    let isConnected: Bool
+    let isRemoteMode: Bool
+    let isRestarting: Bool
+    let onRestart: () -> Void
     
-    // MARK: - Auth Flow
+    @State private var isHovered = false
+    @State private var blinkOpacity: Double = 1.0
     
-    private func startAuthFlow(serverName: String) {
-        Task {
-            authInProgress = serverName
-            if let deviceInfo = await statusMonitor.startAuth(serverName: serverName) {
-                currentAuthServer = serverName
-                authUserCode = deviceInfo.userCode
-                
-                // Copy the user code to clipboard for convenience
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(deviceInfo.userCode, forType: .string)
-                
-                // Show the alert with the code
-                showingAuthAlert = true
-                
-                // Open the verification URL in the browser
-                if let url = URL(string: deviceInfo.verificationUri) {
-                    NSWorkspace.shared.open(url)
+    var body: some View {
+        HStack(spacing: 10) {
+            // Platform icon
+            Image(systemName: isRemoteMode ? "network" : "laptopcomputer")
+                .font(.system(size: 16))
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(displayName)
+                        .font(.system(size: 13, weight: .medium))
+                    
+                    Text("(Master)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
                 
-                // Start polling for token in background
-                Task {
-                    let success = await statusMonitor.pollAuthAndRefresh(
-                        serverName: serverName,
-                        deviceCode: deviceInfo.deviceCode,
-                        interval: deviceInfo.interval
-                    )
-                    authInProgress = nil
-                    showingAuthAlert = false
-                    authUserCode = ""
-                    currentAuthServer = nil
-                    
-                    if !success {
-                        // Auth failed or timed out - status monitor already set lastError
+                Text(isRemoteMode ? "Remote" : "Local")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            
+            Spacer()
+            
+            // Restart button (visible on hover)
+            if isHovered && isConnected && !isRemoteMode && !isRestarting {
+                Button(action: onRestart) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Restart Diane")
+            }
+            
+            // Status indicator
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+                .opacity(isRestarting ? blinkOpacity : 1.0)
+                .onAppear {
+                    if isRestarting {
+                        startBlinking()
                     }
                 }
-            } else {
-                authInProgress = nil
-            }
+                .onChange(of: isRestarting) { _, newValue in
+                    if newValue {
+                        startBlinking()
+                    } else {
+                        blinkOpacity = 1.0
+                    }
+                }
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.03))
+        .cornerRadius(6)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+    
+    private var statusColor: Color {
+        if isRestarting {
+            return .orange
+        }
+        return isConnected ? .green : .gray
+    }
+    
+    private func startBlinking() {
+        withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+            blinkOpacity = 0.3
         }
     }
 }
 
-// MARK: - MCP Server Row
-
-struct MCPServerRow: View {
-    let server: MCPServerStatus
+/// Slave server row with restart and upgrade buttons on hover
+struct SlaveServerRowWithActions: View {
+    let slave: SlaveInfo
+    let isRestarting: Bool
+    let isUpgrading: Bool
     let onRestart: () -> Void
-    let onSignIn: () -> Void
+    let onUpgrade: () -> Void
+    
+    @State private var isHovered = false
+    @State private var blinkOpacity: Double = 1.0
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(serverColor)
-                    .frame(width: 6, height: 6)
+        HStack(spacing: 10) {
+            // Platform icon
+            Image(systemName: slave.platformIcon)
+                .font(.system(size: 16))
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(slave.hostname)
+                    .font(.system(size: 13))
                 
-                Text(server.name)
-                    .font(.subheadline)
-                
-                if server.builtin {
-                    Text("builtin")
-                        .font(.caption2)
+                HStack(spacing: 4) {
+                    Text(slave.platformDisplay)
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.secondary.opacity(0.15))
-                        .cornerRadius(3)
-                }
-                
-                if server.connected {
-                    Text("\(server.toolCount)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                
-                Spacer()
-                
-                if !server.enabled {
-                    Text("off")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } else if server.needsAuthentication {
-                    // Show Sign In button for servers that need auth
-                    Button {
-                        onSignIn()
-                    } label: {
-                        Text("Sign In")
-                            .font(.caption2)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.orange)
-                            .cornerRadius(3)
+                    
+                    if let version = slave.version, !version.isEmpty {
+                        Text("•")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        
+                        Text(version)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
-                    .help("Sign in to \(server.name)")
-                } else if server.error != nil && !server.connected {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
-                
-                // Only show restart button for non-builtin servers
-                if server.enabled && !server.builtin && !server.needsAuthentication {
-                    Button {
-                        onRestart()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.caption2)
+                    
+                    if slave.toolCount > 0 {
+                        Text("•")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        
+                        Text("\(slave.toolCount) tools")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
-                    .help("Restart \(server.name)")
                 }
             }
             
-            // Show error message below the server row (but not for auth errors)
-            if let error = server.error, !server.connected, server.enabled, !server.needsAuthentication {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                    .lineLimit(2)
-                    .padding(.leading, 14)
+            Spacer()
+            
+            // Action buttons (visible on hover)
+            if isHovered && slave.isConnected && !isRestarting && !isUpgrading {
+                HStack(spacing: 6) {
+                    // Upgrade button
+                    Button(action: onUpgrade) {
+                        Image(systemName: "arrow.up.circle")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Upgrade \(slave.hostname) to latest version")
+                    
+                    // Restart button
+                    Button(action: onRestart) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Restart \(slave.hostname)")
+                }
             }
+            
+            // Status indicator
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+                .opacity(isBlinking ? blinkOpacity : 1.0)
+                .onAppear {
+                    if isBlinking {
+                        startBlinking()
+                    }
+                }
+                .onChange(of: isBlinking) { _, newValue in
+                    if newValue {
+                        startBlinking()
+                    } else {
+                        blinkOpacity = 1.0
+                    }
+                }
         }
-        .padding(.vertical, 1)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.02))
+        .cornerRadius(6)
+        .onHover { hovering in
+            isHovered = hovering
+        }
     }
     
-    private var serverColor: Color {
-        if !server.enabled {
-            return .secondary
-        }
-        if server.needsAuthentication {
+    private var isBlinking: Bool {
+        isRestarting || isUpgrading
+    }
+    
+    private var statusColor: Color {
+        if isRestarting {
             return .orange
         }
-        return server.connected ? .green : .red
+        if isUpgrading {
+            return .blue
+        }
+        return slave.isConnected ? .green : .gray
+    }
+    
+    private func startBlinking() {
+        withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+            blinkOpacity = 0.3
+        }
     }
 }
 

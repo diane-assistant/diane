@@ -13,6 +13,8 @@ const (
 	MessageTypeToolCall   = "tool_call"
 	MessageTypeResponse   = "response"
 	MessageTypeError      = "error"
+	MessageTypeRestart    = "restart"
+	MessageTypeUpgrade    = "upgrade"
 )
 
 // Message represents a WebSocket message

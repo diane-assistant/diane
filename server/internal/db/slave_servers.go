@@ -14,6 +14,7 @@ type SlaveServer struct {
 	HostID     string
 	CertSerial string
 	Platform   string
+	Version    string
 	IssuedAt   time.Time
 	ExpiresAt  time.Time
 	LastSeen   *time.Time
@@ -66,10 +67,10 @@ func (db *DB) GetSlaveServerByHostID(hostID string) (*SlaveServer, error) {
 	var lastSeen sql.NullTime
 
 	err := db.conn.QueryRow(`
-		SELECT id, host_id, cert_serial, platform, issued_at, expires_at, last_seen, enabled, created_at, updated_at
+		SELECT id, host_id, cert_serial, platform, version, issued_at, expires_at, last_seen, enabled, created_at, updated_at
 		FROM slave_servers
 		WHERE host_id = ?
-	`, hostID).Scan(&s.ID, &s.HostID, &s.CertSerial, &s.Platform, &s.IssuedAt, &s.ExpiresAt, &lastSeen, &s.Enabled, &s.CreatedAt, &s.UpdatedAt)
+	`, hostID).Scan(&s.ID, &s.HostID, &s.CertSerial, &s.Platform, &s.Version, &s.IssuedAt, &s.ExpiresAt, &lastSeen, &s.Enabled, &s.CreatedAt, &s.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -88,7 +89,7 @@ func (db *DB) GetSlaveServerByHostID(hostID string) (*SlaveServer, error) {
 // ListSlaveServers retrieves all slave servers
 func (db *DB) ListSlaveServers() ([]*SlaveServer, error) {
 	rows, err := db.conn.Query(`
-		SELECT id, host_id, cert_serial, platform, issued_at, expires_at, last_seen, enabled, created_at, updated_at
+		SELECT id, host_id, cert_serial, platform, version, issued_at, expires_at, last_seen, enabled, created_at, updated_at
 		FROM slave_servers
 		ORDER BY host_id
 	`)
@@ -102,7 +103,7 @@ func (db *DB) ListSlaveServers() ([]*SlaveServer, error) {
 		var s SlaveServer
 		var lastSeen sql.NullTime
 
-		err := rows.Scan(&s.ID, &s.HostID, &s.CertSerial, &s.Platform, &s.IssuedAt, &s.ExpiresAt, &lastSeen, &s.Enabled, &s.CreatedAt, &s.UpdatedAt)
+		err := rows.Scan(&s.ID, &s.HostID, &s.CertSerial, &s.Platform, &s.Version, &s.IssuedAt, &s.ExpiresAt, &lastSeen, &s.Enabled, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan slave server: %w", err)
 		}
@@ -137,6 +138,17 @@ func (db *DB) UpdateSlaveLastSeen(hostID string) error {
 		SET last_seen = ?, updated_at = ?
 		WHERE host_id = ?
 	`, time.Now(), time.Now(), hostID)
+
+	return err
+}
+
+// UpdateSlaveVersion updates the version of a slave
+func (db *DB) UpdateSlaveVersion(hostID, version string) error {
+	_, err := db.conn.Exec(`
+		UPDATE slave_servers
+		SET version = ?, updated_at = ?
+		WHERE host_id = ?
+	`, version, time.Now(), hostID)
 
 	return err
 }
