@@ -140,3 +140,10 @@ func (c *SlaveProxyClient) Close() error {
 	// The connection is managed by the registry
 	return nil
 }
+
+// GetDisconnectChan returns a channel that is closed when the slave disconnects
+func (c *SlaveProxyClient) GetDisconnectChan() <-chan struct{} {
+	// Slave connections are managed by the registry and reconnect automatically
+	// Return a channel that never closes
+	return make(chan struct{})
+}

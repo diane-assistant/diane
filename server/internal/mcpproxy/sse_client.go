@@ -247,15 +247,19 @@ func (c *SSEClient) livenessMonitor() {
 }
 
 // reconnectLoop handles automatic reconnection with exponential backoff
+// This will reconnect forever, with a reasonable maximum backoff of 60 seconds
 func (c *SSEClient) reconnectLoop() {
 	backoff := time.Second
-	maxBackoff := 30 * time.Second
+	maxBackoff := 60 * time.Second
+	attemptCount := 0
 
 	for {
 		select {
 		case <-c.stopChan:
 			return
 		case <-c.reconnectChan:
+			attemptCount++
+
 			// Wait before reconnecting
 			select {
 			case <-c.stopChan:
@@ -263,28 +267,36 @@ func (c *SSEClient) reconnectLoop() {
 			case <-time.After(backoff):
 			}
 
-			slog.Info("SSE reconnecting", "client", c.name, "backoff", backoff)
+			slog.Info("SSE reconnecting",
+				"client", c.name,
+				"backoff", backoff,
+				"attempt", attemptCount)
 
 			if err := c.reconnect(); err != nil {
-				slog.Warn("SSE reconnect failed", "client", c.name, "error", err)
+				slog.Warn("SSE reconnect failed",
+					"client", c.name,
+					"error", err,
+					"attempt", attemptCount)
 				c.mu.Lock()
-				c.lastError = err.Error()
+				c.lastError = fmt.Sprintf("reconnect failed (attempt %d): %v", attemptCount, err)
 				c.mu.Unlock()
 
-				// Increase backoff for next attempt
+				// Increase backoff for next attempt, capped at maxBackoff
+				// We will keep trying forever, just with a longer delay
 				backoff = backoff * 2
 				if backoff > maxBackoff {
 					backoff = maxBackoff
 				}
 
-				// Trigger another reconnect attempt
+				// Trigger another reconnect attempt immediately
 				select {
 				case c.reconnectChan <- struct{}{}:
 				default:
 				}
 			} else {
-				// Reset backoff on successful reconnection
+				// Reset backoff and attempt count on successful reconnection
 				backoff = time.Second
+				attemptCount = 0
 				slog.Info("SSE reconnected successfully", "client", c.name)
 			}
 		}
@@ -409,113 +421,168 @@ func (c *SSEClient) handleEvent(eventType, data string) {
 	}
 }
 
+// retryRequest wraps a request with retry logic for transient failures
+// Retries network errors and 5xx errors, but not 4xx errors (client errors)
+func (c *SSEClient) retryRequest(fn func() (json.RawMessage, error), method string) (json.RawMessage, error) {
+	maxRetries := 3
+	baseDelay := 100 * time.Millisecond
+
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := baseDelay * time.Duration(1<<uint(attempt-1)) // exponential backoff
+			slog.Debug("Retrying request",
+				"client", c.name,
+				"method", method,
+				"attempt", attempt,
+				"delay", delay)
+			time.Sleep(delay)
+		}
+
+		result, err := fn()
+		if err == nil {
+			return result, nil
+		}
+
+		lastErr = err
+
+		// Check if error is retryable
+		errStr := err.Error()
+		isNetworkError := strings.Contains(errStr, "connection refused") ||
+			strings.Contains(errStr, "connection reset") ||
+			strings.Contains(errStr, "timeout") ||
+			strings.Contains(errStr, "EOF") ||
+			strings.Contains(errStr, "no such host")
+
+		isServerError := strings.Contains(errStr, "status 5")
+
+		// Don't retry on non-retryable errors (4xx, parse errors, etc.)
+		if !isNetworkError && !isServerError {
+			return nil, err
+		}
+
+		if attempt < maxRetries {
+			slog.Debug("Request failed, will retry",
+				"client", c.name,
+				"method", method,
+				"error", err,
+				"attempt", attempt)
+		}
+	}
+
+	return nil, fmt.Errorf("request failed after %d attempts: %w", maxRetries+1, lastErr)
+}
+
 // sendRequest sends a JSON-RPC request via HTTP POST
 func (c *SSEClient) sendRequest(method string, params json.RawMessage) (json.RawMessage, error) {
 	return c.sendRequestWithTimeout(method, params, 30*time.Second)
 }
 
 func (c *SSEClient) sendRequestWithTimeout(method string, params json.RawMessage, timeout time.Duration) (json.RawMessage, error) {
-	c.mu.Lock()
-	c.nextID++
-	reqID := c.nextID
-	endpoint := c.messageEndpoint
-	c.mu.Unlock()
+	// Wrap in retry logic for network resilience
+	return c.retryRequest(func() (json.RawMessage, error) {
+		c.mu.Lock()
+		c.nextID++
+		reqID := c.nextID
+		endpoint := c.messageEndpoint
+		c.mu.Unlock()
 
-	if endpoint == "" {
-		return nil, fmt.Errorf("no message endpoint available")
-	}
+		if endpoint == "" {
+			return nil, fmt.Errorf("no message endpoint available")
+		}
 
-	// Create response channel
-	respCh := make(chan MCPResponse, 1)
-	c.pendingMu.Lock()
-	c.pending[reqID] = respCh
-	c.pendingMu.Unlock()
-
-	req := MCPRequest{
-		JSONRPC: "2.0",
-		ID:      reqID,
-		Method:  method,
-		Params:  params,
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
+		// Create response channel
+		respCh := make(chan MCPResponse, 1)
 		c.pendingMu.Lock()
-		delete(c.pending, reqID)
+		c.pending[reqID] = respCh
 		c.pendingMu.Unlock()
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
 
-	httpReq, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
-	if err != nil {
-		c.pendingMu.Lock()
-		delete(c.pending, reqID)
-		c.pendingMu.Unlock()
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
+		req := MCPRequest{
+			JSONRPC: "2.0",
+			ID:      reqID,
+			Method:  method,
+			Params:  params,
+		}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-	for k, v := range c.headers {
-		httpReq.Header.Set(k, v)
-	}
-
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		c.pendingMu.Lock()
-		delete(c.pending, reqID)
-		c.pendingMu.Unlock()
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		c.pendingMu.Lock()
-		delete(c.pending, reqID)
-		c.pendingMu.Unlock()
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	// Check if response is in body (synchronous) or via SSE (async)
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		c.pendingMu.Lock()
-		delete(c.pending, reqID)
-		c.pendingMu.Unlock()
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if len(bodyBytes) > 0 {
-		// Synchronous response in body
-		var mcpResp MCPResponse
-		if err := json.Unmarshal(bodyBytes, &mcpResp); err == nil && mcpResp.ID != nil {
+		body, err := json.Marshal(req)
+		if err != nil {
 			c.pendingMu.Lock()
 			delete(c.pending, reqID)
 			c.pendingMu.Unlock()
-			if mcpResp.Error != nil {
-				return nil, fmt.Errorf("%s error: %s", method, mcpResp.Error.Message)
-			}
-			return mcpResp.Result, nil
+			return nil, fmt.Errorf("failed to marshal request: %w", err)
 		}
-	}
 
-	// Wait for async response via SSE
-	select {
-	case result, ok := <-respCh:
-		if !ok {
-			return nil, fmt.Errorf("connection closed")
+		httpReq, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+		if err != nil {
+			c.pendingMu.Lock()
+			delete(c.pending, reqID)
+			c.pendingMu.Unlock()
+			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
-		if result.Error != nil {
-			return nil, fmt.Errorf("%s error: %s", method, result.Error.Message)
+
+		httpReq.Header.Set("Content-Type", "application/json")
+		for k, v := range c.headers {
+			httpReq.Header.Set(k, v)
 		}
-		return result.Result, nil
-	case <-time.After(timeout):
-		c.pendingMu.Lock()
-		delete(c.pending, reqID)
-		c.pendingMu.Unlock()
-		return nil, fmt.Errorf("%s timed out", method)
-	}
+
+		client := &http.Client{Timeout: timeout}
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			c.pendingMu.Lock()
+			delete(c.pending, reqID)
+			c.pendingMu.Unlock()
+			return nil, fmt.Errorf("request failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+			c.pendingMu.Lock()
+			delete(c.pending, reqID)
+			c.pendingMu.Unlock()
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+
+		// Check if response is in body (synchronous) or via SSE (async)
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			c.pendingMu.Lock()
+			delete(c.pending, reqID)
+			c.pendingMu.Unlock()
+			return nil, fmt.Errorf("failed to read response: %w", err)
+		}
+
+		if len(bodyBytes) > 0 {
+			// Synchronous response in body
+			var mcpResp MCPResponse
+			if err := json.Unmarshal(bodyBytes, &mcpResp); err == nil && mcpResp.ID != nil {
+				c.pendingMu.Lock()
+				delete(c.pending, reqID)
+				c.pendingMu.Unlock()
+				if mcpResp.Error != nil {
+					return nil, fmt.Errorf("%s error: %s", method, mcpResp.Error.Message)
+				}
+				return mcpResp.Result, nil
+			}
+		}
+
+		// Wait for async response via SSE
+		select {
+		case result, ok := <-respCh:
+			if !ok {
+				return nil, fmt.Errorf("connection closed")
+			}
+			if result.Error != nil {
+				return nil, fmt.Errorf("%s error: %s", method, result.Error.Message)
+			}
+			return result.Result, nil
+		case <-time.After(timeout):
+			c.pendingMu.Lock()
+			delete(c.pending, reqID)
+			c.pendingMu.Unlock()
+			return nil, fmt.Errorf("%s timed out", method)
+		}
+	}, method)
 }
 
 // initialize sends the initialize request
@@ -734,4 +801,10 @@ func (c *SSEClient) Close() error {
 	close(c.stopChan)
 	c.connected.Store(false)
 	return nil
+}
+
+// GetDisconnectChan returns a channel that never closes because SSE reconnects forever
+func (c *SSEClient) GetDisconnectChan() <-chan struct{} {
+	// SSE handles reconnection internally via reconnectLoop, so this never fires
+	return make(chan struct{})
 }

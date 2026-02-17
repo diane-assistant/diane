@@ -374,6 +374,7 @@ class UpdateChecker: ObservableObject {
         
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binaryPath)
+        process.arguments = ["serve"]
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice

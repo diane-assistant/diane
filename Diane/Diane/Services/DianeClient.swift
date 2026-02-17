@@ -354,6 +354,7 @@ class DianeClient: DianeClientProtocol {
         
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binaryPath)
+        process.arguments = ["serve"]
         
         // Detach from terminal
         process.standardInput = FileHandle.nullDevice
@@ -361,7 +362,7 @@ class DianeClient: DianeClientProtocol {
         process.standardError = FileHandle.nullDevice
         
         try process.run()
-        logger.info("Started diane from: \(binaryPath)")
+        logger.info("Started diane from: \(binaryPath) with 'serve' argument")
     }
     
     /// Stop Diane (sends SIGTERM)

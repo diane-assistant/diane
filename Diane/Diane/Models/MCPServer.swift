@@ -12,6 +12,8 @@ struct MCPServer: Codable, Identifiable {
     var url: String?
     var headers: [String: String]?
     var oauth: OAuthConfig?
+    var nodeID: String?
+    var nodeMode: String?
     let createdAt: Date
     let updatedAt: Date
     
@@ -26,6 +28,8 @@ struct MCPServer: Codable, Identifiable {
         case url
         case headers
         case oauth
+        case nodeID = "node_id"
+        case nodeMode = "node_mode"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -83,6 +87,31 @@ enum MCPServerType: String, CaseIterable, Identifiable {
     }
 }
 
+/// Node mode enum for MCP server deployment
+enum MCPNodeMode: String, CaseIterable, Identifiable {
+    case master
+    case specific
+    case any
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .master: return "Master Node"
+        case .specific: return "Specific Node"
+        case .any: return "Any Available Node"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .master: return "Run on the master/main node"
+        case .specific: return "Run on a specific slave node"
+        case .any: return "Run on any available slave node"
+        }
+    }
+}
+
 /// Request body for creating an MCP server
 struct CreateMCPServerRequest: Codable {
     let name: String
@@ -94,6 +123,14 @@ struct CreateMCPServerRequest: Codable {
     let url: String?
     let headers: [String: String]?
     let oauth: OAuthConfig?
+    let nodeID: String?
+    let nodeMode: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case name, enabled, type, command, args, env, url, headers, oauth
+        case nodeID = "node_id"
+        case nodeMode = "node_mode"
+    }
 }
 
 /// Request body for updating an MCP server
@@ -107,4 +144,12 @@ struct UpdateMCPServerRequest: Codable {
     let url: String?
     let headers: [String: String]?
     let oauth: OAuthConfig?
+    let nodeID: String?
+    let nodeMode: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case name, enabled, type, command, args, env, url, headers, oauth
+        case nodeID = "node_id"
+        case nodeMode = "node_mode"
+    }
 }

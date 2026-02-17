@@ -10,9 +10,9 @@
   "model": "github-copilot/claude-sonnet-4",
   "small_model": "copilot/claude-haiku-4.5",
   "plugin": [
-    "opencode-google-antigravity-auth@latest"
+    "opencode-antigravity-auth@beta"
   ],
- "provider": {
+"provider": {
     "google": {
       "models": {
         "antigravity-gemini-3-pro": {

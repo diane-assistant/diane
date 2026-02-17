@@ -17,6 +17,9 @@ type Config struct {
 	// Debug enables debug-level logging.
 	// Env override: DIANE_DEBUG=1
 	Debug bool `json:"debug"`
+
+	// Slave configuration for connecting to a master server
+	Slave SlaveConfig `json:"slave"`
 }
 
 // HTTPConfig holds settings for the optional TCP HTTP listener.
@@ -29,6 +32,15 @@ type HTTPConfig struct {
 	// When set, all requests must include "Authorization: Bearer <api_key>".
 	// When empty and Port is set, the listener is read-only (GET/HEAD only).
 	APIKey string `json:"api_key"`
+}
+
+// SlaveConfig holds settings for connecting to a master server as a slave.
+type SlaveConfig struct {
+	// Enabled determines whether this instance should connect to a master as a slave.
+	Enabled bool `json:"enabled"`
+
+	// MasterURL is the WebSocket URL of the master server (e.g., "wss://master:8766").
+	MasterURL string `json:"master_url"`
 }
 
 // Load reads configuration from the config file, then applies

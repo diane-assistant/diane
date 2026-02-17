@@ -8,6 +8,8 @@ struct SettingsView: View {
     @AppStorage("autoStartDiane") private var autoStartDiane = true
     @AppStorage("pollInterval") private var pollInterval = 5.0
     @State private var showingChangeServerAlert = false
+    @State private var showingRevokeAlert = false
+    @State private var slaveToRevoke: SlaveInfo?
     
     var body: some View {
         Form {
@@ -111,6 +113,160 @@ struct SettingsView: View {
                 } else {
                     Text("Diane is not running")
                         .foregroundStyle(.secondary)
+                }
+            }
+            
+            // Slave Management
+            if case .connected = statusMonitor.connectionState {
+                // Pending Pairing Requests
+                if !statusMonitor.pendingPairingRequests.isEmpty {
+                    Section("Pending Pairing Requests") {
+                        ForEach(statusMonitor.pendingPairingRequests) { request in
+                            HStack {
+                                Image(systemName: request.platformIcon)
+                                    .foregroundStyle(.orange)
+                                    .frame(width: 20)
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(request.hostname)
+                                        .font(.system(.body, weight: .medium))
+                                    HStack(spacing: 4) {
+                                        Text(request.platformDisplay)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text("Code: \(request.pairingCode)")
+                                            .font(.system(.caption, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                        if let expiresIn = request.expiresIn {
+                                            Text("(\(expiresIn))")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                                
+                                Spacer()
+                                
+                                Button {
+                                    Task {
+                                        await statusMonitor.approvePairing(
+                                            hostname: request.hostname,
+                                            pairingCode: request.pairingCode
+                                        )
+                                    }
+                                } label: {
+                                    Text("Accept")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.green)
+                                .controlSize(.small)
+                                
+                                Button(role: .destructive) {
+                                    Task {
+                                        await statusMonitor.denyPairing(
+                                            hostname: request.hostname,
+                                            pairingCode: request.pairingCode
+                                        )
+                                    }
+                                } label: {
+                                    Text("Deny")
+                                        .font(.caption)
+                                }
+                                .controlSize(.small)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+                
+                // Connected/Registered Slaves
+                Section {
+                    if statusMonitor.slaves.isEmpty {
+                        Text("No slave servers registered")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(statusMonitor.slaves) { slave in
+                            HStack {
+                                // Status dot
+                                Circle()
+                                    .fill(slave.isConnected ? Color.green : Color.gray)
+                                    .frame(width: 8, height: 8)
+                                
+                                Image(systemName: slave.platformIcon)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 20)
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 4) {
+                                        Text(slave.hostname)
+                                            .font(.system(.body, weight: .medium))
+                                        
+                                        if !slave.enabled {
+                                            Text("DISABLED")
+                                                .font(.system(size: 9, weight: .semibold))
+                                                .foregroundStyle(.white)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(Color.red.opacity(0.7))
+                                                .cornerRadius(3)
+                                        }
+                                    }
+                                    
+                                    HStack(spacing: 4) {
+                                        Text(slave.isConnected ? "Connected" : "Disconnected")
+                                            .font(.caption)
+                                            .foregroundStyle(slave.isConnected ? .green : .secondary)
+                                        
+                                        Text(slave.platformDisplay)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        
+                                        if slave.toolCount > 0 {
+                                            Text("\(slave.toolCount) tools")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        
+                                        if let lastSeen = slave.lastSeenFormatted, !slave.isConnected {
+                                            Text("last seen \(lastSeen)")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                                
+                                Spacer()
+                                
+                                Button(role: .destructive) {
+                                    slaveToRevoke = slave
+                                    showingRevokeAlert = true
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Revoke credentials for \(slave.hostname)")
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                } header: {
+                    Text("Slave Servers")
+                } footer: {
+                    Text("Slave servers extend Diane's capabilities by connecting remote machines.")
+                }
+                .alert("Revoke Slave", isPresented: $showingRevokeAlert) {
+                    Button("Revoke", role: .destructive) {
+                        if let slave = slaveToRevoke {
+                            Task {
+                                await statusMonitor.revokeSlaveCredentials(hostname: slave.hostname)
+                            }
+                        }
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("Revoke credentials for \(slaveToRevoke?.hostname ?? "")? This will disconnect the slave and require re-pairing.")
                 }
             }
             

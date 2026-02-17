@@ -248,6 +248,9 @@ struct DianeStatus: Codable {
     let running: Bool
     let pid: Int
     let version: String
+    let platform: String?
+    let architecture: String?
+    let hostname: String?
     let uptime: String
     let uptimeSeconds: Int64
     let startedAt: Date
@@ -258,6 +261,9 @@ struct DianeStatus: Codable {
         case running
         case pid
         case version
+        case platform
+        case architecture
+        case hostname
         case uptime
         case uptimeSeconds = "uptime_seconds"
         case startedAt = "started_at"
@@ -265,10 +271,33 @@ struct DianeStatus: Codable {
         case mcpServers = "mcp_servers"
     }
     
+    /// Human-readable platform display (e.g. "macOS" instead of "darwin")
+    var platformDisplay: String {
+        switch platform {
+        case "darwin": return "macOS"
+        case "linux": return "Linux"
+        case "windows": return "Windows"
+        default: return platform ?? "Unknown"
+        }
+    }
+    
+    /// SF Symbol for the platform
+    var platformIcon: String {
+        switch platform {
+        case "darwin": return "laptopcomputer"
+        case "linux": return "server.rack"
+        case "windows": return "desktopcomputer"
+        default: return "questionmark.circle"
+        }
+    }
+    
     static let empty = DianeStatus(
         running: false,
         pid: 0,
         version: "unknown",
+        platform: nil,
+        architecture: nil,
+        hostname: nil,
         uptime: "0s",
         uptimeSeconds: 0,
         startedAt: Date(),

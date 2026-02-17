@@ -19,25 +19,17 @@ struct MenuBarView: View {
             // Master/Slave status section
             if case .connected = statusMonitor.connectionState {
                 serverStatusSection
-                
-                Divider()
-                    .padding(.vertical, 8)
-                
-                // Open Diane button
-                openDianeButton
-                
-                Divider()
-                    .padding(.vertical, 8)
             } else {
                 // Disconnected state
                 disconnectedSection
-                
-                Divider()
-                    .padding(.vertical, 8)
             }
+            
+            Divider()
+                .padding(.vertical, 8)
             
             // Footer
             footerSection
+                .padding(.vertical, 4)
         }
         .padding(12)
         .frame(width: 300)
@@ -49,9 +41,13 @@ struct MenuBarView: View {
         VStack(alignment: .leading, spacing: 8) {
             // Master server (local/current)
             MasterServerRowWithRestart(
-                displayName: statusMonitor.serverDisplayName,
+                displayName: statusMonitor.status.hostname ?? statusMonitor.serverDisplayName,
                 isConnected: statusMonitor.connectionState == .connected,
                 isRemoteMode: statusMonitor.isRemoteMode,
+                remoteURL: statusMonitor.remoteURL,
+                platform: statusMonitor.status.platformDisplay,
+                architecture: statusMonitor.status.architecture,
+                version: statusMonitor.status.version,
                 isRestarting: statusMonitor.restartingMaster,
                 onRestart: {
                     Task { await statusMonitor.restartDiane() }
@@ -193,40 +189,6 @@ struct MenuBarView: View {
         }
     }
     
-    // MARK: - Open Diane Button
-    
-    private var openDianeButton: some View {
-        Button {
-            // Properly dismiss the menu bar popover
-            dismiss()
-            
-            // Small delay to ensure popover closes before opening window
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                MainWindowView.openMainWindow()
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "macwindow")
-                    .font(.subheadline)
-                    .foregroundStyle(.blue)
-                Text("Open Diane")
-                    .font(.subheadline.weight(.medium))
-                
-                Spacer()
-                
-                Image(systemName: "arrow.up.right")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 10)
-            .background(Color.blue.opacity(0.1))
-            .cornerRadius(6)
-        }
-        .buttonStyle(.plain)
-        .help("Open Diane main window")
-    }
-    
     // MARK: - Update Banner
     
     private func updateBanner(version: String) -> some View {
@@ -303,16 +265,38 @@ struct MenuBarView: View {
     
     private var footerSection: some View {
         HStack {
+            // Quit button (power icon)
+            Button {
+                exit(0)
+            } label: {
+                Image(systemName: "power")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("q", modifiers: [.command, .option])
+            .help("Quit Diane")
+            
             Spacer()
             
-            Button("Quit Diane") {
-                // Force quit by calling exit() since terminate is intercepted
-                // This is the only way for users to fully quit the app
-                exit(0)
+            // Open Diane main window
+            Button {
+                dismiss()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    MainWindowView.openMainWindow()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Open Diane")
+                        .font(.subheadline.weight(.medium))
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.blue)
             }
-            .keyboardShortcut("q", modifiers: [.command, .option])
+            .buttonStyle(.plain)
+            .help("Open Diane main window")
         }
-        .font(.subheadline)
     }
 }
 
@@ -323,6 +307,10 @@ struct MasterServerRowWithRestart: View {
     let displayName: String
     let isConnected: Bool
     let isRemoteMode: Bool
+    let remoteURL: String?
+    let platform: String
+    let architecture: String?
+    let version: String
     let isRestarting: Bool
     let onRestart: () -> Void
     
@@ -332,29 +320,66 @@ struct MasterServerRowWithRestart: View {
     var body: some View {
         HStack(spacing: 10) {
             // Platform icon
-            Image(systemName: isRemoteMode ? "network" : "laptopcomputer")
+            Image(systemName: isRemoteMode ? "server.rack" : platformIcon)
                 .font(.system(size: 16))
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
             
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Text(displayName)
                         .font(.system(size: 13, weight: .medium))
                     
-                    Text("(Master)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                    // Master badge
+                    Text("Master")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.blue.opacity(0.7))
+                        .cornerRadius(3)
                 }
                 
-                Text(isRemoteMode ? "Remote" : "Local")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Text(platform)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    
+                    if let arch = architecture, !arch.isEmpty {
+                        Text("•")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        
+                        Text(arch)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    if version != "unknown" {
+                        Text("•")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        
+                        Text(version)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    if isRemoteMode {
+                        Text("•")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        
+                        Text("Remote")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             
             Spacer()
             
-            // Restart button (visible on hover)
+            // Restart button (visible on hover, local mode only)
             if isHovered && isConnected && !isRemoteMode && !isRestarting {
                 Button(action: onRestart) {
                     Image(systemName: "arrow.clockwise")
@@ -389,6 +414,16 @@ struct MasterServerRowWithRestart: View {
         .cornerRadius(6)
         .onHover { hovering in
             isHovered = hovering
+        }
+        .help(isRemoteMode ? (remoteURL ?? "Remote server") : "Local server")
+    }
+    
+    private var platformIcon: String {
+        switch platform {
+        case "macOS": return "laptopcomputer"
+        case "Linux": return "server.rack"
+        case "Windows": return "desktopcomputer"
+        default: return "questionmark.circle"
         }
     }
     

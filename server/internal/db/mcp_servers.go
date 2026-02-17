@@ -30,6 +30,8 @@ type MCPServer struct {
 	URL       string            `json:"url,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
 	OAuth     *OAuthConfig      `json:"oauth,omitempty"`
+	NodeID    string            `json:"node_id,omitempty"`   // Target slave hostname
+	NodeMode  string            `json:"node_mode,omitempty"` // "master", "specific", "any"
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 }
@@ -37,7 +39,7 @@ type MCPServer struct {
 // ListMCPServers returns all MCP servers
 func (db *DB) ListMCPServers() ([]MCPServer, error) {
 	rows, err := db.conn.Query(`
-		SELECT id, name, enabled, type, command, args, env, url, headers, oauth, created_at, updated_at
+		SELECT id, name, enabled, type, command, args, env, url, headers, oauth, node_id, node_mode, created_at, updated_at
 		FROM mcp_servers
 		ORDER BY name
 	`)
@@ -60,7 +62,7 @@ func (db *DB) ListMCPServers() ([]MCPServer, error) {
 // GetMCPServer returns a single MCP server by name
 func (db *DB) GetMCPServer(name string) (*MCPServer, error) {
 	row := db.conn.QueryRow(`
-		SELECT id, name, enabled, type, command, args, env, url, headers, oauth, created_at, updated_at
+		SELECT id, name, enabled, type, command, args, env, url, headers, oauth, node_id, node_mode, created_at, updated_at
 		FROM mcp_servers
 		WHERE name = ?
 	`, name)
@@ -78,7 +80,7 @@ func (db *DB) GetMCPServer(name string) (*MCPServer, error) {
 // GetMCPServerByID returns a single MCP server by ID
 func (db *DB) GetMCPServerByID(id int64) (*MCPServer, error) {
 	row := db.conn.QueryRow(`
-		SELECT id, name, enabled, type, command, args, env, url, headers, oauth, created_at, updated_at
+		SELECT id, name, enabled, type, command, args, env, url, headers, oauth, node_id, node_mode, created_at, updated_at
 		FROM mcp_servers
 		WHERE id = ?
 	`, id)
@@ -119,10 +121,11 @@ func (db *DB) CreateMCPServer(server *MCPServer) error {
 	}
 
 	result, err := db.conn.Exec(`
-		INSERT INTO mcp_servers (name, enabled, type, command, args, env, url, headers, oauth)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO mcp_servers (name, enabled, type, command, args, env, url, headers, oauth, node_id, node_mode)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, server.Name, server.Enabled, server.Type, server.Command,
-		string(argsJSON), string(envJSON), server.URL, string(headersJSON), string(oauthJSON))
+		string(argsJSON), string(envJSON), server.URL, string(headersJSON), string(oauthJSON),
+		server.NodeID, server.NodeMode)
 	if err != nil {
 		return err
 	}
@@ -162,10 +165,11 @@ func (db *DB) UpdateMCPServer(server *MCPServer) error {
 
 	_, err = db.conn.Exec(`
 		UPDATE mcp_servers 
-		SET name = ?, enabled = ?, type = ?, command = ?, args = ?, env = ?, url = ?, headers = ?, oauth = ?, updated_at = CURRENT_TIMESTAMP
+		SET name = ?, enabled = ?, type = ?, command = ?, args = ?, env = ?, url = ?, headers = ?, oauth = ?, node_id = ?, node_mode = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, server.Name, server.Enabled, server.Type, server.Command,
-		string(argsJSON), string(envJSON), server.URL, string(headersJSON), string(oauthJSON), server.ID)
+		string(argsJSON), string(envJSON), server.URL, string(headersJSON), string(oauthJSON),
+		server.NodeID, server.NodeMode, server.ID)
 	return err
 }
 
@@ -301,10 +305,12 @@ func (db *DB) MigrateFromJSON(jsonPath string) (int, error) {
 func scanMCPServer(rows *sql.Rows) (MCPServer, error) {
 	var s MCPServer
 	var argsJSON, envJSON, headersJSON, oauthJSON sql.NullString
+	var nodeID, nodeMode sql.NullString
 
 	err := rows.Scan(
 		&s.ID, &s.Name, &s.Enabled, &s.Type, &s.Command,
 		&argsJSON, &envJSON, &s.URL, &headersJSON, &oauthJSON,
+		&nodeID, &nodeMode,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
@@ -335,6 +341,16 @@ func scanMCPServer(rows *sql.Rows) (MCPServer, error) {
 			return s, fmt.Errorf("failed to unmarshal oauth: %w", err)
 		}
 		s.OAuth = &oauth
+	}
+
+	if nodeID.Valid {
+		s.NodeID = nodeID.String
+	}
+
+	if nodeMode.Valid {
+		s.NodeMode = nodeMode.String
+	} else {
+		s.NodeMode = "master" // default value
 	}
 
 	return s, nil
@@ -344,10 +360,12 @@ func scanMCPServer(rows *sql.Rows) (MCPServer, error) {
 func scanMCPServerRow(row *sql.Row) (MCPServer, error) {
 	var s MCPServer
 	var argsJSON, envJSON, headersJSON, oauthJSON sql.NullString
+	var nodeID, nodeMode sql.NullString
 
 	err := row.Scan(
 		&s.ID, &s.Name, &s.Enabled, &s.Type, &s.Command,
 		&argsJSON, &envJSON, &s.URL, &headersJSON, &oauthJSON,
+		&nodeID, &nodeMode,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
@@ -378,6 +396,16 @@ func scanMCPServerRow(row *sql.Row) (MCPServer, error) {
 			return s, fmt.Errorf("failed to unmarshal oauth: %w", err)
 		}
 		s.OAuth = &oauth
+	}
+
+	if nodeID.Valid {
+		s.NodeID = nodeID.String
+	}
+
+	if nodeMode.Valid {
+		s.NodeMode = nodeMode.String
+	} else {
+		s.NodeMode = "master" // default value
 	}
 
 	return s, nil

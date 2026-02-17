@@ -24,6 +24,8 @@ type MCPClient struct {
 	mu                  sync.Mutex
 	notifyChan          chan string // Channel for notifications (method names)
 	responseCh          chan MCPResponse
+	disconnectChan      chan struct{} // Closed when the process exits unexpectedly
+	disconnectOnce      sync.Once     // Ensures disconnectChan is closed only once
 	nextID              int
 	pendingMu           sync.Mutex
 	pending             map[interface{}]chan MCPResponse
@@ -36,6 +38,7 @@ type MCPClient struct {
 	refreshing          bool   // Whether a cache refresh is in progress
 	lastError           string // Last error message
 	stderrOutput        string // Last stderr output (truncated)
+	closing             bool   // Whether Close() was called intentionally
 }
 
 // MCPRequest represents a JSON-RPC request
@@ -107,16 +110,17 @@ func NewMCPClient(name string, command string, args []string, env map[string]str
 	}
 
 	client := &MCPClient{
-		Name:       name,
-		cmd:        cmd,
-		stdin:      stdin,
-		stdout:     stdout,
-		stderr:     stderr,
-		encoder:    json.NewEncoder(stdin),
-		decoder:    json.NewDecoder(bufio.NewReader(stdout)),
-		notifyChan: make(chan string, 10), // Buffered channel for notifications
-		nextID:     1,                     // Start at 1 (0 is used by initialize)
-		pending:    make(map[interface{}]chan MCPResponse),
+		Name:           name,
+		cmd:            cmd,
+		stdin:          stdin,
+		stdout:         stdout,
+		stderr:         stderr,
+		encoder:        json.NewEncoder(stdin),
+		decoder:        json.NewDecoder(bufio.NewReader(stdout)),
+		notifyChan:     make(chan string, 10), // Buffered channel for notifications
+		disconnectChan: make(chan struct{}),
+		nextID:         1, // Start at 1 (0 is used by initialize)
+		pending:        make(map[interface{}]chan MCPResponse),
 	}
 
 	// Start goroutine to log stderr output and capture it
@@ -170,6 +174,20 @@ func (c *MCPClient) messageLoop() {
 				delete(c.pending, id)
 			}
 			c.pendingMu.Unlock()
+
+			// Signal disconnect (only if not intentionally closed)
+			c.mu.Lock()
+			intentionalClose := c.closing
+			c.mu.Unlock()
+			if !intentionalClose {
+				slog.Warn("MCP server process exited unexpectedly", "server", c.Name)
+				c.mu.Lock()
+				c.lastError = "process exited unexpectedly"
+				c.mu.Unlock()
+				c.disconnectOnce.Do(func() {
+					close(c.disconnectChan)
+				})
+			}
 			return
 		}
 
@@ -514,6 +532,10 @@ func (c *MCPClient) GetStderrOutput() string {
 
 // Close terminates the MCP server process
 func (c *MCPClient) Close() error {
+	c.mu.Lock()
+	c.closing = true
+	c.mu.Unlock()
+
 	if c.stdin != nil {
 		c.stdin.Close()
 	}
@@ -530,6 +552,11 @@ func (c *MCPClient) Close() error {
 		c.cmd.Wait()
 	}
 	return nil
+}
+
+// GetDisconnectChan returns a channel that is closed when the process exits unexpectedly
+func (c *MCPClient) GetDisconnectChan() <-chan struct{} {
+	return c.disconnectChan
 }
 
 // getPath returns the PATH environment variable with common locations

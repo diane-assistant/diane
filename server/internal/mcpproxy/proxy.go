@@ -37,7 +37,10 @@ type ServerConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 	// OAuth configuration
 	OAuth *OAuthConfig `json:"oauth,omitempty"`
-	// Remote slave fields
+	// Node-aware configuration
+	NodeID   string `json:"node_id,omitempty"`   // Target slave hostname
+	NodeMode string `json:"node_mode,omitempty"` // "master", "specific", "any"
+	// Legacy remote slave fields (kept for backward compatibility)
 	Hostname string `json:"hostname,omitempty"`  // For remote slaves
 	CertPath string `json:"cert_path,omitempty"` // Client cert path
 	KeyPath  string `json:"key_path,omitempty"`  // Client key path
@@ -171,7 +174,107 @@ func (p *Proxy) startClient(config ServerConfig) error {
 	p.mu.Unlock()
 
 	slog.Info("Started MCP server", "server", config.Name, "type", config.Type)
+
+	// For STDIO clients, start auto-restart watcher
+	// STDIO processes can crash, so we need to automatically restart them
+	if config.Type == "stdio" || config.Type == "" {
+		go p.watchAndRestartStdio(config)
+	}
+
 	return nil
+}
+
+// watchAndRestartStdio monitors a STDIO client and restarts it if it crashes
+// It will keep trying to restart forever with exponential backoff
+func (p *Proxy) watchAndRestartStdio(config ServerConfig) {
+	backoff := 2 * time.Second
+	maxBackoff := 60 * time.Second
+	attemptCount := 0
+
+	for {
+		// Get current client
+		p.mu.RLock()
+		client, exists := p.clients[config.Name]
+		p.mu.RUnlock()
+
+		if !exists {
+			slog.Debug("STDIO client no longer registered, stopping watcher", "server", config.Name)
+			return
+		}
+
+		// Wait for disconnect signal
+		select {
+		case <-client.GetDisconnectChan():
+			// Client disconnected unexpectedly
+			attemptCount++
+			slog.Warn("STDIO process crashed, will auto-restart",
+				"server", config.Name,
+				"attempt", attemptCount,
+				"backoff", backoff)
+		}
+
+		// Wait before restarting
+		time.Sleep(backoff)
+
+		// Close old client cleanly
+		p.mu.Lock()
+		if oldClient, ok := p.clients[config.Name]; ok {
+			oldClient.Close()
+			delete(p.clients, config.Name)
+		}
+		p.mu.Unlock()
+
+		// Create new client
+		newClient, err := NewMCPClient(config.Name, config.Command, config.Args, config.Env)
+		if err != nil {
+			slog.Error("Failed to restart STDIO process",
+				"server", config.Name,
+				"error", err,
+				"attempt", attemptCount,
+				"next_retry_in", backoff*2)
+
+			// Increase backoff
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+
+			// Store the error
+			p.mu.Lock()
+			p.initErrors[config.Name] = fmt.Sprintf("restart failed (attempt %d): %v", attemptCount, err)
+			p.mu.Unlock()
+
+			// Try again - loop back and wait on a temporary disconnect channel
+			// Since there's no client, we just sleep and retry
+			time.Sleep(backoff)
+
+			// Recursive retry - keep trying forever
+			continue
+		}
+
+		// Register new client
+		p.mu.Lock()
+		p.clients[config.Name] = newClient
+		delete(p.initErrors, config.Name)
+		p.mu.Unlock()
+
+		// Reset backoff on success
+		backoff = 2 * time.Second
+		attemptCount = 0
+
+		slog.Info("STDIO process restarted successfully", "server", config.Name)
+
+		// Start monitoring the new client
+		go p.monitorClient(newClient)
+
+		// Notify about potential tool changes after restart
+		select {
+		case p.notifyChan <- config.Name:
+		default:
+		}
+
+		// Continue loop to watch new client for crashes
+	}
 }
 
 // ListAllTools aggregates tools from all MCP clients
@@ -531,6 +634,12 @@ func (p *Proxy) startClientUnlocked(config ServerConfig) error {
 	go p.monitorClient(client)
 
 	slog.Info("Started MCP server", "server", config.Name, "type", config.Type)
+
+	// For STDIO clients, start auto-restart watcher
+	if config.Type == "stdio" || config.Type == "" {
+		go p.watchAndRestartStdio(config)
+	}
+
 	return nil
 }
 

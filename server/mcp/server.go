@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -39,7 +41,9 @@ var Version = "dev"
 
 var proxy *mcpproxy.Proxy
 var slaveManager *slave.Manager
-var globalEncoder *json.Encoder // For sending notifications
+var slaveClient *mcpproxy.WSClient // Slave client for connecting to master
+var slaveConfig config.SlaveConfig // Slave configuration
+var globalEncoder *json.Encoder    // For sending notifications
 var appleProvider *apple.Provider
 var googleProvider *google.Provider
 var infrastructureProvider *infrastructure.Provider
@@ -84,15 +88,17 @@ func (p *DBConfigProvider) LoadMCPServerConfigs() ([]mcpproxy.ServerConfig, erro
 			}
 		}
 		configs = append(configs, mcpproxy.ServerConfig{
-			Name:    s.Name,
-			Enabled: s.Enabled,
-			Type:    s.Type,
-			Command: s.Command,
-			Args:    s.Args,
-			Env:     s.Env,
-			URL:     s.URL,
-			Headers: s.Headers,
-			OAuth:   oauth,
+			Name:     s.Name,
+			Enabled:  s.Enabled,
+			Type:     s.Type,
+			Command:  s.Command,
+			Args:     s.Args,
+			Env:      s.Env,
+			URL:      s.URL,
+			Headers:  s.Headers,
+			OAuth:    oauth,
+			NodeID:   s.NodeID,
+			NodeMode: s.NodeMode,
 		})
 	}
 	return configs, nil
@@ -102,13 +108,37 @@ func (p *DBConfigProvider) LoadMCPServerConfigs() ([]mcpproxy.ServerConfig, erro
 type DianeStatusProvider struct{}
 
 func (d *DianeStatusProvider) GetStatus() api.Status {
+	home, _ := os.UserHomeDir()
+	logFile := filepath.Join(home, ".diane", "server.log")
+	hostname, _ := os.Hostname()
+
 	status := api.Status{
 		Running:       true,
 		PID:           os.Getpid(),
 		Version:       Version,
+		Platform:      runtime.GOOS,
+		Architecture:  runtime.GOARCH,
+		Hostname:      hostname,
 		StartedAt:     startTime,
 		UptimeSeconds: int64(time.Since(startTime).Seconds()),
 		Uptime:        formatDuration(time.Since(startTime)),
+		LogFile:       logFile,
+	}
+
+	// Add slave connection info if in slave mode
+	if slaveConfig.Enabled && slaveConfig.MasterURL != "" {
+		status.SlaveMode = true
+		status.MasterURL = slaveConfig.MasterURL
+
+		if slaveClient != nil {
+			status.SlaveConnected = slaveClient.IsConnected()
+			if !status.SlaveConnected {
+				status.SlaveError = "Disconnected from master (will auto-reconnect)"
+			}
+		} else {
+			status.SlaveConnected = false
+			status.SlaveError = "Failed to initialize slave client (check certificates)"
+		}
 	}
 
 	// Get all MCP servers (builtin providers + external)
@@ -1592,6 +1622,58 @@ func main() {
 	defer func() {
 		if slaveManager != nil {
 			slaveManager.Stop()
+		}
+	}()
+
+	// Initialize slave client (for connecting to a master as a slave)
+	slaveConfig = cfg.Slave // Store config globally
+	if cfg.Slave.Enabled && cfg.Slave.MasterURL != "" {
+		dianeDir := filepath.Join(home, ".diane")
+		certPath := filepath.Join(dianeDir, "slave-cert.pem")
+		keyPath := filepath.Join(dianeDir, "slave-key.pem")
+		caPath := filepath.Join(dianeDir, "slave-ca-cert.pem")
+
+		// Check if certificates exist
+		if _, err := os.Stat(certPath); err == nil {
+			if _, err := os.Stat(keyPath); err == nil {
+				if _, err := os.Stat(caPath); err == nil {
+					// Get hostname
+					hostname, err := os.Hostname()
+					if err != nil {
+						slog.Warn("Failed to get hostname for slave client", "error", err)
+						hostname = "unknown"
+					}
+
+					// Parse master URL to extract host:port
+					// Expected format: https://host:port or wss://host:port
+					masterAddr := cfg.Slave.MasterURL
+					if strings.HasPrefix(masterAddr, "https://") {
+						masterAddr = strings.TrimPrefix(masterAddr, "https://")
+					} else if strings.HasPrefix(masterAddr, "wss://") {
+						masterAddr = strings.TrimPrefix(masterAddr, "wss://")
+					}
+
+					// Initialize slave client
+					client, err := mcpproxy.NewWSClient("master", hostname, masterAddr, certPath, keyPath, caPath)
+					if err != nil {
+						slog.Error("Failed to initialize slave client", "error", err, "master", cfg.Slave.MasterURL)
+					} else {
+						slaveClient = client
+						slog.Info("Slave client initialized and connected to master", "master", cfg.Slave.MasterURL)
+					}
+				} else {
+					slog.Warn("Slave certificates not found, cannot connect to master", "ca_path", caPath)
+				}
+			} else {
+				slog.Warn("Slave certificates not found, cannot connect to master", "key_path", keyPath)
+			}
+		} else {
+			slog.Warn("Slave certificates not found, cannot connect to master", "cert_path", certPath)
+		}
+	}
+	defer func() {
+		if slaveClient != nil {
+			slaveClient.Close()
 		}
 	}()
 

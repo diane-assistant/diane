@@ -40,6 +40,8 @@ final class MCPServersViewModel {
     var newServerURL = ""
     var newServerHeaders: [String: String] = [:]
     var newServerOAuth: OAuthConfig?
+    var newServerNodeID = ""
+    var newServerNodeMode: MCPNodeMode = .master
     var isCreating = false
     var createError: String?
 
@@ -55,8 +57,15 @@ final class MCPServersViewModel {
     var editURL = ""
     var editHeaders: [String: String] = [:]
     var editOAuth: OAuthConfig?
+    var editNodeID = ""
+    var editNodeMode: MCPNodeMode = .master
     var isEditing = false
     var editError: String?
+    
+    // MARK: - Slave/Node State
+    
+    var availableSlaves: [SlaveInfo] = []
+    var isLoadingSlaves = false
 
     // MARK: - Delete Confirmation State
 
@@ -123,6 +132,7 @@ final class MCPServersViewModel {
         do {
             let command = newServerType == .stdio ? (newServerCommand.isEmpty ? nil : newServerCommand) : nil
             let url = (newServerType == .sse || newServerType == .http) ? (newServerURL.isEmpty ? nil : newServerURL) : nil
+            let nodeID = newServerNodeMode == .specific ? (newServerNodeID.isEmpty ? nil : newServerNodeID) : nil
 
             let server = try await client.createMCPServerConfig(
                 name: newServerName,
@@ -133,7 +143,9 @@ final class MCPServersViewModel {
                 env: newServerEnv.isEmpty ? nil : newServerEnv,
                 url: url,
                 headers: newServerHeaders.isEmpty ? nil : newServerHeaders,
-                oauth: newServerOAuth
+                oauth: newServerOAuth,
+                nodeID: nodeID,
+                nodeMode: newServerNodeMode.rawValue
             )
 
             servers.append(server)
@@ -156,6 +168,7 @@ final class MCPServersViewModel {
         do {
             let command = editType == .stdio ? (editCommand.isEmpty ? nil : editCommand) : nil
             let url = (editType == .sse || editType == .http) ? (editURL.isEmpty ? nil : editURL) : nil
+            let nodeID = editNodeMode == .specific ? (editNodeID.isEmpty ? nil : editNodeID) : nil
 
             let updatedServer = try await client.updateMCPServerConfig(
                 id: server.id,
@@ -167,7 +180,9 @@ final class MCPServersViewModel {
                 env: editEnv.isEmpty ? nil : editEnv,
                 url: url,
                 headers: editHeaders.isEmpty ? nil : editHeaders,
-                oauth: editOAuth
+                oauth: editOAuth,
+                nodeID: nodeID,
+                nodeMode: editNodeMode.rawValue
             )
 
             // Update in list
@@ -210,7 +225,9 @@ final class MCPServersViewModel {
                 env: server.env,
                 url: server.url,
                 headers: server.headers,
-                oauth: server.oauth
+                oauth: server.oauth,
+                nodeID: server.nodeID,
+                nodeMode: server.nodeMode
             )
 
             // Add to list and select it
@@ -219,6 +236,16 @@ final class MCPServersViewModel {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+    
+    func loadSlaves() async {
+        isLoadingSlaves = true
+        do {
+            availableSlaves = try await client.getSlaves()
+        } catch {
+            // Silently fail - slaves are optional
+        }
+        isLoadingSlaves = false
     }
 
     // MARK: - Edit Helpers
@@ -232,6 +259,8 @@ final class MCPServersViewModel {
         editEnv = server.env ?? [:]
         editURL = server.url ?? ""
         editHeaders = server.headers ?? [:]
+        editNodeID = server.nodeID ?? ""
+        editNodeMode = MCPNodeMode(rawValue: server.nodeMode ?? "master") ?? .master
         editOAuth = server.oauth
     }
 
@@ -330,5 +359,7 @@ final class MCPServersViewModel {
         newServerURL = ""
         newServerHeaders = [:]
         newServerOAuth = nil
+        newServerNodeID = ""
+        newServerNodeMode = .master
     }
 }

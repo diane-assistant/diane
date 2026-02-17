@@ -33,6 +33,8 @@ type MCPServerResponse struct {
 	URL       string            `json:"url,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
 	OAuth     *db.OAuthConfig   `json:"oauth,omitempty"`
+	NodeID    string            `json:"node_id,omitempty"`
+	NodeMode  string            `json:"node_mode,omitempty"`
 	CreatedAt string            `json:"created_at"`
 	UpdatedAt string            `json:"updated_at"`
 }
@@ -102,6 +104,8 @@ func (api *MCPServersAPI) listServers(w http.ResponseWriter, r *http.Request) {
 			URL:       s.URL,
 			Headers:   s.Headers,
 			OAuth:     s.OAuth,
+			NodeID:    s.NodeID,
+			NodeMode:  s.NodeMode,
 			CreatedAt: s.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			UpdatedAt: s.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
@@ -113,15 +117,17 @@ func (api *MCPServersAPI) listServers(w http.ResponseWriter, r *http.Request) {
 // createServer creates a new MCP server
 func (api *MCPServersAPI) createServer(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name    string            `json:"name"`
-		Enabled *bool             `json:"enabled,omitempty"`
-		Type    string            `json:"type"`
-		Command string            `json:"command,omitempty"`
-		Args    []string          `json:"args,omitempty"`
-		Env     map[string]string `json:"env,omitempty"`
-		URL     string            `json:"url,omitempty"`
-		Headers map[string]string `json:"headers,omitempty"`
-		OAuth   *db.OAuthConfig   `json:"oauth,omitempty"`
+		Name     string            `json:"name"`
+		Enabled  *bool             `json:"enabled,omitempty"`
+		Type     string            `json:"type"`
+		Command  string            `json:"command,omitempty"`
+		Args     []string          `json:"args,omitempty"`
+		Env      map[string]string `json:"env,omitempty"`
+		URL      string            `json:"url,omitempty"`
+		Headers  map[string]string `json:"headers,omitempty"`
+		OAuth    *db.OAuthConfig   `json:"oauth,omitempty"`
+		NodeID   string            `json:"node_id,omitempty"`
+		NodeMode string            `json:"node_mode,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -166,16 +172,38 @@ func (api *MCPServersAPI) createServer(w http.ResponseWriter, r *http.Request) {
 		enabled = *body.Enabled
 	}
 
+	// Set default node_mode if not provided
+	nodeMode := body.NodeMode
+	if nodeMode == "" {
+		nodeMode = "master"
+	}
+
+	// Validate node_mode
+	if nodeMode != "master" && nodeMode != "specific" && nodeMode != "any" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid node_mode. Must be: master, specific, or any"})
+		return
+	}
+
+	// Validate node_id is provided when node_mode is "specific"
+	if nodeMode == "specific" && body.NodeID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "node_id is required when node_mode is 'specific'"})
+		return
+	}
+
 	server := &db.MCPServer{
-		Name:    body.Name,
-		Enabled: enabled,
-		Type:    body.Type,
-		Command: body.Command,
-		Args:    body.Args,
-		Env:     body.Env,
-		URL:     body.URL,
-		Headers: body.Headers,
-		OAuth:   body.OAuth,
+		Name:     body.Name,
+		Enabled:  enabled,
+		Type:     body.Type,
+		Command:  body.Command,
+		Args:     body.Args,
+		Env:      body.Env,
+		URL:      body.URL,
+		Headers:  body.Headers,
+		OAuth:    body.OAuth,
+		NodeID:   body.NodeID,
+		NodeMode: nodeMode,
 	}
 
 	if err := api.db.CreateMCPServer(server); err != nil {
@@ -201,6 +229,8 @@ func (api *MCPServersAPI) createServer(w http.ResponseWriter, r *http.Request) {
 		URL:       server.URL,
 		Headers:   server.Headers,
 		OAuth:     server.OAuth,
+		NodeID:    server.NodeID,
+		NodeMode:  server.NodeMode,
 		CreatedAt: server.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt: server.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
@@ -264,6 +294,8 @@ func (api *MCPServersAPI) getServer(w http.ResponseWriter, id int64) {
 		URL:       server.URL,
 		Headers:   server.Headers,
 		OAuth:     server.OAuth,
+		NodeID:    server.NodeID,
+		NodeMode:  server.NodeMode,
 		CreatedAt: server.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt: server.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
@@ -285,15 +317,17 @@ func (api *MCPServersAPI) updateServer(w http.ResponseWriter, r *http.Request, i
 	}
 
 	var body struct {
-		Name    *string            `json:"name,omitempty"`
-		Enabled *bool              `json:"enabled,omitempty"`
-		Type    *string            `json:"type,omitempty"`
-		Command *string            `json:"command,omitempty"`
-		Args    *[]string          `json:"args,omitempty"`
-		Env     *map[string]string `json:"env,omitempty"`
-		URL     *string            `json:"url,omitempty"`
-		Headers *map[string]string `json:"headers,omitempty"`
-		OAuth   *db.OAuthConfig    `json:"oauth,omitempty"`
+		Name     *string            `json:"name,omitempty"`
+		Enabled  *bool              `json:"enabled,omitempty"`
+		Type     *string            `json:"type,omitempty"`
+		Command  *string            `json:"command,omitempty"`
+		Args     *[]string          `json:"args,omitempty"`
+		Env      *map[string]string `json:"env,omitempty"`
+		URL      *string            `json:"url,omitempty"`
+		Headers  *map[string]string `json:"headers,omitempty"`
+		OAuth    *db.OAuthConfig    `json:"oauth,omitempty"`
+		NodeID   *string            `json:"node_id,omitempty"`
+		NodeMode *string            `json:"node_mode,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -335,6 +369,25 @@ func (api *MCPServersAPI) updateServer(w http.ResponseWriter, r *http.Request, i
 	if body.OAuth != nil {
 		server.OAuth = body.OAuth
 	}
+	if body.NodeID != nil {
+		server.NodeID = *body.NodeID
+	}
+	if body.NodeMode != nil {
+		// Validate node_mode
+		if *body.NodeMode != "master" && *body.NodeMode != "specific" && *body.NodeMode != "any" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid node_mode. Must be: master, specific, or any"})
+			return
+		}
+		server.NodeMode = *body.NodeMode
+	}
+
+	// Validate node_id is provided when node_mode is "specific"
+	if server.NodeMode == "specific" && server.NodeID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "node_id is required when node_mode is 'specific'"})
+		return
+	}
 
 	if err := api.db.UpdateMCPServer(server); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -358,6 +411,8 @@ func (api *MCPServersAPI) updateServer(w http.ResponseWriter, r *http.Request, i
 		URL:       server.URL,
 		Headers:   server.Headers,
 		OAuth:     server.OAuth,
+		NodeID:    server.NodeID,
+		NodeMode:  server.NodeMode,
 		CreatedAt: server.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt: server.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	})

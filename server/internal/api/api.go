@@ -38,14 +38,22 @@ type MCPServerStatus struct {
 
 // Status represents the overall Diane status
 type Status struct {
-	Running       bool              `json:"running"`
-	PID           int               `json:"pid"`
-	Version       string            `json:"version"`
-	Uptime        string            `json:"uptime"`
-	UptimeSeconds int64             `json:"uptime_seconds"`
-	StartedAt     time.Time         `json:"started_at"`
-	TotalTools    int               `json:"total_tools"`
-	MCPServers    []MCPServerStatus `json:"mcp_servers"`
+	Running        bool              `json:"running"`
+	PID            int               `json:"pid"`
+	Version        string            `json:"version"`
+	Platform       string            `json:"platform"`
+	Architecture   string            `json:"architecture"`
+	Hostname       string            `json:"hostname"`
+	Uptime         string            `json:"uptime"`
+	UptimeSeconds  int64             `json:"uptime_seconds"`
+	StartedAt      time.Time         `json:"started_at"`
+	TotalTools     int               `json:"total_tools"`
+	MCPServers     []MCPServerStatus `json:"mcp_servers"`
+	LogFile        string            `json:"log_file,omitempty"`
+	SlaveMode      bool              `json:"slave_mode,omitempty"`
+	MasterURL      string            `json:"master_url,omitempty"`
+	SlaveConnected bool              `json:"slave_connected,omitempty"`
+	SlaveError     string            `json:"slave_error,omitempty"`
 }
 
 // ToolInfo represents information about a tool

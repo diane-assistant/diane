@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -105,6 +106,9 @@ func runCTLCommand(args []string) bool {
 
 	case "pair":
 		ctlHandlePairCommand()
+
+	case "logs":
+		ctlHandleLogsCommand(args[2:])
 
 	case "help", "--help", "-h":
 		ctlPrintUsage()
@@ -1365,6 +1369,85 @@ func ctlHandlePairCommand() {
 	fmt.Println()
 }
 
+func ctlHandleLogsCommand(args []string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: could not determine home directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	logPath := filepath.Join(home, ".diane", "server.log")
+
+	// Parse flags
+	lines := 100
+	follow := false
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-n", "--lines":
+			if i+1 < len(args) {
+				_, err := fmt.Sscanf(args[i+1], "%d", &lines)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error: invalid number of lines: %s\n", args[i+1])
+					os.Exit(1)
+				}
+				i++
+			}
+		case "-f", "--follow":
+			follow = true
+		}
+	}
+
+	// Check if log file exists
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Error: log file not found at %s\n", logPath)
+		fmt.Fprintf(os.Stderr, "\nDiane may not be running, or logs may be written elsewhere.\n")
+		fmt.Fprintf(os.Stderr, "Try: diane status\n")
+		os.Exit(1)
+	}
+
+	if follow {
+		// Use tail -f for following logs
+		fmt.Fprintf(os.Stderr, "Following logs at %s (Ctrl+C to stop)...\n\n", logPath)
+		cmd := exec.Command("tail", "-f", "-n", fmt.Sprintf("%d", lines), logPath)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error following logs: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// Read last N lines
+		data, err := os.ReadFile(logPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading log file: %v\n", err)
+			os.Exit(1)
+		}
+
+		allLines := strings.Split(string(data), "\n")
+
+		// Remove empty last line if present
+		if len(allLines) > 0 && allLines[len(allLines)-1] == "" {
+			allLines = allLines[:len(allLines)-1]
+		}
+
+		// Get last N lines
+		start := 0
+		if len(allLines) > lines {
+			start = len(allLines) - lines
+		}
+
+		displayLines := allLines[start:]
+
+		for _, line := range displayLines {
+			fmt.Println(line)
+		}
+
+		fmt.Fprintf(os.Stderr, "\n(Showing last %d lines of %d total. Use -n to adjust, -f to follow)\n", len(displayLines), len(allLines))
+		fmt.Fprintf(os.Stderr, "Log file: %s\n", logPath)
+	}
+}
+
 func ctlHandleDoctorCommand(client *api.Client) {
 	report, err := client.Doctor()
 	if err != nil {
@@ -1416,6 +1499,10 @@ Control Commands:
   reload             Reload MCP configuration
   restart <name>     Restart a specific MCP server
   pair               Show a time-based pairing code for connecting apps
+  logs [-n N] [-f]   View server logs (default: last 100 lines)
+                     Options:
+                       -n, --lines N   Number of lines to show
+                       -f, --follow    Follow log output in real-time
   upgrade            Upgrade to the latest version
   version            Show version
 
@@ -1460,6 +1547,10 @@ Examples:
   diane                                                # Show help
   diane serve                                          # Start as daemon
   diane info                                           # Show connection guide
+  diane status                                         # Show full status
+  diane logs                                           # View last 100 lines of logs
+  diane logs -n 50                                     # View last 50 lines
+  diane logs -f                                        # Follow logs in real-time
   diane pair                                           # Show pairing code for app setup
   diane mcp install opencode                           # Install MCP config in OpenCode project
   diane mcp install opencode --context work            # Install with specific context

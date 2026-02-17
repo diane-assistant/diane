@@ -16,6 +16,7 @@ class StatusMonitor: ObservableObject {
     @Published var isPaused: Bool = false  // Pause during updates
     @Published var isRemoteMode: Bool = false
     @Published var serverDisplayName: String = "Unknown"
+    @Published var remoteURL: String?
     
     // Slave management
     @Published var slaves: [SlaveInfo] = []
@@ -27,6 +28,9 @@ class StatusMonitor: ObservableObject {
     @Published var upgradingSlaves: Set<String> = []
     
     private var client: DianeClientProtocol?
+    
+    /// Dedicated client for local process management (always a DianeClient, independent of mode)
+    private let localProcessClient = DianeClient()
     
     /// The configured client instance for use by ViewModels
     /// This allows ViewModels to use the same remote/local client as StatusMonitor
@@ -52,6 +56,7 @@ class StatusMonitor: ObservableObject {
         FileLogger.shared.info("StatusMonitor configuring for local mode", category: "StatusMonitor")
         client = DianeClient()
         isRemoteMode = false
+        remoteURL = nil
         serverDisplayName = "Local"
     }
     
@@ -62,6 +67,7 @@ class StatusMonitor: ObservableObject {
         let effectiveKey = (apiKey?.isEmpty ?? true) ? nil : apiKey
         client = DianeHTTPClient(baseURL: baseURL, apiKey: effectiveKey)
         isRemoteMode = true
+        remoteURL = baseURL.absoluteString
         serverDisplayName = baseURL.host ?? "Remote"
     }
     
@@ -111,9 +117,34 @@ class StatusMonitor: ObservableObject {
         
         await startPolling()
         
+        // Always ensure local diane-server is running (needed for slave connectivity)
+        await ensureLocalServerRunning()
+        
         // Auto-start Diane if enabled and not already running (local mode only)
         if !isRemoteMode {
             await autoStartIfNeeded()
+        }
+    }
+    
+    /// Ensure the local diane-server process is running regardless of mode.
+    /// In remote mode, the local server acts as a slave connecting to the master.
+    private func ensureLocalServerRunning() async {
+        // Small delay to let things settle
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        
+        if !localProcessClient.isProcessRunning() {
+            logger.info("Local diane-server not running, starting it...")
+            FileLogger.shared.info("Local diane-server not running, starting it...", category: "StatusMonitor")
+            do {
+                try localProcessClient.startDiane()
+                logger.info("Local diane-server started successfully")
+                FileLogger.shared.info("Local diane-server started successfully", category: "StatusMonitor")
+            } catch {
+                logger.warning("Failed to start local diane-server: \(error.localizedDescription)")
+                FileLogger.shared.warning("Failed to start local diane-server: \(error.localizedDescription)", category: "StatusMonitor")
+            }
+        } else {
+            logger.info("Local diane-server already running")
         }
     }
     

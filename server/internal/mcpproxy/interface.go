@@ -63,4 +63,7 @@ type Client interface {
 
 	// Close closes the client connection
 	Close() error
+
+	// GetDisconnectChan returns a channel that is closed when the client disconnects unexpectedly
+	GetDisconnectChan() <-chan struct{}
 }

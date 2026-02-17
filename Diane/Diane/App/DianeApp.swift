@@ -1,11 +1,20 @@
 import SwiftUI
 import UserNotifications
 
-/// App delegate to handle window activation and lifecycle events
-class AppDelegate: NSObject, NSApplicationDelegate {
+/// App delegate to handle window activation, lifecycle events, and notification actions
+class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    // Reference to status monitor for handling notification actions
+    var statusMonitor: StatusMonitor?
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Set up notification delegate
+        UNUserNotificationCenter.current().delegate = self
+        
+        // Register notification categories with actions
+        registerNotificationCategories()
+        
         // Request notification permissions for pairing requests
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if let error = error {
                 print("Error requesting notification permissions: \(error)")
             } else if granted {
@@ -15,6 +24,79 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Ensure the main window activates on launch
         NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    /// Register notification categories with action buttons
+    private func registerNotificationCategories() {
+        let approveAction = UNNotificationAction(
+            identifier: "APPROVE_PAIRING",
+            title: "Accept",
+            options: [.authenticationRequired]
+        )
+        
+        let denyAction = UNNotificationAction(
+            identifier: "DENY_PAIRING",
+            title: "Deny",
+            options: [.destructive, .authenticationRequired]
+        )
+        
+        let pairingCategory = UNNotificationCategory(
+            identifier: "PAIRING_REQUEST",
+            actions: [approveAction, denyAction],
+            intentIdentifiers: [],
+            options: [.customDismissAction]
+        )
+        
+        UNUserNotificationCenter.current().setNotificationCategories([pairingCategory])
+    }
+    
+    // MARK: - UNUserNotificationCenterDelegate
+    
+    /// Handle notification actions (Accept/Deny buttons)
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+        let hostname = userInfo["hostname"] as? String ?? ""
+        let pairingCode = userInfo["pairing_code"] as? String ?? ""
+        
+        switch response.actionIdentifier {
+        case "APPROVE_PAIRING":
+            Task { @MainActor in
+                await statusMonitor?.approvePairing(hostname: hostname, pairingCode: pairingCode)
+            }
+        case "DENY_PAIRING":
+            Task { @MainActor in
+                await statusMonitor?.denyPairing(hostname: hostname, pairingCode: pairingCode)
+            }
+        case UNNotificationDefaultActionIdentifier:
+            // User tapped the notification itself - open the settings to show pending requests
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                // Open settings window
+                if #available(macOS 14.0, *) {
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                } else {
+                    NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                }
+            }
+        default:
+            break
+        }
+        
+        completionHandler()
+    }
+    
+    /// Show notifications even when app is in foreground
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // Show banner and play sound even when app is in foreground
+        completionHandler([.banner, .sound, .badge])
     }
     
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -138,6 +220,9 @@ struct DianeApp: App {
         guard serverConfig.isConfigured else { return }
         guard !hasStarted else { return }
         hasStarted = true
+        
+        // Wire up the app delegate with the status monitor for notification actions
+        appDelegate.statusMonitor = statusMonitor
         
         // Configure the status monitor from server config if not already done
         statusMonitor.configure(from: serverConfig)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -44,11 +45,24 @@ func NewHTTPClient(name string, url string, headers map[string]string) (*HTTPCli
 
 // NewHTTPClientWithOAuth creates a new HTTP Streamable MCP client with OAuth support
 func NewHTTPClientWithOAuth(name string, url string, headers map[string]string, oauth *OAuthConfig) (*HTTPClient, error) {
+	// Create HTTP client with connection pooling and keepalive
+	transport := &http.Transport{
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+		DisableKeepAlives:   false,
+		// TCP keepalive to detect dead connections
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	}
+
 	client := &HTTPClient{
 		name:        name,
 		baseURL:     url,
 		headers:     headers,
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  &http.Client{Timeout: 30 * time.Second, Transport: transport},
 		notifyChan:  make(chan string, 10),
 		nextID:      1,
 		oauthConfig: oauth,
@@ -237,81 +251,136 @@ func (c *HTTPClient) initialize() error {
 	return nil
 }
 
+// retryRequest wraps a request with retry logic for transient failures
+// Retries network errors and 5xx errors, but not 4xx errors (client errors)
+func (c *HTTPClient) retryRequest(fn func() (json.RawMessage, error), method string) (json.RawMessage, error) {
+	maxRetries := 3
+	baseDelay := 100 * time.Millisecond
+
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := baseDelay * time.Duration(1<<uint(attempt-1)) // exponential backoff
+			slog.Debug("Retrying HTTP request",
+				"client", c.name,
+				"method", method,
+				"attempt", attempt,
+				"delay", delay)
+			time.Sleep(delay)
+		}
+
+		result, err := fn()
+		if err == nil {
+			return result, nil
+		}
+
+		lastErr = err
+
+		// Check if error is retryable
+		errStr := err.Error()
+		isNetworkError := strings.Contains(errStr, "connection refused") ||
+			strings.Contains(errStr, "connection reset") ||
+			strings.Contains(errStr, "timeout") ||
+			strings.Contains(errStr, "EOF") ||
+			strings.Contains(errStr, "no such host")
+
+		isServerError := strings.Contains(errStr, "status 5")
+
+		// Don't retry on non-retryable errors (4xx, parse errors, etc.)
+		if !isNetworkError && !isServerError {
+			return nil, err
+		}
+
+		if attempt < maxRetries {
+			slog.Debug("HTTP request failed, will retry",
+				"client", c.name,
+				"method", method,
+				"error", err,
+				"attempt", attempt)
+		}
+	}
+
+	return nil, fmt.Errorf("request failed after %d attempts: %w", maxRetries+1, lastErr)
+}
+
 // sendRequest sends a JSON-RPC request via HTTP POST
 func (c *HTTPClient) sendRequest(method string, params json.RawMessage) (json.RawMessage, error) {
 	return c.sendRequestWithTimeout(method, params, 30*time.Second)
 }
 
 func (c *HTTPClient) sendRequestWithTimeout(method string, params json.RawMessage, timeout time.Duration) (json.RawMessage, error) {
-	c.mu.Lock()
-	c.nextID++
-	reqID := c.nextID
-	sessionID := c.sessionID
-	c.mu.Unlock()
-
-	slog.Debug("HTTPClient sendRequest", "client", c.name, "method", method, "sessionID", sessionID)
-
-	req := MCPRequest{
-		JSONRPC: "2.0",
-		ID:      reqID,
-		Method:  method,
-		Params:  params,
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequest("POST", c.baseURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json, text/event-stream")
-	httpReq.Header.Set("MCP-Protocol-Version", "2025-03-26")
-	if sessionID != "" {
-		httpReq.Header.Set("MCP-Session-Id", sessionID)
-	}
-	for k, v := range c.headers {
-		httpReq.Header.Set(k, v)
-	}
-
-	// Add OAuth authorization header if configured
-	if authHeader := c.getAuthorizationHeader(); authHeader != "" {
-		httpReq.Header.Set("Authorization", authHeader)
-	}
-
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(httpReq)
-	if err != nil {
+	// Wrap in retry logic for network resilience
+	return c.retryRequest(func() (json.RawMessage, error) {
 		c.mu.Lock()
-		c.lastError = err.Error()
+		c.nextID++
+		reqID := c.nextID
+		sessionID := c.sessionID
 		c.mu.Unlock()
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		errMsg := fmt.Sprintf("status %d: %s", resp.StatusCode, string(bodyBytes))
-		c.mu.Lock()
-		c.lastError = errMsg
-		c.mu.Unlock()
-		return nil, fmt.Errorf("request failed with %s", errMsg)
-	}
+		slog.Debug("HTTPClient sendRequest", "client", c.name, "method", method, "sessionID", sessionID)
 
-	mcpResp, err := decodeResponse(resp)
-	if err != nil {
-		return nil, err
-	}
+		req := MCPRequest{
+			JSONRPC: "2.0",
+			ID:      reqID,
+			Method:  method,
+			Params:  params,
+		}
 
-	if mcpResp.Error != nil {
-		return nil, fmt.Errorf("%s error: %s", method, mcpResp.Error.Message)
-	}
+		body, err := json.Marshal(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request: %w", err)
+		}
 
-	return mcpResp.Result, nil
+		httpReq, err := http.NewRequest("POST", c.baseURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "application/json, text/event-stream")
+		httpReq.Header.Set("MCP-Protocol-Version", "2025-03-26")
+		if sessionID != "" {
+			httpReq.Header.Set("MCP-Session-Id", sessionID)
+		}
+		for k, v := range c.headers {
+			httpReq.Header.Set(k, v)
+		}
+
+		// Add OAuth authorization header if configured
+		if authHeader := c.getAuthorizationHeader(); authHeader != "" {
+			httpReq.Header.Set("Authorization", authHeader)
+		}
+
+		// Use the shared HTTP client with connection pooling
+		resp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			c.mu.Lock()
+			c.lastError = err.Error()
+			c.mu.Unlock()
+			return nil, fmt.Errorf("request failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			errMsg := fmt.Sprintf("status %d: %s", resp.StatusCode, string(bodyBytes))
+			c.mu.Lock()
+			c.lastError = errMsg
+			c.mu.Unlock()
+			return nil, fmt.Errorf("request failed with %s", errMsg)
+		}
+
+		mcpResp, err := decodeResponse(resp)
+		if err != nil {
+			return nil, err
+		}
+
+		if mcpResp.Error != nil {
+			return nil, fmt.Errorf("%s error: %s", method, mcpResp.Error.Message)
+		}
+
+		return mcpResp.Result, nil
+	}, method)
 }
 
 // GetName returns the client name
@@ -528,4 +597,10 @@ func (c *HTTPClient) GetStderrOutput() string {
 func (c *HTTPClient) Close() error {
 	c.connected.Store(false)
 	return nil
+}
+
+// GetDisconnectChan returns a channel that never closes because HTTP is stateless
+func (c *HTTPClient) GetDisconnectChan() <-chan struct{} {
+	// HTTP is stateless - each request reconnects, so disconnect doesn't apply
+	return make(chan struct{})
 }

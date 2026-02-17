@@ -7,6 +7,8 @@ default.profraw
 # Go binaries (but not Go source directories)
 *.test
 *.out
+server/diane
+server/mcp/mcp
 
 # IDE
 .idea/
