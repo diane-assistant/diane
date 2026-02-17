@@ -198,6 +198,7 @@ type Server struct {
 	contextsAPI    *ContextsAPI
 	providersAPI   *ProvidersAPI
 	mcpServersAPI  *MCPServersAPI
+	hostsAPI       *HostsAPI
 	slaveManager   *slave.Manager
 	pairLimiter    *pairing.RateLimiter // rate limiter for pairing attempts
 }
@@ -257,6 +258,16 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 		mcpServersAPI = NewMCPServersAPI(database, statusProvider)
 	}
 
+	// Initialize Hosts API (shows master + slaves)
+	var hostsAPI *HostsAPI
+	slog.Info("NewServer: About to initialize Hosts API", "database_nil", database == nil, "slaveManager_nil", slaveManager == nil)
+	if database != nil {
+		hostsAPI = NewHostsAPI(database, slaveManager)
+		slog.Info("NewServer: Hosts API initialized", "hostsAPI_nil", hostsAPI == nil)
+	} else {
+		slog.Warn("NewServer: Database is nil, Hosts API not initialized")
+	}
+
 	return &Server{
 		socketPath:     socketPath,
 		httpAddr:       cfg.HTTPAddr(),
@@ -267,6 +278,7 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 		contextsAPI:    contextsAPI,
 		providersAPI:   providersAPI,
 		mcpServersAPI:  mcpServersAPI,
+		hostsAPI:       hostsAPI,
 		slaveManager:   slaveManager,
 		pairLimiter:    pairing.NewRateLimiter(),
 	}, nil
@@ -378,6 +390,14 @@ func (s *Server) Start() error {
 	// Register MCP Servers API routes
 	if s.mcpServersAPI != nil {
 		s.mcpServersAPI.RegisterRoutes(mux)
+	}
+
+	// Register Hosts API routes
+	if s.hostsAPI != nil {
+		slog.Info("Registering Hosts API routes")
+		s.hostsAPI.RegisterRoutes(mux)
+	} else {
+		slog.Warn("Hosts API is nil, routes not registered")
 	}
 
 	// Register Slave Management API routes

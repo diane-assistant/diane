@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/diane-assistant/diane/internal/api"
+	"github.com/diane-assistant/diane/internal/cli"
 	"github.com/diane-assistant/diane/internal/config"
 	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/logger"
@@ -65,7 +66,17 @@ type DBConfigProvider struct {
 }
 
 func (p *DBConfigProvider) LoadMCPServerConfigs() ([]mcpproxy.ServerConfig, error) {
-	servers, err := p.db.ListMCPServers()
+	// Determine which host we're running on
+	hostID := "master"
+	if slaveConfig.Enabled && slaveConfig.MasterURL != "" {
+		// Running as a slave - use hostname as hostID
+		if hostname, err := os.Hostname(); err == nil {
+			hostID = hostname
+		}
+	}
+
+	// Get all enabled servers for this host (respects global enabled flag + placement enabled flag)
+	servers, err := p.db.GetEnabledServersForHost(hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -1494,20 +1505,16 @@ func main() {
 	// Determine run mode: "serve" = daemon (no stdio), default = stdio MCP
 	serveMode := len(os.Args) >= 2 && os.Args[1] == "serve"
 
-	// If there are unrecognized subcommands, show usage and exit
-	if len(os.Args) >= 2 && !serveMode {
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", os.Args[1])
-		ctlPrintUsage()
-		os.Exit(1)
-	}
-
-	// If no arguments and stdin is a terminal (interactive), show help.
+	// If no arguments and stdin is a terminal (interactive), show Cobra help.
 	// Stdio MCP mode is only entered when stdin is piped (AI tool spawning the binary).
 	if !serveMode {
 		stat, _ := os.Stdin.Stat()
 		if (stat.Mode() & os.ModeCharDevice) != 0 {
 			// stdin is a terminal — user ran "diane" interactively
-			ctlPrintUsage()
+			client := api.NewClient()
+			rootCmd := cli.NewRootCmd(client, Version)
+			rootCmd.SetArgs([]string{}) // no args = show help
+			rootCmd.Execute()
 			os.Exit(0)
 		}
 	}
@@ -1575,6 +1582,11 @@ func main() {
 			slog.Warn("Failed to migrate MCP servers from JSON", "error", err)
 		} else if imported > 0 {
 			slog.Info("Migrated MCP servers from JSON to database", "count", imported)
+		}
+
+		// Ensure all builtin servers exist in database (idempotent)
+		if err := database.EnsureBuiltinServers(); err != nil {
+			slog.Warn("Failed to ensure builtin servers in database", "error", err)
 		}
 	}
 	defer func() {
@@ -1677,97 +1689,167 @@ func main() {
 		}
 	}()
 
-	// Initialize Apple tools provider (only on macOS)
-	appleProvider = apple.NewProvider()
-	if err := appleProvider.CheckDependencies(); err != nil {
-		slog.Warn("Apple tools not available", "error", err)
-		appleProvider = nil
-	} else {
-		slog.Info("Apple tools initialized successfully")
+	// Helper function to check if a builtin server should be enabled
+	isBuiltinEnabled := func(serverName string) bool {
+		if database == nil {
+			return false
+		}
+
+		// Determine which host we're running on
+		hostID := "master"
+		if slaveConfig.Enabled && slaveConfig.MasterURL != "" {
+			// Running as a slave - use hostname as hostID
+			if hostname, err := os.Hostname(); err == nil {
+				hostID = hostname
+			}
+		}
+
+		// Get the server from database
+		server, err := database.GetMCPServer(serverName)
+		if err != nil || server == nil {
+			return false // Server doesn't exist in DB yet, don't enable
+		}
+
+		// Check if enabled on this host
+		enabled, err := database.IsServerEnabledOnHost(server.ID, hostID)
+		if err != nil {
+			return false
+		}
+
+		return enabled
 	}
 
-	// Initialize Google tools provider
-	googleProvider = google.NewProvider()
-	if err := googleProvider.CheckDependencies(); err != nil {
-		slog.Warn("Google tools not available", "error", err)
-		googleProvider = nil
+	// Initialize Apple tools provider (only on macOS and if enabled)
+	if isBuiltinEnabled("apple") {
+		appleProvider = apple.NewProvider()
+		if err := appleProvider.CheckDependencies(); err != nil {
+			slog.Warn("Apple tools not available", "error", err)
+			appleProvider = nil
+		} else {
+			slog.Info("Apple tools initialized successfully")
+		}
 	} else {
-		slog.Info("Google tools initialized successfully")
+		slog.Debug("Apple tools disabled via placement configuration")
 	}
 
-	// Initialize Infrastructure tools provider (Cloudflare DNS)
-	infrastructureProvider = infrastructure.NewProvider()
-	if err := infrastructureProvider.CheckDependencies(); err != nil {
-		slog.Warn("Infrastructure tools not available", "error", err)
-		infrastructureProvider = nil
+	// Initialize Google tools provider (if enabled)
+	if isBuiltinEnabled("google") {
+		googleProvider = google.NewProvider()
+		if err := googleProvider.CheckDependencies(); err != nil {
+			slog.Warn("Google tools not available", "error", err)
+			googleProvider = nil
+		} else {
+			slog.Info("Google tools initialized successfully")
+		}
 	} else {
-		slog.Info("Infrastructure tools initialized successfully")
+		slog.Debug("Google tools disabled via placement configuration")
 	}
 
-	// Initialize Notifications tools provider (Discord, Home Assistant)
-	notificationsProvider = notifications.NewProvider()
-	if err := notificationsProvider.CheckDependencies(); err != nil {
-		slog.Warn("Notifications tools not available", "error", err)
-		notificationsProvider = nil
+	// Initialize Infrastructure tools provider (Cloudflare DNS, if enabled)
+	if isBuiltinEnabled("infrastructure") {
+		infrastructureProvider = infrastructure.NewProvider()
+		if err := infrastructureProvider.CheckDependencies(); err != nil {
+			slog.Warn("Infrastructure tools not available", "error", err)
+			infrastructureProvider = nil
+		} else {
+			slog.Info("Infrastructure tools initialized successfully")
+		}
 	} else {
-		slog.Info("Notifications tools initialized successfully")
+		slog.Debug("Infrastructure tools disabled via placement configuration")
 	}
 
-	// Initialize Finance tools provider (Enable Banking, Actual Budget, Bank Sync)
-	financeProvider = finance.NewProvider()
-	if err := financeProvider.CheckDependencies(); err != nil {
-		slog.Warn("Finance tools not available", "error", err)
-		financeProvider = nil
+	// Initialize Notifications tools provider (Discord, Home Assistant, if enabled)
+	if isBuiltinEnabled("discord") {
+		notificationsProvider = notifications.NewProvider()
+		if err := notificationsProvider.CheckDependencies(); err != nil {
+			slog.Warn("Notifications tools not available", "error", err)
+			notificationsProvider = nil
+		} else {
+			slog.Info("Notifications tools initialized successfully")
+		}
 	} else {
-		slog.Info("Finance tools initialized successfully")
+		slog.Debug("Notifications tools disabled via placement configuration")
 	}
 
-	// Initialize Google Places tools provider
-	placesProvider = places.NewProvider()
-	if err := placesProvider.CheckDependencies(); err != nil {
-		slog.Warn("Google Places tools not available", "error", err)
-		placesProvider = nil
+	// Initialize Finance tools provider (Enable Banking, Actual Budget, Bank Sync, if enabled)
+	if isBuiltinEnabled("finance") {
+		financeProvider = finance.NewProvider()
+		if err := financeProvider.CheckDependencies(); err != nil {
+			slog.Warn("Finance tools not available", "error", err)
+			financeProvider = nil
+		} else {
+			slog.Info("Finance tools initialized successfully")
+		}
 	} else {
-		slog.Info("Google Places tools initialized successfully")
+		slog.Debug("Finance tools disabled via placement configuration")
 	}
 
-	// Initialize Weather tools provider
-	weatherProvider = weather.NewProvider()
-	if err := weatherProvider.CheckDependencies(); err != nil {
-		slog.Warn("Weather tools not available", "error", err)
-		weatherProvider = nil
+	// Initialize Google Places tools provider (if enabled)
+	if isBuiltinEnabled("places") {
+		placesProvider = places.NewProvider()
+		if err := placesProvider.CheckDependencies(); err != nil {
+			slog.Warn("Google Places tools not available", "error", err)
+			placesProvider = nil
+		} else {
+			slog.Info("Google Places tools initialized successfully")
+		}
 	} else {
-		slog.Info("Weather tools initialized successfully")
+		slog.Debug("Google Places tools disabled via placement configuration")
 	}
 
-	// Initialize GitHub Bot tools provider
-	var githubErr error
-	githubProvider, githubErr = githubbot.NewProvider()
-	if githubErr != nil {
-		slog.Warn("GitHub Bot tools not available", "error", githubErr)
-		githubProvider = nil
+	// Initialize Weather tools provider (if enabled)
+	if isBuiltinEnabled("weather") {
+		weatherProvider = weather.NewProvider()
+		if err := weatherProvider.CheckDependencies(); err != nil {
+			slog.Warn("Weather tools not available", "error", err)
+			weatherProvider = nil
+		} else {
+			slog.Info("Weather tools initialized successfully")
+		}
 	} else {
-		slog.Info("GitHub Bot tools initialized successfully")
+		slog.Debug("Weather tools disabled via placement configuration")
 	}
 
-	// Initialize Downloads tools provider
-	var downloadsErr error
-	downloadsProvider, downloadsErr = downloads.NewProvider()
-	if downloadsErr != nil {
-		slog.Warn("Downloads tools not available", "error", downloadsErr)
-		downloadsProvider = nil
+	// Initialize GitHub Bot tools provider (if enabled)
+	if isBuiltinEnabled("github-bot") {
+		var githubErr error
+		githubProvider, githubErr = githubbot.NewProvider()
+		if githubErr != nil {
+			slog.Warn("GitHub Bot tools not available", "error", githubErr)
+			githubProvider = nil
+		} else {
+			slog.Info("GitHub Bot tools initialized successfully")
+		}
 	} else {
-		slog.Info("Downloads tools initialized successfully")
+		slog.Debug("GitHub Bot tools disabled via placement configuration")
 	}
 
-	// Initialize Files tools provider (uses Emergent backend via env vars)
-	var filesErr error
-	filesProvider, filesErr = files.NewProvider()
-	if filesErr != nil {
-		slog.Warn("Files tools not available", "error", filesErr)
-		filesProvider = nil
+	// Initialize Downloads tools provider (if enabled)
+	if isBuiltinEnabled("downloads") {
+		var downloadsErr error
+		downloadsProvider, downloadsErr = downloads.NewProvider()
+		if downloadsErr != nil {
+			slog.Warn("Downloads tools not available", "error", downloadsErr)
+			downloadsProvider = nil
+		} else {
+			slog.Info("Downloads tools initialized successfully")
+		}
 	} else {
-		slog.Info("Files tools initialized successfully")
+		slog.Debug("Downloads tools disabled via placement configuration")
+	}
+
+	// Initialize Files tools provider (uses Emergent backend via env vars, if enabled)
+	if isBuiltinEnabled("file_registry") {
+		var filesErr error
+		filesProvider, filesErr = files.NewProvider()
+		if filesErr != nil {
+			slog.Warn("Files tools not available", "error", filesErr)
+			filesProvider = nil
+		} else {
+			slog.Info("Files tools initialized successfully")
+		}
+	} else {
+		slog.Debug("Files tools disabled via placement configuration")
 	}
 	defer func() {
 		if filesProvider != nil {

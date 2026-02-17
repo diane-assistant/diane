@@ -746,6 +746,35 @@ class DianeClient: DianeClientProtocol {
         _ = try await request("/mcp-servers-config/\(id)", method: "DELETE")
     }
     
+    // MARK: - MCP Placements API
+    
+    /// Get all placements for a specific host
+    func getPlacements(hostID: String) async throws -> [MCPServerPlacement] {
+        let data = try await request("/mcp-placements?host_id=\(hostID)")
+        return try makeGoCompatibleDecoder().decode([MCPServerPlacement].self, from: data)
+    }
+    
+    /// Update a placement's enabled state
+    func updatePlacement(serverID: Int64, hostID: String, enabled: Bool) async throws -> MCPServerPlacement {
+        let body = UpdatePlacementRequest(enabled: enabled)
+        let bodyData = try JSONEncoder().encode(body)
+        let data = try await request("/mcp-placements/\(serverID)/\(hostID)", method: "PUT", body: bodyData)
+        return try makeGoCompatibleDecoder().decode(MCPServerPlacement.self, from: data)
+    }
+    
+    /// Delete a placement
+    func deletePlacement(serverID: Int64, hostID: String) async throws {
+        _ = try await request("/mcp-placements/\(serverID)/\(hostID)", method: "DELETE")
+    }
+    
+    // MARK: - Hosts API
+    
+    /// Get all hosts (master + slaves)
+    func getHosts() async throws -> [HostInfo] {
+        let data = try await request("/hosts")
+        return try makeGoCompatibleDecoder().decode([HostInfo].self, from: data)
+    }
+    
     // MARK: - Providers API
     
     /// Get all providers, optionally filtered by type

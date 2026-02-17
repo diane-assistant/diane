@@ -153,6 +153,21 @@ func (db *DB) UpdateSlaveVersion(hostID, version string) error {
 	return err
 }
 
+// UpdateSlaveServerCredentials updates the certificate and expiration for an existing slave
+func (db *DB) UpdateSlaveServerCredentials(hostID, certSerial, platform string, issuedAt, expiresAt time.Time) error {
+	_, err := db.conn.Exec(`
+		UPDATE slave_servers
+		SET cert_serial = ?, platform = ?, issued_at = ?, expires_at = ?, updated_at = ?
+		WHERE host_id = ?
+	`, certSerial, platform, issuedAt, expiresAt, time.Now(), hostID)
+
+	if err != nil {
+		return fmt.Errorf("failed to update slave server credentials: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteSlaveServer deletes a slave server configuration
 func (db *DB) DeleteSlaveServer(hostID string) error {
 	_, err := db.conn.Exec(`
@@ -316,6 +331,16 @@ func (db *DB) CleanupExpiredPairingRequests() error {
 		DELETE FROM pairing_requests
 		WHERE expires_at < ? AND status = 'pending'
 	`, time.Now())
+
+	return err
+}
+
+// DeletePendingPairingRequestsForHost deletes all pending pairing requests for a specific host
+func (db *DB) DeletePendingPairingRequestsForHost(hostID string) error {
+	_, err := db.conn.Exec(`
+		DELETE FROM pairing_requests
+		WHERE host_id = ? AND status = 'pending'
+	`, hostID)
 
 	return err
 }

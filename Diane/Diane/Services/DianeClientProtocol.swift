@@ -70,6 +70,22 @@ protocol DianeClientProtocol {
 
     /// Delete an MCP server configuration
     func deleteMCPServerConfig(id: Int64) async throws
+    
+    // MARK: - MCP Placements
+    
+    /// Get all placements for a specific host
+    func getPlacements(hostID: String) async throws -> [MCPServerPlacement]
+    
+    /// Update a placement's enabled state
+    func updatePlacement(serverID: Int64, hostID: String, enabled: Bool) async throws -> MCPServerPlacement
+    
+    /// Delete a placement
+    func deletePlacement(serverID: Int64, hostID: String) async throws
+    
+    // MARK: - Hosts
+    
+    /// Get all hosts (master + slaves)
+    func getHosts() async throws -> [HostInfo]
 
     // MARK: - Tools
 

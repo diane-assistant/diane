@@ -41,8 +41,17 @@ type MCPServerResponse struct {
 
 // RegisterRoutes registers MCP server API routes on the given mux
 func (api *MCPServersAPI) RegisterRoutes(mux *http.ServeMux) {
+	// MCP Registry routes (server definitions)
 	mux.HandleFunc("/mcp-servers-config", api.handleMCPServers)
 	mux.HandleFunc("/mcp-servers-config/", api.handleMCPServerAction)
+
+	// Placement routes (deployment config)
+	mux.HandleFunc("/mcp-placements", api.handlePlacements)
+	mux.HandleFunc("/mcp-placements/", api.handlePlacementAction)
+
+	// Backward compatibility aliases
+	mux.HandleFunc("/mcp-registry", api.handleMCPServers)
+	mux.HandleFunc("/mcp-registry/", api.handleMCPServerAction)
 }
 
 // handleMCPServers handles GET /mcp-servers-config and POST /mcp-servers-config
@@ -440,4 +449,166 @@ func (api *MCPServersAPI) deleteServer(w http.ResponseWriter, id int64) {
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "id": strconv.FormatInt(id, 10)})
+}
+
+// PlacementResponse represents a placement in API responses
+type PlacementResponse struct {
+	ID        int64             `json:"id"`
+	ServerID  int64             `json:"server_id"`
+	HostID    string            `json:"host_id"`
+	Enabled   bool              `json:"enabled"`
+	Server    MCPServerResponse `json:"server,omitempty"`
+	CreatedAt string            `json:"created_at"`
+	UpdatedAt string            `json:"updated_at"`
+}
+
+// handlePlacements handles GET /mcp-placements?host_id=X
+func (api *MCPServersAPI) handlePlacements(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	hostID := r.URL.Query().Get("host_id")
+	if hostID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "host_id query parameter is required"})
+		return
+	}
+
+	placements, err := api.db.GetPlacementsForHost(hostID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	response := make([]PlacementResponse, len(placements))
+	for i, p := range placements {
+		response[i] = PlacementResponse{
+			ID:       p.ID,
+			ServerID: p.ServerID,
+			HostID:   p.HostID,
+			Enabled:  p.Enabled,
+			Server: MCPServerResponse{
+				ID:        p.Server.ID,
+				Name:      p.Server.Name,
+				Enabled:   p.Server.Enabled,
+				Type:      p.Server.Type,
+				Command:   p.Server.Command,
+				Args:      p.Server.Args,
+				Env:       p.Server.Env,
+				URL:       p.Server.URL,
+				Headers:   p.Server.Headers,
+				OAuth:     p.Server.OAuth,
+				NodeID:    p.Server.NodeID,
+				NodeMode:  p.Server.NodeMode,
+				CreatedAt: p.Server.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+				UpdatedAt: p.Server.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			},
+			CreatedAt: p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			UpdatedAt: p.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		}
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+// handlePlacementAction handles PUT /mcp-placements/{serverID}/{hostID}
+func (api *MCPServersAPI) handlePlacementAction(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	path := strings.TrimPrefix(r.URL.Path, "/mcp-placements/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) < 2 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Both server_id and host_id required in path"})
+		return
+	}
+
+	serverID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid server ID"})
+		return
+	}
+
+	hostID := parts[1]
+
+	switch r.Method {
+	case http.MethodPut:
+		api.updatePlacement(w, r, serverID, hostID)
+	case http.MethodDelete:
+		api.deletePlacement(w, serverID, hostID)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+	}
+}
+
+// updatePlacement updates a placement's enabled state
+func (api *MCPServersAPI) updatePlacement(w http.ResponseWriter, r *http.Request, serverID int64, hostID string) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+		return
+	}
+
+	// Verify server exists
+	server, err := api.db.GetMCPServerByID(serverID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	if server == nil {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Server not found"})
+		return
+	}
+
+	if err := api.db.SetPlacementEnabled(serverID, hostID, body.Enabled); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Return the updated placement
+	placement, err := api.db.GetPlacement(serverID, hostID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(PlacementResponse{
+		ID:        placement.ID,
+		ServerID:  placement.ServerID,
+		HostID:    placement.HostID,
+		Enabled:   placement.Enabled,
+		CreatedAt: placement.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt: placement.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	})
+}
+
+// deletePlacement deletes a placement
+func (api *MCPServersAPI) deletePlacement(w http.ResponseWriter, serverID int64, hostID string) {
+	if err := api.db.DeletePlacement(serverID, hostID); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":    "deleted",
+		"server_id": strconv.FormatInt(serverID, 10),
+		"host_id":   hostID,
+	})
 }

@@ -410,3 +410,58 @@ func scanMCPServerRow(row *sql.Row) (MCPServer, error) {
 
 	return s, nil
 }
+
+// BuiltinServerDefinition defines metadata for a builtin MCP server
+type BuiltinServerDefinition struct {
+	Name string
+	Type string
+}
+
+// EnsureBuiltinServers ensures all builtin MCP servers exist in the database
+// This is idempotent - it will only create servers that don't exist
+// All builtin servers are created as type="builtin" and enabled=false (secure by default)
+func (db *DB) EnsureBuiltinServers() error {
+	builtins := []BuiltinServerDefinition{
+		{Name: "apple", Type: "builtin"},
+		{Name: "google", Type: "builtin"},
+		{Name: "infrastructure", Type: "builtin"},
+		{Name: "discord", Type: "builtin"},
+		{Name: "finance", Type: "builtin"},
+		{Name: "places", Type: "builtin"},
+		{Name: "weather", Type: "builtin"},
+		{Name: "github-bot", Type: "builtin"},
+		{Name: "downloads", Type: "builtin"},
+		{Name: "file_registry", Type: "builtin"},
+	}
+
+	for _, builtin := range builtins {
+		// Check if server already exists
+		existing, err := db.GetMCPServer(builtin.Name)
+		if err != nil {
+			return fmt.Errorf("failed to check for builtin server %s: %w", builtin.Name, err)
+		}
+
+		if existing != nil {
+			// Server already exists, skip
+			continue
+		}
+
+		// Create the builtin server (disabled by default)
+		server := &MCPServer{
+			Name:    builtin.Name,
+			Type:    builtin.Type,
+			Enabled: false, // Secure by default
+		}
+
+		if err := db.CreateMCPServer(server); err != nil {
+			return fmt.Errorf("failed to create builtin server %s: %w", builtin.Name, err)
+		}
+
+		// Create a placement for master node (disabled by default)
+		if err := db.UpsertPlacement(server.ID, "master", false); err != nil {
+			return fmt.Errorf("failed to create master placement for builtin server %s: %w", builtin.Name, err)
+		}
+	}
+
+	return nil
+}

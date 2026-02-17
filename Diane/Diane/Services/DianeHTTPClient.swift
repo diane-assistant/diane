@@ -274,6 +274,42 @@ class DianeHTTPClient: DianeClientProtocol {
         throw DianeHTTPClientError.readOnlyMode
     }
 
+    // MARK: - MCP Placements
+    
+    func getPlacements(hostID: String) async throws -> [MCPServerPlacement] {
+        guard let encodedHostID = hostID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            throw DianeHTTPClientError.invalidURL(path: hostID)
+        }
+        let data = try await request("/mcp-placements?host_id=\(encodedHostID)")
+        return try decodeGo([MCPServerPlacement].self, from: data)
+    }
+    
+    func updatePlacement(serverID: Int64, hostID: String, enabled: Bool) async throws -> MCPServerPlacement {
+        guard let encodedHostID = hostID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            throw DianeHTTPClientError.invalidURL(path: hostID)
+        }
+        
+        let body = UpdatePlacementRequest(enabled: enabled)
+        let bodyData = try JSONEncoder().encode(body)
+        
+        let data = try await requestWithBody("/mcp-placements/\(serverID)/\(encodedHostID)", method: "PUT", body: bodyData)
+        return try decodeGo(MCPServerPlacement.self, from: data)
+    }
+    
+    func deletePlacement(serverID: Int64, hostID: String) async throws {
+        guard let encodedHostID = hostID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            throw DianeHTTPClientError.invalidURL(path: hostID)
+        }
+        _ = try await requestWithBody("/mcp-placements/\(serverID)/\(encodedHostID)", method: "DELETE")
+    }
+    
+    // MARK: - Hosts
+    
+    func getHosts() async throws -> [HostInfo] {
+        let data = try await request("/hosts")
+        return try decode([HostInfo].self, from: data)
+    }
+
     // MARK: - Tools
 
     func getTools() async throws -> [ToolInfo] {

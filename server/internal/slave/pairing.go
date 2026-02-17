@@ -70,11 +70,19 @@ func (ps *PairingService) CreatePairingRequest(hostID string, csrPEM []byte, pla
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	// Check if host already has a pending request
-	for _, req := range ps.pendingRequests {
+	// Check if host already has a pending request and remove it
+	// This allows the host to retry pairing without waiting for expiration
+	for code, req := range ps.pendingRequests {
 		if req.HostID == hostID && time.Now().Before(req.ExpiresAt) {
-			return "", fmt.Errorf("pairing request already pending for host %s", hostID)
+			// Delete old pending request from memory
+			delete(ps.pendingRequests, code)
 		}
+	}
+
+	// Clean up any pending requests for this host in the database
+	if err := ps.db.DeletePendingPairingRequestsForHost(hostID); err != nil {
+		// Log but don't fail - we can continue even if cleanup fails
+		fmt.Printf("Warning: failed to cleanup old pairing requests for host %s: %v\n", hostID, err)
 	}
 
 	// Generate pairing code
@@ -85,7 +93,7 @@ func (ps *PairingService) CreatePairingRequest(hostID string, csrPEM []byte, pla
 
 	// Create request info
 	now := time.Now()
-	expiresAt := now.Add(10 * time.Minute)
+	expiresAt := now.Add(1 * time.Minute)
 
 	req := &PairingRequestInfo{
 		HostID:      hostID,
@@ -147,12 +155,28 @@ func (ps *PairingService) ApprovePairingRequest(hostID, pairingCode string) (cer
 		return nil, nil, fmt.Errorf("failed to get CA cert: %w", err)
 	}
 
-	// Create slave server record in database
+	// Check if slave server record already exists
+	existingSlave, err := ps.db.GetSlaveServerByHostID(hostID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to check for existing slave: %w", err)
+	}
+
+	// Create or update slave server record in database
 	now := time.Now()
 	expiresAt := now.AddDate(0, 0, 365)
-	_, err = ps.db.CreateSlaveServer(hostID, serialNumber, req.Platform, now, expiresAt)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create slave server record: %w", err)
+
+	if existingSlave != nil {
+		// Update existing slave with new credentials
+		err = ps.db.UpdateSlaveServerCredentials(hostID, serialNumber, req.Platform, now, expiresAt)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to update slave server credentials: %w", err)
+		}
+	} else {
+		// Create new slave server record
+		_, err = ps.db.CreateSlaveServer(hostID, serialNumber, req.Platform, now, expiresAt)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create slave server record: %w", err)
+		}
 	}
 
 	// Update request status and store certificate

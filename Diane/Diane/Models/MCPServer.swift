@@ -153,3 +153,50 @@ struct UpdateMCPServerRequest: Codable {
         case nodeMode = "node_mode"
     }
 }
+
+// MARK: - Placement Models
+
+/// Represents a server placement on a specific host
+struct MCPServerPlacement: Codable, Identifiable {
+    let id: Int64
+    let serverID: Int64
+    let hostID: String
+    var enabled: Bool
+    let server: MCPServer?
+    let createdAt: Date
+    let updatedAt: Date
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case serverID = "server_id"
+        case hostID = "host_id"
+        case enabled
+        case server
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+/// Request body for updating a placement
+struct UpdatePlacementRequest: Codable {
+    let enabled: Bool
+}
+
+/// Host/node information
+struct HostInfo: Codable, Identifiable {
+    let id: String
+    let name: String
+    let type: String  // "master" or "slave"
+    let platform: String?
+    let online: Bool
+    
+    /// Whether this is the master node
+    var isMaster: Bool {
+        type == "master"
+    }
+    
+    /// Display name with online status indicator
+    var displayName: String {
+        online ? "\(name) ●" : "\(name) ○"
+    }
+}

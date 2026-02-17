@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/diane-assistant/diane/internal/acp"
@@ -23,6 +24,16 @@ type Client struct {
 // NewClient creates a new API client
 func NewClient() *Client {
 	return NewClientWithTimeout(10 * time.Second)
+}
+
+// NewClientWithHTTPClient creates a client with a custom HTTP client (for testing).
+// The httpClient should have a Transport that routes requests appropriately.
+// All client methods use "http://unix/..." URLs, so the Transport must handle that.
+func NewClientWithHTTPClient(httpClient *http.Client) *Client {
+	return &Client{
+		httpClient: httpClient,
+		socketPath: "",
+	}
 }
 
 // NewClientWithTimeout creates a new API client with a custom timeout
@@ -54,6 +65,99 @@ func (c *Client) Health() error {
 		return fmt.Errorf("unhealthy: status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// --- Usage Tracking Methods ---
+
+// GetUsage retrieves usage records
+func (c *Client) GetUsage(providerID int64, service string, from, to time.Time, limit int) (*UsageResponse, error) {
+	u, _ := url.Parse("http://unix/usage")
+	q := u.Query()
+	if providerID > 0 {
+		q.Set("provider_id", fmt.Sprintf("%d", providerID))
+	}
+	if service != "" {
+		q.Set("service", service)
+	}
+	if !from.IsZero() {
+		q.Set("from", from.Format(time.RFC3339))
+	}
+	if !to.IsZero() {
+		q.Set("to", to.Format(time.RFC3339))
+	}
+	if limit > 0 {
+		q.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	u.RawQuery = q.Encode()
+
+	resp, err := c.httpClient.Get(u.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get usage: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("get usage failed: status %d", resp.StatusCode)
+	}
+
+	var usage UsageResponse
+	if err := json.NewDecoder(resp.Body).Decode(&usage); err != nil {
+		return nil, fmt.Errorf("failed to decode usage: %w", err)
+	}
+
+	return &usage, nil
+}
+
+// GetUsageSummary retrieves aggregated usage stats
+func (c *Client) GetUsageSummary(from, to time.Time) (*UsageSummaryResponse, error) {
+	u, _ := url.Parse("http://unix/usage/summary")
+	q := u.Query()
+	if !from.IsZero() {
+		q.Set("from", from.Format(time.RFC3339))
+	}
+	if !to.IsZero() {
+		q.Set("to", to.Format(time.RFC3339))
+	}
+	u.RawQuery = q.Encode()
+
+	resp, err := c.httpClient.Get(u.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get usage summary: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("get usage summary failed: status %d", resp.StatusCode)
+	}
+
+	var summary UsageSummaryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		return nil, fmt.Errorf("failed to decode usage summary: %w", err)
+	}
+
+	return &summary, nil
+}
+
+// --- Host Management Methods ---
+
+// GetHosts retrieves all connected hosts (master and slaves)
+func (c *Client) GetHosts() ([]HostInfo, error) {
+	resp, err := c.httpClient.Get("http://unix/hosts")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get hosts: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("get hosts failed: status %d", resp.StatusCode)
+	}
+
+	var hosts []HostInfo
+	if err := json.NewDecoder(resp.Body).Decode(&hosts); err != nil {
+		return nil, fmt.Errorf("failed to decode hosts: %w", err)
+	}
+
+	return hosts, nil
 }
 
 // --- Slave Management Methods ---
@@ -333,6 +437,220 @@ func (c *Client) ListContexts() ([]ContextInfo, error) {
 	}
 
 	return contexts, nil
+}
+
+// CreateContext creates a new context
+func (c *Client) CreateContext(name, description string) (*ContextResponse, error) {
+	body := map[string]string{
+		"name":        name,
+		"description": description,
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	resp, err := c.httpClient.Post("http://unix/contexts", "application/json", bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create context: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if errResp.Error != "" {
+			return nil, fmt.Errorf("create context failed: %s", errResp.Error)
+		}
+		return nil, fmt.Errorf("create context failed: status %d", resp.StatusCode)
+	}
+
+	var ctx ContextResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ctx); err != nil {
+		return nil, fmt.Errorf("failed to decode context: %w", err)
+	}
+
+	return &ctx, nil
+}
+
+// DeleteContext deletes a context
+func (c *Client) DeleteContext(name string) error {
+	url := fmt.Sprintf("http://unix/contexts/%s", name)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to delete context: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if errResp.Error != "" {
+			return fmt.Errorf("delete context failed: %s", errResp.Error)
+		}
+		return fmt.Errorf("delete context failed: status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// SetDefaultContext sets the default context
+func (c *Client) SetDefaultContext(name string) error {
+	url := fmt.Sprintf("http://unix/contexts/%s/default", name)
+	resp, err := c.httpClient.Post(url, "application/json", nil)
+	if err != nil {
+		return fmt.Errorf("failed to set default context: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if errResp.Error != "" {
+			return fmt.Errorf("set default context failed: %s", errResp.Error)
+		}
+		return fmt.Errorf("set default context failed: status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// GetContextDetail gets full details for a context
+func (c *Client) GetContextDetail(name string) (*ContextDetailResponse, error) {
+	url := fmt.Sprintf("http://unix/contexts/%s", name)
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get context detail: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("get context detail failed: status %d", resp.StatusCode)
+	}
+
+	var detail ContextDetailResponse
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		return nil, fmt.Errorf("failed to decode context detail: %w", err)
+	}
+
+	return &detail, nil
+}
+
+// SyncContextTools syncs tools for a context
+func (c *Client) SyncContextTools(name string) (int, error) {
+	url := fmt.Sprintf("http://unix/contexts/%s/sync", name)
+	resp, err := c.httpClient.Post(url, "application/json", nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to sync context tools: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("sync context tools failed: status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		ToolsSynced int `json:"tools_synced"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("failed to decode sync result: %w", err)
+	}
+
+	return result.ToolsSynced, nil
+}
+
+// GetAvailableServersForContext returns servers available to be added to a context
+func (c *Client) GetAvailableServersForContext(name string) ([]AvailableServer, error) {
+	url := fmt.Sprintf("http://unix/contexts/%s/available-servers", name)
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get available servers: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("get available servers failed: status %d", resp.StatusCode)
+	}
+
+	var servers []AvailableServer
+	if err := json.NewDecoder(resp.Body).Decode(&servers); err != nil {
+		return nil, fmt.Errorf("failed to decode available servers: %w", err)
+	}
+
+	return servers, nil
+}
+
+// --- Job Management Methods ---
+
+// ListJobs returns all scheduled jobs
+func (c *Client) ListJobs() ([]Job, error) {
+	resp, err := c.httpClient.Get("http://unix/jobs")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list jobs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("list jobs failed: status %d", resp.StatusCode)
+	}
+
+	var jobs []Job
+	if err := json.NewDecoder(resp.Body).Decode(&jobs); err != nil {
+		return nil, fmt.Errorf("failed to decode jobs: %w", err)
+	}
+
+	return jobs, nil
+}
+
+// GetJobLogs returns execution logs for a job
+func (c *Client) GetJobLogs(name string, limit int) ([]JobExecution, error) {
+	url := fmt.Sprintf("http://unix/jobs/logs?limit=%d", limit)
+	if name != "" {
+		url += fmt.Sprintf("&name=%s", name)
+	}
+
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get job logs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("get job logs failed: status %d", resp.StatusCode)
+	}
+
+	var logs []JobExecution
+	if err := json.NewDecoder(resp.Body).Decode(&logs); err != nil {
+		return nil, fmt.Errorf("failed to decode job logs: %w", err)
+	}
+
+	return logs, nil
+}
+
+// ToggleJob enables or disables a job
+func (c *Client) ToggleJob(name string, enabled bool) error {
+	url := fmt.Sprintf("http://unix/jobs/%s/toggle", name)
+	body, _ := json.Marshal(map[string]bool{"enabled": enabled})
+
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to toggle job: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("toggle job failed: status %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 // Doctor runs diagnostic checks and returns a report
@@ -722,6 +1040,78 @@ func (c *Client) CreateMCPServer(req CreateMCPServerRequest) (*MCPServerResponse
 	return &server, nil
 }
 
+// UpdateMCPServerRequest represents a request to update an MCP server
+type UpdateMCPServerRequest struct {
+	Name    *string            `json:"name,omitempty"`
+	Enabled *bool              `json:"enabled,omitempty"`
+	Command *string            `json:"command,omitempty"`
+	Args    *[]string          `json:"args,omitempty"`
+	Env     *map[string]string `json:"env,omitempty"`
+	URL     *string            `json:"url,omitempty"`
+	Headers *map[string]string `json:"headers,omitempty"`
+}
+
+// UpdateMCPServerConfig updates an MCP server configuration
+func (c *Client) UpdateMCPServerConfig(id int64, req UpdateMCPServerRequest) (*MCPServerResponse, error) {
+	url := fmt.Sprintf("http://unix/mcp-servers-config/%d", id)
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update MCP server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("update failed: %s", errResp.Error)
+	}
+
+	var server MCPServerResponse
+	if err := json.NewDecoder(resp.Body).Decode(&server); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &server, nil
+}
+
+// DeleteMCPServerConfig deletes an MCP server configuration
+func (c *Client) DeleteMCPServerConfig(id int64) error {
+	url := fmt.Sprintf("http://unix/mcp-servers-config/%d", id)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to delete MCP server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return fmt.Errorf("delete failed: %s", errResp.Error)
+	}
+
+	return nil
+}
+
 // ListOAuthServers returns all MCP servers with OAuth configuration
 func (c *Client) ListOAuthServers() ([]OAuthServerInfo, error) {
 	resp, err := c.httpClient.Get("http://unix/auth")
@@ -834,4 +1224,238 @@ func (c *Client) LogoutOAuth(serverName string) error {
 	}
 
 	return nil
+}
+
+// --- Provider Management Methods ---
+
+// ListProviders returns all configured providers, optionally filtered by type
+func (c *Client) ListProviders(typeFilter string) ([]ProviderResponse, error) {
+	url := "http://unix/providers"
+	if typeFilter != "" {
+		url += "?type=" + typeFilter
+	}
+
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list providers: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("list providers failed: status %d", resp.StatusCode)
+	}
+
+	var providers []ProviderResponse
+	if err := json.NewDecoder(resp.Body).Decode(&providers); err != nil {
+		return nil, fmt.Errorf("failed to decode providers: %w", err)
+	}
+
+	return providers, nil
+}
+
+// CreateProvider creates a new provider
+func (c *Client) CreateProvider(req CreateProviderRequest) (*ProviderResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	resp, err := c.httpClient.Post("http://unix/providers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create provider: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if errResp.Error != "" {
+			return nil, fmt.Errorf("create provider failed: %s", errResp.Error)
+		}
+		return nil, fmt.Errorf("create provider failed: status %d", resp.StatusCode)
+	}
+
+	var provider ProviderResponse
+	if err := json.NewDecoder(resp.Body).Decode(&provider); err != nil {
+		return nil, fmt.Errorf("failed to decode provider: %w", err)
+	}
+
+	return &provider, nil
+}
+
+// UpdateProvider updates an existing provider
+func (c *Client) UpdateProvider(id int64, req UpdateProviderRequest) (*ProviderResponse, error) {
+	url := fmt.Sprintf("http://unix/providers/%d", id)
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update provider: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("update provider failed: %s", errResp.Error)
+	}
+
+	var provider ProviderResponse
+	if err := json.NewDecoder(resp.Body).Decode(&provider); err != nil {
+		return nil, fmt.Errorf("failed to decode provider: %w", err)
+	}
+
+	return &provider, nil
+}
+
+// DeleteProvider deletes a provider
+func (c *Client) DeleteProvider(id int64) error {
+	url := fmt.Sprintf("http://unix/providers/%d", id)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to delete provider: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("delete provider failed: status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// EnableProvider enables a provider
+func (c *Client) EnableProvider(id int64) (*ProviderResponse, error) {
+	url := fmt.Sprintf("http://unix/providers/%d/enable", id)
+	resp, err := c.httpClient.Post(url, "application/json", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to enable provider: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("enable provider failed: status %d", resp.StatusCode)
+	}
+
+	var provider ProviderResponse
+	if err := json.NewDecoder(resp.Body).Decode(&provider); err != nil {
+		return nil, fmt.Errorf("failed to decode provider: %w", err)
+	}
+
+	return &provider, nil
+}
+
+// DisableProvider disables a provider
+func (c *Client) DisableProvider(id int64) (*ProviderResponse, error) {
+	url := fmt.Sprintf("http://unix/providers/%d/disable", id)
+	resp, err := c.httpClient.Post(url, "application/json", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to disable provider: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("disable provider failed: status %d", resp.StatusCode)
+	}
+
+	var provider ProviderResponse
+	if err := json.NewDecoder(resp.Body).Decode(&provider); err != nil {
+		return nil, fmt.Errorf("failed to decode provider: %w", err)
+	}
+
+	return &provider, nil
+}
+
+// SetDefaultProvider sets a provider as default for its type
+func (c *Client) SetDefaultProvider(id int64) (*ProviderResponse, error) {
+	url := fmt.Sprintf("http://unix/providers/%d/set-default", id)
+	resp, err := c.httpClient.Post(url, "application/json", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set default provider: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("set default provider failed: status %d", resp.StatusCode)
+	}
+
+	var provider ProviderResponse
+	if err := json.NewDecoder(resp.Body).Decode(&provider); err != nil {
+		return nil, fmt.Errorf("failed to decode provider: %w", err)
+	}
+
+	return &provider, nil
+}
+
+// TestProvider tests a provider connection
+func (c *Client) TestProvider(id int64) (*ProviderTestResult, error) {
+	url := fmt.Sprintf("http://unix/providers/%d/test", id)
+	resp, err := c.httpClient.Post(url, "application/json", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to test provider: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result ProviderTestResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode test result: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return &result, fmt.Errorf("test failed: %s", result.Message)
+	}
+
+	return &result, nil
+}
+
+// ListProviderModels lists available models for a provider service
+func (c *Client) ListProviderModels(service, providerType, projectID string) ([]ModelInfo, error) {
+	req := ListModelsRequest{
+		Service:   service,
+		Type:      providerType,
+		ProjectID: projectID,
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	resp, err := c.httpClient.Post("http://unix/providers/models", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list models: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("list models failed: %s", errResp.Error)
+	}
+
+	var result ListModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode models: %w", err)
+	}
+
+	return result.Models, nil
 }

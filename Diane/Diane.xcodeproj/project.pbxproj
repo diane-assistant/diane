@@ -141,6 +141,10 @@
 		1502 /* ServerListPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1602 /* ServerListPopover.swift */; };
 		1503 /* Slave.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1601 /* Slave.swift */; };
 		1504 /* ServerListPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1602 /* ServerListPopover.swift */; };
+		1702 /* MCPRegistryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1700 /* MCPRegistryView.swift */; };
+		1703 /* MCPRegistryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1701 /* MCPRegistryViewModel.swift */; };
+		1704 /* MCPRegistryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1700 /* MCPRegistryView.swift */; };
+		1705 /* MCPRegistryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1701 /* MCPRegistryViewModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -224,6 +228,8 @@
 		1015 /* MacServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacServerSetupView.swift; sourceTree = "<group>"; };
 		1601 /* Slave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Slave.swift; sourceTree = "<group>"; };
 		1602 /* ServerListPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerListPopover.swift; sourceTree = "<group>"; };
+		1700 /* MCPRegistryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPRegistryView.swift; sourceTree = "<group>"; };
+		1701 /* MCPRegistryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPRegistryViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -339,6 +345,7 @@
 				121 /* UsageView.swift */,
 				1015 /* MacServerSetupView.swift */,
 				1602 /* ServerListPopover.swift */,
+				1700 /* MCPRegistryView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -391,6 +398,7 @@
 				138 /* ProvidersViewModel.swift */,
 				140 /* AgentsViewModel.swift */,
 				142 /* ContextsViewModel.swift */,
+				1701 /* MCPRegistryViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -682,6 +690,8 @@
 				1130 /* MacServerSetupView.swift in Sources */,
 				1501 /* Slave.swift in Sources */,
 				1502 /* ServerListPopover.swift in Sources */,
+				1702 /* MCPRegistryView.swift in Sources */,
+				1703 /* MCPRegistryViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -755,6 +765,8 @@
 				161 /* TimeRangePicker.swift in Sources */,
 				1503 /* Slave.swift in Sources */,
 				1504 /* ServerListPopover.swift in Sources */,
+				1704 /* MCPRegistryView.swift in Sources */,
+				1705 /* MCPRegistryViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

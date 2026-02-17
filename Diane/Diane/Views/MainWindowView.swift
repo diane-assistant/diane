@@ -32,6 +32,7 @@ struct MainWindowView: View {
     
     /// Navigation section enum defining all available sections in the sidebar
     enum Section: String, CaseIterable, Identifiable {
+        case mcpRegistry = "MCP Registry"
         case mcpServers = "MCP Servers"
         case scheduler = "Scheduler"
         case agents = "Agents"
@@ -45,6 +46,8 @@ struct MainWindowView: View {
         /// SF Symbol icon for each section
         var icon: String {
             switch self {
+            case .mcpRegistry:
+                return "book.closed"
             case .mcpServers:
                 return "server.rack"
             case .scheduler:
@@ -182,6 +185,8 @@ struct MainWindowView: View {
     @ViewBuilder
     private func detailView(for section: Section?) -> some View {
         switch section {
+        case .mcpRegistry:
+            MCPRegistryView()
         case .mcpServers:
             MCPServersView()
         case .scheduler:
@@ -205,6 +210,7 @@ struct MainWindowView: View {
     /// Returns keyboard shortcut key for each section
     private func shortcutKey(for section: Section) -> KeyEquivalent {
         switch section {
+        case .mcpRegistry: return "0"
         case .mcpServers: return "1"
         case .scheduler: return "2"
         case .agents: return "3"

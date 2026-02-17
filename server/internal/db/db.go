@@ -61,10 +61,21 @@ func New(path string) (*DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	// Set connection pool limits for SQLite (single writer)
+	conn.SetMaxOpenConns(1)
+	conn.SetMaxIdleConns(1)
+	conn.SetConnMaxLifetime(0)
+
 	// Enable foreign keys
 	if _, err := conn.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+	}
+
+	// Set busy timeout (5 seconds) to handle concurrent access
+	if _, err := conn.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to set busy timeout: %w", err)
 	}
 
 	db := &DB{conn: conn, path: path}
@@ -310,6 +321,27 @@ func (db *DB) migrate() error {
 	// Create index for efficient node-based queries
 	db.conn.Exec(`CREATE INDEX IF NOT EXISTS idx_mcp_servers_node ON mcp_servers(node_id, node_mode)`)
 
+	// Migration: Create mcp_server_placements table for host-based MCP deployment
+	db.conn.Exec(`
+		CREATE TABLE IF NOT EXISTS mcp_server_placements (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			server_id INTEGER NOT NULL,
+			host_id TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE,
+			UNIQUE(server_id, host_id)
+		)
+	`)
+	db.conn.Exec(`CREATE INDEX IF NOT EXISTS idx_placements_host ON mcp_server_placements(host_id)`)
+	db.conn.Exec(`CREATE INDEX IF NOT EXISTS idx_placements_server ON mcp_server_placements(server_id)`)
+
+	// Migrate existing node_mode/node_id data to placements
+	if err := db.migratePlacementsFromNodeMode(); err != nil {
+		return fmt.Errorf("failed to migrate placements: %w", err)
+	}
+
 	// Ensure default context exists
 	return db.ensureDefaultContext()
 }
@@ -328,5 +360,115 @@ func (db *DB) ensureDefaultContext() error {
 		`)
 		return err
 	}
+	return nil
+}
+
+// migratePlacementsFromNodeMode migrates existing node_mode/node_id data to the placements table
+func (db *DB) migratePlacementsFromNodeMode() error {
+	// Check if we've already migrated by seeing if placements exist
+	var existingCount int
+	if err := db.conn.QueryRow("SELECT COUNT(*) FROM mcp_server_placements").Scan(&existingCount); err != nil {
+		return fmt.Errorf("failed to check existing placements: %w", err)
+	}
+
+	if existingCount > 0 {
+		// Already migrated, skip
+		return nil
+	}
+
+	// Get all MCP servers with their node configuration
+	rows, err := db.conn.Query(`
+		SELECT id, name, type, enabled, node_mode, node_id 
+		FROM mcp_servers
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query mcp_servers: %w", err)
+	}
+	defer rows.Close()
+
+	type serverInfo struct {
+		id       int64
+		name     string
+		typ      string
+		enabled  bool
+		nodeMode *string
+		nodeID   *string
+	}
+
+	var servers []serverInfo
+	for rows.Next() {
+		var s serverInfo
+		if err := rows.Scan(&s.id, &s.name, &s.typ, &s.enabled, &s.nodeMode, &s.nodeID); err != nil {
+			return fmt.Errorf("failed to scan server row: %w", err)
+		}
+		servers = append(servers, s)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating servers: %w", err)
+	}
+
+	// Migrate each server to placements
+	for _, s := range servers {
+		// Determine which hosts this server should be placed on
+		var hostIDs []string
+
+		// If node_mode is not set or empty, default to "master" for backwards compatibility
+		nodeMode := "master"
+		if s.nodeMode != nil && *s.nodeMode != "" {
+			nodeMode = *s.nodeMode
+		}
+
+		switch nodeMode {
+		case "master":
+			// Place on master node only
+			hostIDs = []string{"master"}
+		case "slave":
+			// Place on specific slave node
+			if s.nodeID != nil && *s.nodeID != "" {
+				hostIDs = []string{*s.nodeID}
+			}
+		case "all":
+			// Place on master and all slaves
+			hostIDs = []string{"master"}
+			// Get all slave IDs
+			slaveRows, err := db.conn.Query("SELECT id FROM slave_servers")
+			if err != nil {
+				return fmt.Errorf("failed to query slaves: %w", err)
+			}
+			for slaveRows.Next() {
+				var slaveID string
+				if err := slaveRows.Scan(&slaveID); err != nil {
+					slaveRows.Close()
+					return fmt.Errorf("failed to scan slave ID: %w", err)
+				}
+				hostIDs = append(hostIDs, slaveID)
+			}
+			slaveRows.Close()
+		}
+
+		// Create placement for each host
+		// Preserve existing enabled state during migration: if the server was enabled,
+		// its master placement should also be enabled to maintain existing behavior.
+		// New servers added later will default to disabled (secure by default).
+		for _, hostID := range hostIDs {
+			enabled := 0
+
+			// Preserve previous enabled state on master during migration
+			if s.enabled && hostID == "master" {
+				enabled = 1
+			}
+
+			_, err := db.conn.Exec(`
+				INSERT INTO mcp_server_placements (server_id, host_id, enabled)
+				VALUES (?, ?, ?)
+			`, s.id, hostID, enabled)
+
+			if err != nil {
+				return fmt.Errorf("failed to create placement for server %s on host %s: %w", s.name, hostID, err)
+			}
+		}
+	}
+
 	return nil
 }
