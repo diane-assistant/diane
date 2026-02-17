@@ -21,6 +21,7 @@ type WSClient struct {
 	name       string
 	hostname   string
 	masterAddr string
+	version    string // Version to send in registration
 	conn       *websocket.Conn
 	connMu     sync.RWMutex
 	connected  bool
@@ -49,11 +50,12 @@ type WSClient struct {
 }
 
 // NewWSClient creates a new WebSocket MCP client
-func NewWSClient(name, hostname, masterAddr, certPath, keyPath, caPath string) (*WSClient, error) {
+func NewWSClient(name, hostname, masterAddr, certPath, keyPath, caPath, version string) (*WSClient, error) {
 	client := &WSClient{
 		name:       name,
 		hostname:   hostname,
 		masterAddr: masterAddr,
+		version:    version,
 		notifyChan: make(chan string, 10),
 		pending:    make(map[interface{}]chan MCPResponse),
 		certPath:   certPath,
@@ -139,7 +141,7 @@ func (c *WSClient) register() error {
 
 	regMsg := slavetypes.RegisterMessage{
 		Hostname: c.hostname,
-		Version:  "1.0.0", // TODO: Get from build info
+		Version:  c.version,
 		Tools:    tools,
 	}
 

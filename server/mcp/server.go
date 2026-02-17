@@ -1666,7 +1666,7 @@ func main() {
 					}
 
 					// Initialize slave client
-					client, err := mcpproxy.NewWSClient("master", hostname, masterAddr, certPath, keyPath, caPath)
+					client, err := mcpproxy.NewWSClient("master", hostname, masterAddr, certPath, keyPath, caPath, Version)
 					if err != nil {
 						slog.Error("Failed to initialize slave client", "error", err, "master", cfg.Slave.MasterURL)
 					} else {
