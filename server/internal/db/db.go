@@ -300,6 +300,9 @@ func (db *DB) migrate() error {
 	// Migration: Add platform column to slave_servers if missing
 	db.conn.Exec(`ALTER TABLE slave_servers ADD COLUMN platform TEXT DEFAULT ''`)
 
+	// Migration: Add version column to slave_servers if missing
+	db.conn.Exec(`ALTER TABLE slave_servers ADD COLUMN version TEXT DEFAULT ''`)
+
 	// Migration: Add node-aware columns to mcp_servers if missing
 	db.conn.Exec(`ALTER TABLE mcp_servers ADD COLUMN node_id TEXT`)
 	db.conn.Exec(`ALTER TABLE mcp_servers ADD COLUMN node_mode TEXT DEFAULT 'master'`)
