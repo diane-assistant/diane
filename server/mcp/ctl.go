@@ -29,7 +29,7 @@ func runCTLCommand(args []string) bool {
 
 	// Delegate to Cobra CLI
 	client := api.NewClient()
-	rootCmd := cli.NewRootCmd(client, Version)
+	rootCmd := cli.NewRootCmd(client, getVersion())
 	rootCmd.SetArgs(args[1:])
 
 	if err := rootCmd.Execute(); err != nil {

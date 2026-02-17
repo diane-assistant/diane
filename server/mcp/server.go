@@ -40,6 +40,16 @@ import (
 // Version is set at build time via ldflags
 var Version = "dev"
 
+// cleanVersion removes the 'v' prefix from version strings
+func cleanVersion(v string) string {
+	return strings.TrimPrefix(v, "v")
+}
+
+// getVersion returns the version without 'v' prefix
+func getVersion() string {
+	return cleanVersion(Version)
+}
+
 var proxy *mcpproxy.Proxy
 var slaveManager *slave.Manager
 var slaveClient *mcpproxy.WSClient // Slave client for connecting to master
@@ -126,7 +136,7 @@ func (d *DianeStatusProvider) GetStatus() api.Status {
 	status := api.Status{
 		Running:       true,
 		PID:           os.Getpid(),
-		Version:       Version,
+		Version:       getVersion(),
 		Platform:      runtime.GOOS,
 		Architecture:  runtime.GOARCH,
 		Hostname:      hostname,
@@ -1512,7 +1522,7 @@ func main() {
 		if (stat.Mode() & os.ModeCharDevice) != 0 {
 			// stdin is a terminal — user ran "diane" interactively
 			client := api.NewClient()
-			rootCmd := cli.NewRootCmd(client, Version)
+			rootCmd := cli.NewRootCmd(client, getVersion())
 			rootCmd.SetArgs([]string{}) // no args = show help
 			rootCmd.Execute()
 			os.Exit(0)
@@ -1551,7 +1561,7 @@ func main() {
 	if serveMode {
 		mode = "serve"
 	}
-	slog.Info("Diane server starting", "version", Version, "pid", os.Getpid(), "mode", mode)
+	slog.Info("Diane server starting", "version", getVersion(), "pid", os.Getpid(), "mode", mode)
 
 	// Single instance check: try to acquire exclusive lock on lock file
 	lockFile := filepath.Join(home, ".diane", "diane.lock")
@@ -1666,7 +1676,7 @@ func main() {
 					}
 
 					// Initialize slave client
-					client, err := mcpproxy.NewWSClient("master", hostname, masterAddr, certPath, keyPath, caPath, Version)
+					client, err := mcpproxy.NewWSClient("master", hostname, masterAddr, certPath, keyPath, caPath, getVersion())
 					if err != nil {
 						slog.Error("Failed to initialize slave client", "error", err, "master", cfg.Slave.MasterURL)
 					} else {
@@ -1951,7 +1961,7 @@ func main() {
 		// --- Serve mode: daemon without stdio ---
 		// Block until SIGINT or SIGTERM for graceful shutdown.
 		slog.Info("Diane running in serve mode (no stdio). Press Ctrl+C to stop.")
-		fmt.Fprintf(os.Stderr, "Diane %s running in serve mode (pid %d)\n", Version, os.Getpid())
+		fmt.Fprintf(os.Stderr, "Diane %s running in serve mode (pid %d)\n", getVersion(), os.Getpid())
 		fmt.Fprintf(os.Stderr, "  Unix socket: ~/.diane/diane.sock\n")
 		fmt.Fprintf(os.Stderr, "  MCP HTTP: http://localhost:8765\n")
 		fmt.Fprintf(os.Stderr, "  MCP HTTPS: https://localhost:8766 (secure/slave)\n")
@@ -2103,7 +2113,7 @@ func initialize() MCPResponse {
 			},
 			"serverInfo": map[string]interface{}{
 				"name":    "diane",
-				"version": Version,
+				"version": getVersion(),
 			},
 		},
 	}
