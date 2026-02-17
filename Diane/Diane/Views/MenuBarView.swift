@@ -383,8 +383,8 @@ struct MasterServerRowWithRestart: View {
                     }
                 }
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(Color.primary.opacity(0.03))
         .cornerRadius(6)
         .onHover { hovering in
@@ -499,8 +499,8 @@ struct SlaveServerRowWithActions: View {
                     }
                 }
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(Color.primary.opacity(0.02))
         .cornerRadius(6)
         .onHover { hovering in
