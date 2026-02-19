@@ -177,6 +177,39 @@ struct DianeApp: App {
                 }
                 .keyboardShortcut("q", modifiers: [.command, .option])
             }
+            
+            // Navigation shortcuts
+            CommandGroup(after: .sidebar) {
+                Button("MCP Servers") {
+                    NotificationCenter.default.post(name: NSNotification.Name("NavigateToSection"), object: "mcpServers")
+                }
+                .keyboardShortcut("1", modifiers: .command)
+                
+                Button("Contexts") {
+                    NotificationCenter.default.post(name: NSNotification.Name("NavigateToSection"), object: "contexts")
+                }
+                .keyboardShortcut("2", modifiers: .command)
+                
+                Button("Scheduler") {
+                    NotificationCenter.default.post(name: NSNotification.Name("NavigateToSection"), object: "scheduler")
+                }
+                .keyboardShortcut("3", modifiers: .command)
+                
+                Button("Agents") {
+                    NotificationCenter.default.post(name: NSNotification.Name("NavigateToSection"), object: "agents")
+                }
+                .keyboardShortcut("4", modifiers: .command)
+                
+                Button("Providers") {
+                    NotificationCenter.default.post(name: NSNotification.Name("NavigateToSection"), object: "providers")
+                }
+                .keyboardShortcut("5", modifiers: .command)
+                
+                Button("Usage") {
+                    NotificationCenter.default.post(name: NSNotification.Name("NavigateToSection"), object: "usage")
+                }
+                .keyboardShortcut("6", modifiers: .command)
+            }
         }
         
         // Menu bar as secondary quick-access

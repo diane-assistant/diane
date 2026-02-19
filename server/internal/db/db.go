@@ -17,6 +17,7 @@ type DB struct {
 }
 
 // Job represents a scheduled job in the database
+// TODO(emergent-migration): Move to Emergent graph object type "job". See db/jobs.go for plan.
 type Job struct {
 	ID         int64
 	Name       string
@@ -30,6 +31,7 @@ type Job struct {
 }
 
 // JobExecution represents a job execution log entry
+// TODO(emergent-migration): Move to Emergent graph object type "job_execution". See db/executions.go for plan.
 type JobExecution struct {
 	ID        int64
 	JobID     int64

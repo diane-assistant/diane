@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -68,7 +69,7 @@ func (api *ContextsAPI) handleContextServers(w http.ResponseWriter, r *http.Requ
 
 // listContextServers returns all servers in a context
 func (api *ContextsAPI) listContextServers(w http.ResponseWriter, contextName string) {
-	servers, err := api.db.GetServersForContext(contextName)
+	servers, err := api.db.GetServersForContext(context.Background(), contextName)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -77,7 +78,7 @@ func (api *ContextsAPI) listContextServers(w http.ResponseWriter, contextName st
 
 	response := make([]ContextServerResponse, len(servers))
 	for i, s := range servers {
-		server, _ := api.db.GetMCPServerByID(s.ServerID)
+		server, _ := api.serverStore.GetMCPServerByID(context.Background(), s.ServerID)
 		serverType := ""
 		if server != nil {
 			serverType = server.Type
@@ -117,7 +118,7 @@ func (api *ContextsAPI) addServerToContext(w http.ResponseWriter, r *http.Reques
 
 	// First, ensure the server exists in the database
 	// If it doesn't exist, try to sync it from the running proxy
-	server, err := api.db.GetMCPServer(body.ServerName)
+	server, err := api.serverStore.GetMCPServer(context.Background(), body.ServerName)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -132,7 +133,7 @@ func (api *ContextsAPI) addServerToContext(w http.ResponseWriter, r *http.Reques
 			Enabled: true,
 			Type:    "builtin",
 		}
-		if err := api.db.CreateMCPServer(server); err != nil {
+		if err := api.serverStore.CreateMCPServer(context.Background(), server); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create server: " + err.Error()})
 			return
@@ -140,7 +141,7 @@ func (api *ContextsAPI) addServerToContext(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Add server to context
-	if err := api.db.AddServerToContext(contextName, body.ServerName, enabled); err != nil {
+	if err := api.db.AddServerToContext(context.Background(), contextName, body.ServerName, enabled); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
@@ -162,7 +163,7 @@ func (api *ContextsAPI) addServerToContext(w http.ResponseWriter, r *http.Reques
 				toolUpdates[toolName] = true // default enabled
 			}
 			// Ignore errors for tool sync - server is already added
-			_ = api.db.BulkSetToolsEnabled(contextName, body.ServerName, toolUpdates)
+			_ = api.db.BulkSetToolsEnabled(context.Background(), contextName, body.ServerName, toolUpdates)
 		}
 	}
 
@@ -187,7 +188,7 @@ func (api *ContextsAPI) handleServerInContext(w http.ResponseWriter, r *http.Req
 			return
 		}
 
-		if err := api.db.SetServerEnabledInContext(contextName, serverName, body.Enabled); err != nil {
+		if err := api.db.SetServerEnabledInContext(context.Background(), contextName, serverName, body.Enabled); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
@@ -200,7 +201,7 @@ func (api *ContextsAPI) handleServerInContext(w http.ResponseWriter, r *http.Req
 		})
 
 	case http.MethodDelete:
-		if err := api.db.RemoveServerFromContext(contextName, serverName); err != nil {
+		if err := api.db.RemoveServerFromContext(context.Background(), contextName, serverName); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
@@ -218,7 +219,7 @@ func (api *ContextsAPI) handleServerInContext(w http.ResponseWriter, r *http.Req
 func (api *ContextsAPI) handleServerTools(w http.ResponseWriter, r *http.Request, contextName, serverName string) {
 	switch r.Method {
 	case http.MethodGet:
-		tools, err := api.db.GetToolsForContextServer(contextName, serverName)
+		tools, err := api.db.GetToolsForContextServer(context.Background(), contextName, serverName)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -242,7 +243,7 @@ func (api *ContextsAPI) handleServerTools(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		if err := api.db.BulkSetToolsEnabled(contextName, serverName, body); err != nil {
+		if err := api.db.BulkSetToolsEnabled(context.Background(), contextName, serverName, body); err != nil {
 			if err == db.ErrServerNotInContext {
 				w.WriteHeader(http.StatusBadRequest)
 			} else {
@@ -277,7 +278,7 @@ func (api *ContextsAPI) handleToolAction(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if err := api.db.SetToolEnabled(contextName, serverName, toolName, body.Enabled); err != nil {
+	if err := api.db.SetToolEnabled(context.Background(), contextName, serverName, toolName, body.Enabled); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return

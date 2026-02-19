@@ -22,6 +22,9 @@ final class MCPRegistryViewModel {
     // MARK: - Server List State
 
     var servers: [MCPServer] = []
+    var placements: [MCPServerPlacement] = []
+    var contexts: [Context] = []
+    var contextServers: [String: [ContextServer]] = [:] // contextName -> list of servers
     var selectedServer: MCPServer?
     var isLoading = true
     var error: String?
@@ -104,7 +107,25 @@ final class MCPRegistryViewModel {
         error = nil
 
         do {
-            servers = try await client.getMCPServerConfigs()
+            async let fetchedServers = client.getMCPServerConfigs()
+            async let fetchedPlacements = client.getPlacements(hostID: "master")
+            async let fetchedContexts = client.getContexts()
+            
+            let (s, p, c) = try await (fetchedServers, fetchedPlacements, fetchedContexts)
+            
+            servers = s
+            placements = p
+            contexts = c
+            
+            // Load context servers for each context
+            var contextServerMap: [String: [ContextServer]] = [:]
+            for context in c {
+                if let servers = try? await client.getContextServers(contextName: context.name) {
+                    contextServerMap[context.name] = servers
+                }
+            }
+            contextServers = contextServerMap
+            
             // Select first server if none selected
             if selectedServer == nil, let first = servers.first {
                 selectedServer = first
@@ -116,6 +137,71 @@ final class MCPRegistryViewModel {
         isLoading = false
     }
 
+    /// Toggle a server's enabled state on the master node.
+    func toggleServer(_ server: MCPServer, enabled: Bool) async {
+        // Optimistic update
+        let oldEnabled = isServerEnabled(server)
+        updateLocalPlacement(serverID: server.id, enabled: enabled)
+        
+        do {
+            let updatedPlacement = try await client.updatePlacement(
+                serverID: server.id,
+                hostID: "master",
+                enabled: enabled
+            )
+            
+            // Confirm update
+            if let index = placements.firstIndex(where: { $0.serverID == server.id }) {
+                placements[index] = updatedPlacement
+            } else {
+                placements.append(updatedPlacement)
+            }
+            
+            // If enabling, also ensure it's in the default context
+            if enabled {
+                try? await client.addServerToContext(contextName: "personal", serverName: server.name, enabled: true)
+            }
+        } catch {
+            // Revert on error
+            updateLocalPlacement(serverID: server.id, enabled: oldEnabled)
+            self.error = error.localizedDescription
+        }
+    }
+    
+    private func updateLocalPlacement(serverID: Int64, enabled: Bool) {
+        if let index = placements.firstIndex(where: { $0.serverID == serverID }) {
+            var p = placements[index]
+            p.enabled = enabled
+            placements[index] = p
+        }
+    }
+    
+    func isServerEnabled(_ server: MCPServer) -> Bool {
+        placements.first(where: { $0.serverID == server.id })?.enabled ?? false
+    }
+    
+    /// Get all contexts that contain this server
+    func contextsForServer(_ server: MCPServer) -> [String] {
+        var result: [String] = []
+        for (contextName, servers) in contextServers {
+            if servers.contains(where: { $0.name == server.name }) {
+                result.append(contextName)
+            }
+        }
+        return result.sorted()
+    }
+    
+    /// Get all nodes (placements) where this server is deployed
+    /// Currently only shows "master" since we only load master placements
+    func nodesForServer(_ server: MCPServer) -> [String] {
+        // For now we only show master node
+        // In future when multi-node is implemented, we'd fetch all placements
+        if isServerEnabled(server) {
+            return ["master"]
+        }
+        return []
+    }
+
     func createServer() async {
         isCreating = true
         createError = nil
@@ -124,28 +210,36 @@ final class MCPRegistryViewModel {
             let command = newServerType == .stdio ? (newServerCommand.isEmpty ? nil : newServerCommand) : nil
             let url = (newServerType == .sse || newServerType == .http) ? (newServerURL.isEmpty ? nil : newServerURL) : nil
 
-            // Note: New servers are created globally disabled (enabled=false)
-            // and with no placements. Users must explicitly enable them per-node
-            // in the MCP Servers view.
+            // Create the server definition
             let server = try await client.createMCPServerConfig(
                 name: newServerName,
                 type: newServerType.rawValue,
-                enabled: false, // Secure by default
+                enabled: false, // Global flag ignored in favor of placements
                 command: command,
                 args: newServerArgs.isEmpty ? nil : newServerArgs,
                 env: newServerEnv.isEmpty ? nil : newServerEnv,
                 url: url,
                 headers: newServerHeaders.isEmpty ? nil : newServerHeaders,
                 oauth: newServerOAuth,
-                nodeID: nil, // Deprecated - use placements instead
-                nodeMode: nil // Deprecated - use placements instead
+                nodeID: nil,
+                nodeMode: nil
             )
 
             servers.append(server)
             selectedServer = server
-            showCreateServer = false
+            
+            // Automatically enable on master
+            let placement = try await client.updatePlacement(
+                serverID: server.id,
+                hostID: "master",
+                enabled: true
+            )
+            placements.append(placement)
+            
+            // Automatically add to default context
+            try await client.addServerToContext(contextName: "personal", serverName: server.name, enabled: true)
 
-            // Reset form
+            showCreateServer = false
             resetCreateForm()
         } catch {
             createError = error.localizedDescription

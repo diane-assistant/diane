@@ -13,6 +13,7 @@ import (
 
 	"github.com/diane-assistant/diane/internal/acp"
 	"github.com/diane-assistant/diane/internal/db"
+	"github.com/diane-assistant/diane/internal/store"
 )
 
 // Client is a client for the Diane API
@@ -1458,4 +1459,181 @@ func (c *Client) ListProviderModels(service, providerType, projectID string) ([]
 	}
 
 	return result.Models, nil
+}
+
+// ---------------------------------------------------------------------------
+// Session management
+// ---------------------------------------------------------------------------
+
+// StartSession starts a new multi-turn session with an agent.
+func (c *Client) StartSession(agentName, workDir, title string) (*acp.SessionInfo, error) {
+	url := fmt.Sprintf("http://unix/agents/%s/sessions", agentName)
+	body, _ := json.Marshal(map[string]string{"workdir": workDir, "title": title})
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to start session: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("start session failed: %s", errResp.Error)
+	}
+
+	var info acp.SessionInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("failed to decode session info: %w", err)
+	}
+	return &info, nil
+}
+
+// ListSessions lists sessions for an agent (or all agents if agentName is empty).
+func (c *Client) ListSessions(agentName, status string) ([]*acp.SessionInfo, error) {
+	var url string
+	if agentName != "" {
+		url = fmt.Sprintf("http://unix/agents/%s/sessions", agentName)
+		if status != "" {
+			url += "?status=" + status
+		}
+	} else {
+		url = "http://unix/sessions"
+		if status != "" {
+			url += "?status=" + status
+		}
+	}
+
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sessions: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("list sessions failed: %d", resp.StatusCode)
+	}
+
+	var sessions []*acp.SessionInfo
+	if err := json.NewDecoder(resp.Body).Decode(&sessions); err != nil {
+		return nil, fmt.Errorf("failed to decode sessions: %w", err)
+	}
+	return sessions, nil
+}
+
+// GetSessionInfo returns info about a specific session.
+func (c *Client) GetSessionInfo(agentName, sessionID string) (*acp.SessionInfo, error) {
+	url := fmt.Sprintf("http://unix/agents/%s/sessions/%s", agentName, sessionID)
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("get session failed: %s", errResp.Error)
+	}
+
+	var info acp.SessionInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("failed to decode session info: %w", err)
+	}
+	return &info, nil
+}
+
+// PromptSession sends a prompt to an existing session.
+func (c *Client) PromptSession(agentName, sessionID, prompt string) (*acp.Run, error) {
+	url := fmt.Sprintf("http://unix/agents/%s/sessions/%s/prompt", agentName, sessionID)
+	body, _ := json.Marshal(map[string]string{"prompt": prompt})
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to prompt session: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("prompt session failed: %s", errResp.Error)
+	}
+
+	var run acp.Run
+	if err := json.NewDecoder(resp.Body).Decode(&run); err != nil {
+		return nil, fmt.Errorf("failed to decode prompt result: %w", err)
+	}
+	return &run, nil
+}
+
+// SetSessionConfig sets a configuration option on a live session.
+func (c *Client) SetSessionConfig(agentName, sessionID, configID, value string) error {
+	url := fmt.Sprintf("http://unix/agents/%s/sessions/%s/config", agentName, sessionID)
+	body, _ := json.Marshal(map[string]string{"config_id": configID, "value": value})
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to set session config: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return fmt.Errorf("set session config failed: %s", errResp.Error)
+	}
+	return nil
+}
+
+// CloseSession closes a session.
+func (c *Client) CloseSession(agentName, sessionID string) error {
+	url := fmt.Sprintf("http://unix/agents/%s/sessions/%s", agentName, sessionID)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to close session: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return fmt.Errorf("close session failed: %s", errResp.Error)
+	}
+	return nil
+}
+
+// GetSessionMessages returns the full message history for a session.
+func (c *Client) GetSessionMessages(agentName, sessionID string) ([]*store.ACPSessionMessage, error) {
+	url := fmt.Sprintf("http://unix/agents/%s/sessions/%s/messages", agentName, sessionID)
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session messages: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("get session messages failed: %s", errResp.Error)
+	}
+
+	var messages []*store.ACPSessionMessage
+	if err := json.NewDecoder(resp.Body).Decode(&messages); err != nil {
+		return nil, fmt.Errorf("failed to decode messages: %w", err)
+	}
+	return messages, nil
 }

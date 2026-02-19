@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,9 +19,11 @@ import (
 	"github.com/diane-assistant/diane/internal/cli"
 	"github.com/diane-assistant/diane/internal/config"
 	"github.com/diane-assistant/diane/internal/db"
+	"github.com/diane-assistant/diane/internal/emergent"
 	"github.com/diane-assistant/diane/internal/logger"
 	"github.com/diane-assistant/diane/internal/mcpproxy"
 	"github.com/diane-assistant/diane/internal/slave"
+	"github.com/diane-assistant/diane/internal/store"
 	"github.com/diane-assistant/diane/mcp/tools"
 	"github.com/diane-assistant/diane/mcp/tools/apple"
 	"github.com/diane-assistant/diane/mcp/tools/downloads"
@@ -67,15 +70,18 @@ var downloadsProvider *downloads.Provider // File download tools
 var filesProvider *files.Provider         // File index tools
 var apiServer *api.Server
 var mcpHTTPServer *api.MCPHTTPServer
-var database *db.DB // Shared database instance
+var database *db.DB                 // Shared database instance
+var contextStore store.ContextStore // Shared Emergent-backed context store
 var startTime time.Time
 
-// DBConfigProvider implements mcpproxy.ConfigProvider, loading server configs from the database
+// DBConfigProvider implements mcpproxy.ConfigProvider, loading server configs from the Emergent-backed store
 type DBConfigProvider struct {
-	db *db.DB
+	store store.MCPServerStore
 }
 
 func (p *DBConfigProvider) LoadMCPServerConfigs() ([]mcpproxy.ServerConfig, error) {
+	ctx := context.Background()
+
 	// Determine which host we're running on
 	hostID := "master"
 	if slaveConfig.Enabled && slaveConfig.MasterURL != "" {
@@ -86,7 +92,7 @@ func (p *DBConfigProvider) LoadMCPServerConfigs() ([]mcpproxy.ServerConfig, erro
 	}
 
 	// Get all enabled servers for this host (respects global enabled flag + placement enabled flag)
-	servers, err := p.db.GetEnabledServersForHost(hostID)
+	servers, err := p.store.GetEnabledServersForHost(ctx, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -345,6 +351,12 @@ func (d *DianeStatusProvider) ReloadConfig() error {
 	}
 	return proxy.Reload()
 }
+
+// TODO(emergent-migration): GetJobs, GetJobLogs, ToggleJob, GetAgentLogs, and CreateAgentLog
+// all use direct *db.DB calls (ListJobs, GetJobByName, ListJobExecutions, UpdateJob,
+// ListAgentLogs, CreateAgentLog). These should be routed through store.JobStore,
+// store.ExecutionStore, and store.AgentStore interfaces once those are implemented.
+// See db/jobs.go, db/executions.go, and db/agents.go for the migration plan.
 
 // GetJobs returns all scheduled jobs
 func (d *DianeStatusProvider) GetJobs() ([]api.Job, error) {
@@ -822,6 +834,60 @@ func (d *DianeStatusProvider) GetAllTools() []api.ToolInfo {
 	return tools
 }
 
+// ListTools implements mcpproxy.ToolProvider for the slave client
+func (d *DianeStatusProvider) ListTools() ([]map[string]interface{}, error) {
+	tools := d.GetAllTools()
+	result := make([]map[string]interface{}, 0, len(tools))
+	for _, tool := range tools {
+		// Filter out tools from external MCP servers (proxy) to avoid cycles
+		// We only want to share local tools with the master
+		if !tool.Builtin {
+			continue
+		}
+
+		result = append(result, map[string]interface{}{
+			"name":        tool.Name,
+			"description": tool.Description,
+			"inputSchema": tool.InputSchema,
+		})
+	}
+	return result, nil
+}
+
+// CallTool implements mcpproxy.ToolProvider for the slave client
+func (d *DianeStatusProvider) CallTool(name string, arguments map[string]interface{}) (map[string]interface{}, error) {
+	// Construct the params object expected by callTool
+	params := map[string]interface{}{
+		"name":      name,
+		"arguments": arguments,
+	}
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal params: %w", err)
+	}
+
+	// Call the local tool handler
+	resp := callTool(paramsBytes)
+
+	// Check for errors
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s", resp.Error.Message)
+	}
+
+	// Cast result to map[string]interface{}
+	if result, ok := resp.Result.(map[string]interface{}); ok {
+		return result, nil
+	}
+
+	// If result is nil or not a map, return empty map (success but no data)
+	if resp.Result == nil {
+		return map[string]interface{}{}, nil
+	}
+
+	// Wrap other types
+	return map[string]interface{}{"result": resp.Result}, nil
+}
+
 // GetAllPrompts returns all prompts from builtin and external MCP servers
 func (d *DianeStatusProvider) GetAllPrompts() []api.PromptInfo {
 	var prompts []api.PromptInfo
@@ -1087,15 +1153,13 @@ func (d *DianeStatusProvider) GetToolsForContext(contextName string) []api.ToolI
 		return d.GetAllTools()
 	}
 
-	// Get context filter from database
-	database, err := getDB()
-	if err != nil {
-		slog.Warn("Failed to get database for context filtering", "error", err)
+	// Get context filter from Emergent store
+	if contextStore == nil {
+		slog.Warn("Context store not initialized for context filtering")
 		return []api.ToolInfo{} // Fail closed
 	}
-	defer database.Close()
 
-	contextFilter := db.NewContextFilterAdapter(database)
+	contextFilter := store.NewContextFilterAdapter(contextStore)
 
 	var tools []api.ToolInfo
 
@@ -1578,26 +1642,12 @@ func main() {
 	}
 	defer os.Remove(pidFile)
 
-	// Initialize database (shared across proxy, API, and other subsystems)
+	// Initialize database (shared across jobs, agents, and legacy migration)
 	dbPath := filepath.Join(home, ".diane", "cron.db")
 	var err2 error
 	database, err2 = db.New(dbPath)
 	if err2 != nil {
 		slog.Warn("Failed to initialize database", "error", err2)
-	} else {
-		// One-time migration: import servers from mcp-servers.json if DB is empty
-		jsonPath := filepath.Join(home, ".diane", "mcp-servers.json")
-		imported, err := database.MigrateFromJSON(jsonPath)
-		if err != nil {
-			slog.Warn("Failed to migrate MCP servers from JSON", "error", err)
-		} else if imported > 0 {
-			slog.Info("Migrated MCP servers from JSON to database", "count", imported)
-		}
-
-		// Ensure all builtin servers exist in database (idempotent)
-		if err := database.EnsureBuiltinServers(); err != nil {
-			slog.Warn("Failed to ensure builtin servers in database", "error", err)
-		}
 	}
 	defer func() {
 		if database != nil {
@@ -1605,15 +1655,43 @@ func main() {
 		}
 	}()
 
-	// Initialize MCP proxy from database
-	if database != nil {
-		provider := &DBConfigProvider{db: database}
+	// Initialize Emergent-backed stores
+	var slaveStore store.SlaveStore
+	var mcpServerStore store.MCPServerStore
+	emergentClient, err := emergent.GetClient()
+	if err != nil {
+		slog.Warn("Emergent not configured — stores unavailable", "error", err)
+	} else {
+		slaveStore = store.NewEmergentSlaveStore(emergentClient)
+		contextStore = store.NewEmergentContextStore(emergentClient)
+		mcpServerStore = store.NewEmergentMCPServerStore(emergentClient)
+		slog.Info("Emergent stores initialized (slave, context, mcp_server)")
+	}
+
+	// One-time migration: copy MCP servers, placements, contexts, and tool
+	// overrides from SQLite to Emergent. Skipped if Emergent already has data.
+	if database != nil && mcpServerStore != nil && contextStore != nil {
+		if err := store.MigrateFromSQLite(database, mcpServerStore, contextStore); err != nil {
+			slog.Warn("SQLite to Emergent migration failed", "error", err)
+		}
+	}
+
+	// Ensure all builtin servers exist in Emergent (idempotent)
+	if mcpServerStore != nil {
+		if err := mcpServerStore.EnsureBuiltinServers(context.Background()); err != nil {
+			slog.Warn("Failed to ensure builtin servers in Emergent", "error", err)
+		}
+	}
+
+	// Initialize MCP proxy from Emergent-backed store
+	if mcpServerStore != nil {
+		provider := &DBConfigProvider{store: mcpServerStore}
 		proxy, err = mcpproxy.NewProxy(provider)
 		if err != nil {
 			slog.Warn("Failed to initialize MCP proxy", "error", err)
 		}
 	} else {
-		slog.Warn("MCP proxy not available: database not initialized")
+		slog.Warn("MCP proxy not available: MCP server store not initialized")
 	}
 	defer func() {
 		if proxy != nil {
@@ -1622,13 +1700,13 @@ func main() {
 	}()
 
 	// Initialize slave manager (for master/slave pairing)
-	if database != nil && proxy != nil {
+	if slaveStore != nil && proxy != nil {
 		dianeDir := filepath.Join(home, ".diane")
 		ca, err := slave.NewCertificateAuthority(dianeDir)
 		if err != nil {
 			slog.Warn("Failed to initialize CA for slave manager", "error", err)
 		} else {
-			slaveManager, err = slave.NewManager(database, proxy, ca)
+			slaveManager, err = slave.NewManager(slaveStore, proxy, ca)
 			if err != nil {
 				slog.Warn("Failed to initialize slave manager", "error", err)
 			} else {
@@ -1649,61 +1727,15 @@ func main() {
 
 	// Initialize slave client (for connecting to a master as a slave)
 	slaveConfig = cfg.Slave // Store config globally
-	if cfg.Slave.Enabled && cfg.Slave.MasterURL != "" {
-		dianeDir := filepath.Join(home, ".diane")
-		certPath := filepath.Join(dianeDir, "slave-cert.pem")
-		keyPath := filepath.Join(dianeDir, "slave-key.pem")
-		caPath := filepath.Join(dianeDir, "slave-ca-cert.pem")
-
-		// Check if certificates exist
-		if _, err := os.Stat(certPath); err == nil {
-			if _, err := os.Stat(keyPath); err == nil {
-				if _, err := os.Stat(caPath); err == nil {
-					// Get hostname
-					hostname, err := os.Hostname()
-					if err != nil {
-						slog.Warn("Failed to get hostname for slave client", "error", err)
-						hostname = "unknown"
-					}
-
-					// Parse master URL to extract host:port
-					// Expected format: https://host:port or wss://host:port
-					masterAddr := cfg.Slave.MasterURL
-					if strings.HasPrefix(masterAddr, "https://") {
-						masterAddr = strings.TrimPrefix(masterAddr, "https://")
-					} else if strings.HasPrefix(masterAddr, "wss://") {
-						masterAddr = strings.TrimPrefix(masterAddr, "wss://")
-					}
-
-					// Initialize slave client
-					client, err := mcpproxy.NewWSClient("master", hostname, masterAddr, certPath, keyPath, caPath, getVersion())
-					if err != nil {
-						slog.Error("Failed to initialize slave client", "error", err, "master", cfg.Slave.MasterURL)
-					} else {
-						slaveClient = client
-						slog.Info("Slave client initialized and connected to master", "master", cfg.Slave.MasterURL)
-					}
-				} else {
-					slog.Warn("Slave certificates not found, cannot connect to master", "ca_path", caPath)
-				}
-			} else {
-				slog.Warn("Slave certificates not found, cannot connect to master", "key_path", keyPath)
-			}
-		} else {
-			slog.Warn("Slave certificates not found, cannot connect to master", "cert_path", certPath)
-		}
-	}
-	defer func() {
-		if slaveClient != nil {
-			slaveClient.Close()
-		}
-	}()
+	// Slave client will be initialized after providers are loaded (to sync tools)
 
 	// Helper function to check if a builtin server should be enabled
 	isBuiltinEnabled := func(serverName string) bool {
-		if database == nil {
+		if mcpServerStore == nil {
 			return false
 		}
+
+		ctx := context.Background()
 
 		// Determine which host we're running on
 		hostID := "master"
@@ -1714,14 +1746,14 @@ func main() {
 			}
 		}
 
-		// Get the server from database
-		server, err := database.GetMCPServer(serverName)
+		// Get the server from Emergent store
+		server, err := mcpServerStore.GetMCPServer(ctx, serverName)
 		if err != nil || server == nil {
-			return false // Server doesn't exist in DB yet, don't enable
+			return false // Server doesn't exist yet, don't enable
 		}
 
 		// Check if enabled on this host
-		enabled, err := database.IsServerEnabledOnHost(server.ID, hostID)
+		enabled, err := mcpServerStore.IsServerEnabledOnHost(ctx, server.ID, hostID)
 		if err != nil {
 			return false
 		}
@@ -1869,6 +1901,58 @@ func main() {
 
 	// Start the Unix socket API server for companion app
 	statusProvider := &DianeStatusProvider{}
+
+	// Initialize slave client (now that providers are ready)
+	if cfg.Slave.Enabled && cfg.Slave.MasterURL != "" {
+		dianeDir := filepath.Join(home, ".diane")
+		certPath := filepath.Join(dianeDir, "slave-cert.pem")
+		keyPath := filepath.Join(dianeDir, "slave-key.pem")
+		caPath := filepath.Join(dianeDir, "slave-ca-cert.pem")
+
+		// Check if certificates exist
+		if _, err := os.Stat(certPath); err == nil {
+			if _, err := os.Stat(keyPath); err == nil {
+				if _, err := os.Stat(caPath); err == nil {
+					// Get hostname
+					hostname, err := os.Hostname()
+					if err != nil {
+						slog.Warn("Failed to get hostname for slave client", "error", err)
+						hostname = "unknown"
+					}
+
+					// Parse master URL to extract host:port
+					// Expected format: https://host:port or wss://host:port
+					masterAddr := cfg.Slave.MasterURL
+					if strings.HasPrefix(masterAddr, "https://") {
+						masterAddr = strings.TrimPrefix(masterAddr, "https://")
+					} else if strings.HasPrefix(masterAddr, "wss://") {
+						masterAddr = strings.TrimPrefix(masterAddr, "wss://")
+					}
+
+					// Initialize slave client
+					client, err := mcpproxy.NewWSClient("master", hostname, masterAddr, certPath, keyPath, caPath, getVersion(), statusProvider)
+					if err != nil {
+						slog.Error("Failed to initialize slave client", "error", err, "master", cfg.Slave.MasterURL)
+					} else {
+						slaveClient = client
+						slog.Info("Slave client initialized and connected to master", "master", cfg.Slave.MasterURL)
+					}
+				} else {
+					slog.Warn("Slave certificates not found, cannot connect to master", "ca_path", caPath)
+				}
+			} else {
+				slog.Warn("Slave certificates not found, cannot connect to master", "key_path", keyPath)
+			}
+		} else {
+			slog.Warn("Slave certificates not found, cannot connect to master", "cert_path", certPath)
+		}
+	}
+	defer func() {
+		if slaveClient != nil {
+			slaveClient.Close()
+		}
+	}()
+
 	apiServer, err = api.NewServer(statusProvider, database, cfg, slaveManager)
 	if err != nil {
 		slog.Warn("Failed to create API server", "error", err)
@@ -2240,6 +2324,91 @@ func listTools() MCPResponse {
 				"properties": map[string]interface{}{},
 			},
 		},
+		{
+			"name":        "agent_session_start",
+			"description": "Start a new multi-turn session with an ACP agent. The agent subprocess stays alive between prompts.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent": map[string]interface{}{
+						"type":        "string",
+						"description": "Name of the ACP agent to start a session with",
+					},
+					"workdir": map[string]interface{}{
+						"type":        "string",
+						"description": "Working directory for the agent (optional, uses agent default)",
+					},
+					"title": map[string]interface{}{
+						"type":        "string",
+						"description": "Human-readable title for this session (optional)",
+					},
+				},
+				"required": []string{"agent"},
+			},
+		},
+		{
+			"name":        "agent_session_prompt",
+			"description": "Send a prompt to an existing agent session and get the response. The session maintains conversation context across prompts.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Session ID returned from agent_session_start",
+					},
+					"prompt": map[string]interface{}{
+						"type":        "string",
+						"description": "The prompt to send to the agent",
+					},
+				},
+				"required": []string{"session_id", "prompt"},
+			},
+		},
+		{
+			"name":        "agent_session_list",
+			"description": "List agent sessions, optionally filtered by agent name or status (active, idle, closed, disconnected)",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent": map[string]interface{}{
+						"type":        "string",
+						"description": "Filter by agent name (optional)",
+					},
+					"status": map[string]interface{}{
+						"type":        "string",
+						"description": "Filter by status: active, idle, closed, disconnected (optional)",
+					},
+				},
+			},
+		},
+		{
+			"name":        "agent_session_close",
+			"description": "Close an agent session. If this is the last session for the agent, the subprocess is terminated.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Session ID to close",
+					},
+				},
+				"required": []string{"session_id"},
+			},
+		},
+		{
+			"name":        "agent_session_messages",
+			"description": "Get the full message history for an agent session, including prompts, responses, tool calls, and timing.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Session ID to get messages for",
+					},
+				},
+				"required": []string{"session_id"},
+			},
+		},
 	}
 
 	// Add Apple tools (reminders + contacts)
@@ -2403,6 +2572,16 @@ func callTool(params json.RawMessage) MCPResponse {
 		return getLogs(call.Arguments)
 	case "server_status":
 		return getStatus()
+	case "agent_session_start":
+		return agentSessionStart(call.Arguments)
+	case "agent_session_prompt":
+		return agentSessionPrompt(call.Arguments)
+	case "agent_session_list":
+		return agentSessionList(call.Arguments)
+	case "agent_session_close":
+		return agentSessionClose(call.Arguments)
+	case "agent_session_messages":
+		return agentSessionMessages(call.Arguments)
 	default:
 		// Try Apple tools first
 		if appleProvider != nil && appleProvider.HasTool(call.Name) {
@@ -2562,19 +2741,17 @@ func callTool(params json.RawMessage) MCPResponse {
 
 // listToolsForContext returns tools filtered by context
 func listToolsForContext(contextName string) MCPResponse {
-	// Get context filter from database
-	database, err := getDB()
-	if err != nil {
-		slog.Warn("Failed to get database for context filtering", "error", err)
+	// Get context filter from Emergent store
+	if contextStore == nil {
+		slog.Warn("Context store not initialized for context filtering")
 		return MCPResponse{
 			Result: map[string]interface{}{
 				"tools": []map[string]interface{}{},
 			},
 		} // Fail closed
 	}
-	defer database.Close()
 
-	contextFilter := db.NewContextFilterAdapter(database)
+	contextFilter := store.NewContextFilterAdapter(contextStore)
 
 	var tools []map[string]interface{}
 
@@ -2632,10 +2809,52 @@ func listToolsForContext(contextName string) MCPResponse {
 			},
 		}},
 		{"server_status", "Get Diane server status and statistics", map[string]interface{}{"type": "object"}},
+		{"agent_session_start", "Start a new multi-turn session with an ACP agent", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"agent":   map[string]interface{}{"type": "string", "description": "Name of the ACP agent"},
+				"workdir": map[string]interface{}{"type": "string", "description": "Working directory (optional)"},
+				"title":   map[string]interface{}{"type": "string", "description": "Session title (optional)"},
+			},
+			"required": []string{"agent"},
+		}},
+		{"agent_session_prompt", "Send a prompt to an existing agent session", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"session_id": map[string]interface{}{"type": "string", "description": "Session ID"},
+				"prompt":     map[string]interface{}{"type": "string", "description": "The prompt to send"},
+			},
+			"required": []string{"session_id", "prompt"},
+		}},
+		{"agent_session_list", "List agent sessions with optional filters", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"agent":  map[string]interface{}{"type": "string", "description": "Filter by agent name"},
+				"status": map[string]interface{}{"type": "string", "description": "Filter by status"},
+			},
+		}},
+		{"agent_session_close", "Close an agent session", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"session_id": map[string]interface{}{"type": "string", "description": "Session ID to close"},
+			},
+			"required": []string{"session_id"},
+		}},
+		{"agent_session_messages", "Get message history for an agent session", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"session_id": map[string]interface{}{"type": "string", "description": "Session ID"},
+			},
+			"required": []string{"session_id"},
+		}},
 	}
 
 	for _, t := range builtinTools {
-		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, "jobs", t.name); enabled {
+		serverName := "jobs"
+		if strings.HasPrefix(t.name, "agent_session_") {
+			serverName = "agents"
+		}
+		if enabled, _ := contextFilter.IsToolEnabledInContext(contextName, serverName, t.name); enabled {
 			tools = append(tools, map[string]interface{}{
 				"name":        t.name,
 				"description": t.desc,
@@ -2825,32 +3044,35 @@ func callToolForContext(params json.RawMessage, contextName string) MCPResponse 
 		}
 	}
 
-	// Get context filter from database
-	database, err := getDB()
-	if err != nil {
-		slog.Warn("Failed to get database for context validation", "error", err)
+	// Get context filter from Emergent store
+	if contextStore == nil {
+		slog.Warn("Context store not initialized for context validation")
 		return MCPResponse{
 			Error: &MCPError{
 				Code:    -32000,
-				Message: fmt.Sprintf("Context validation failed: %v", err),
+				Message: "Context validation failed: context store not initialized",
 			},
 		} // Fail closed
 	}
-	defer database.Close()
 
-	contextFilter := db.NewContextFilterAdapter(database)
+	contextFilter := store.NewContextFilterAdapter(contextStore)
 
 	// Check if tool is enabled in context for built-in tools
 	isBuiltinTool := map[string]string{
-		"job_list":      "jobs",
-		"job_add":       "jobs",
-		"job_enable":    "jobs",
-		"job_disable":   "jobs",
-		"job_delete":    "jobs",
-		"job_pause":     "jobs",
-		"job_resume":    "jobs",
-		"job_logs":      "jobs",
-		"server_status": "jobs",
+		"job_list":               "jobs",
+		"job_add":                "jobs",
+		"job_enable":             "jobs",
+		"job_disable":            "jobs",
+		"job_delete":             "jobs",
+		"job_pause":              "jobs",
+		"job_resume":             "jobs",
+		"job_logs":               "jobs",
+		"server_status":          "jobs",
+		"agent_session_start":    "agents",
+		"agent_session_prompt":   "agents",
+		"agent_session_list":     "agents",
+		"agent_session_close":    "agents",
+		"agent_session_messages": "agents",
 	}
 
 	if serverName, isBuiltin := isBuiltinTool[call.Name]; isBuiltin {
@@ -2882,6 +3104,16 @@ func callToolForContext(params json.RawMessage, contextName string) MCPResponse 
 			return getLogs(call.Arguments)
 		case "server_status":
 			return getStatus()
+		case "agent_session_start":
+			return agentSessionStart(call.Arguments)
+		case "agent_session_prompt":
+			return agentSessionPrompt(call.Arguments)
+		case "agent_session_list":
+			return agentSessionList(call.Arguments)
+		case "agent_session_close":
+			return agentSessionClose(call.Arguments)
+		case "agent_session_messages":
+			return agentSessionMessages(call.Arguments)
 		}
 	}
 
@@ -3083,19 +3315,17 @@ func callToolForContext(params json.RawMessage, contextName string) MCPResponse 
 // --- Prompts ---
 
 func listPromptsForContext(contextName string) MCPResponse {
-	// Get context filter from database
-	database, err := getDB()
-	if err != nil {
-		slog.Warn("Failed to get database for context filtering", "error", err)
+	// Get context filter from Emergent store
+	if contextStore == nil {
+		slog.Warn("Context store not initialized for context filtering")
 		return MCPResponse{
 			Result: map[string]interface{}{
 				"prompts": []map[string]interface{}{},
 			},
 		} // Fail closed
 	}
-	defer database.Close()
 
-	contextFilter := db.NewContextFilterAdapter(database)
+	contextFilter := store.NewContextFilterAdapter(contextStore)
 
 	var prompts []map[string]interface{}
 
@@ -3241,20 +3471,18 @@ func getPromptForContext(params json.RawMessage, contextName string) MCPResponse
 		}
 	}
 
-	// Get context filter from database
-	database, err := getDB()
-	if err != nil {
-		slog.Warn("Failed to get database for context filtering", "error", err)
+	// Get context filter from Emergent store
+	if contextStore == nil {
+		slog.Warn("Context store not initialized for context filtering")
 		return MCPResponse{
 			Error: &MCPError{
 				Code:    -32000,
-				Message: fmt.Sprintf("Context validation failed: %v", err),
+				Message: "Context validation failed: context store not initialized",
 			},
 		} // Fail closed
 	}
-	defer database.Close()
 
-	contextFilter := db.NewContextFilterAdapter(database)
+	contextFilter := store.NewContextFilterAdapter(contextStore)
 
 	// Helper to check if server is enabled in context
 	isServerEnabled := func(serverName string) bool {
@@ -3752,12 +3980,10 @@ func readResource(params json.RawMessage) MCPResponse {
 }
 
 func getDB() (*db.DB, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
+	if database == nil {
+		return nil, fmt.Errorf("database not initialized")
 	}
-	dbPath := filepath.Join(home, ".diane", "cron.db")
-	return db.New(dbPath)
+	return database, nil
 }
 
 // Helper to format tool response in MCP content format
@@ -4002,11 +4228,140 @@ func getStatus() MCPResponse {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 	}
 
-	pidFile := filepath.Join(home, ".diane", "server.pid")
+	// Check mcp.pid first (Go server)
+	pidFile := filepath.Join(home, ".diane", "mcp.pid")
 	pidBytes, err := os.ReadFile(pidFile)
-	if err != nil {
-		return mcpTextResponse("Server is not running")
+	if err == nil {
+		return mcpTextResponse(fmt.Sprintf("Diane MCP Server is running (PID: %s)", strings.TrimSpace(string(pidBytes))))
 	}
 
-	return mcpTextResponse(fmt.Sprintf("Server is running (PID: %s)", string(pidBytes)))
+	// Fallback to server.pid (legacy/Python server)
+	pidFile = filepath.Join(home, ".diane", "server.pid")
+	pidBytes, err = os.ReadFile(pidFile)
+	if err == nil {
+		return mcpTextResponse(fmt.Sprintf("Legacy Diane Server is running (PID: %s)", strings.TrimSpace(string(pidBytes))))
+	}
+
+	return mcpTextResponse("Server is not running")
+}
+
+// --- ACP Session Tools ---
+
+func agentSessionStart(args map[string]interface{}) MCPResponse {
+	if apiServer == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "API server not initialized"}}
+	}
+	mgr := apiServer.GetACPManager()
+	if mgr == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "ACP manager not initialized"}}
+	}
+
+	agentName, _ := args["agent"].(string)
+	if agentName == "" {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "agent name is required"}}
+	}
+
+	workDir, _ := args["workdir"].(string)
+	title, _ := args["title"].(string)
+
+	info, err := mgr.StartSession(agentName, workDir, title)
+	if err != nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	}
+
+	infoJSON, _ := json.MarshalIndent(info, "", "  ")
+	return mcpTextResponse(string(infoJSON))
+}
+
+func agentSessionPrompt(args map[string]interface{}) MCPResponse {
+	if apiServer == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "API server not initialized"}}
+	}
+	mgr := apiServer.GetACPManager()
+	if mgr == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "ACP manager not initialized"}}
+	}
+
+	sessionID, _ := args["session_id"].(string)
+	if sessionID == "" {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "session_id is required"}}
+	}
+
+	prompt, _ := args["prompt"].(string)
+	if prompt == "" {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "prompt is required"}}
+	}
+
+	run, err := mgr.PromptSession(sessionID, prompt)
+	if err != nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	}
+
+	runJSON, _ := json.MarshalIndent(run, "", "  ")
+	return mcpTextResponse(string(runJSON))
+}
+
+func agentSessionList(args map[string]interface{}) MCPResponse {
+	if apiServer == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "API server not initialized"}}
+	}
+	mgr := apiServer.GetACPManager()
+	if mgr == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "ACP manager not initialized"}}
+	}
+
+	agentName, _ := args["agent"].(string)
+	status, _ := args["status"].(string)
+
+	sessions, err := mgr.ListSessionsFromStore(agentName, status)
+	if err != nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	}
+
+	sessionsJSON, _ := json.MarshalIndent(sessions, "", "  ")
+	return mcpTextResponse(string(sessionsJSON))
+}
+
+func agentSessionClose(args map[string]interface{}) MCPResponse {
+	if apiServer == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "API server not initialized"}}
+	}
+	mgr := apiServer.GetACPManager()
+	if mgr == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "ACP manager not initialized"}}
+	}
+
+	sessionID, _ := args["session_id"].(string)
+	if sessionID == "" {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "session_id is required"}}
+	}
+
+	if err := mgr.CloseSession(sessionID); err != nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	}
+
+	return mcpTextResponse(fmt.Sprintf("Session '%s' closed", sessionID))
+}
+
+func agentSessionMessages(args map[string]interface{}) MCPResponse {
+	if apiServer == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "API server not initialized"}}
+	}
+	mgr := apiServer.GetACPManager()
+	if mgr == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "ACP manager not initialized"}}
+	}
+
+	sessionID, _ := args["session_id"].(string)
+	if sessionID == "" {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "session_id is required"}}
+	}
+
+	messages, err := mgr.GetSessionMessages(sessionID)
+	if err != nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	}
+
+	messagesJSON, _ := json.MarshalIndent(messages, "", "  ")
+	return mcpTextResponse(string(messagesJSON))
 }

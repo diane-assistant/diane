@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/slavetypes"
+	"github.com/diane-assistant/diane/internal/store"
 	"github.com/gorilla/websocket"
 )
 
@@ -21,7 +21,7 @@ import (
 type Server struct {
 	ca              *CertificateAuthority
 	registry        *Registry
-	db              *db.DB
+	db              store.SlaveStore
 	pairing         *PairingService
 	upgrader        websocket.Upgrader
 	server          *http.Server
@@ -46,7 +46,7 @@ type slaveConnection struct {
 }
 
 // NewServer creates a new slave WebSocket server
-func NewServer(ca *CertificateAuthority, registry *Registry, database *db.DB, pairing *PairingService) *Server {
+func NewServer(ca *CertificateAuthority, registry *Registry, database store.SlaveStore, pairing *PairingService) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Server{
@@ -70,7 +70,7 @@ func NewServer(ca *CertificateAuthority, registry *Registry, database *db.DB, pa
 // Start begins listening for slave connections
 // DEPRECATED: This starts its own server which conflicts with the MCP HTTP server
 // Use RegisterHandlers and GetTLSConfig instead
-func Start(addr string, ca *CertificateAuthority, registry *Registry, database *db.DB, pairing *PairingService) (*Server, error) {
+func Start(addr string, ca *CertificateAuthority, registry *Registry, database store.SlaveStore, pairing *PairingService) (*Server, error) {
 	srv := NewServer(ca, registry, database, pairing)
 
 	// Start heartbeat monitor
@@ -127,7 +127,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	hostname := clientCert.Subject.CommonName
 
 	// Get slave ID from certificate
-	slave, err := s.db.GetSlaveServerByHostID(hostname)
+	slave, err := s.db.GetSlaveServerByHostID(context.Background(), hostname)
 	if err != nil {
 		slog.Error("Failed to get slave server", "hostname", hostname, "error", err)
 		http.Error(w, "Unknown slave", http.StatusUnauthorized)
@@ -135,7 +135,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if credentials are revoked
-	revoked, err := s.db.IsCredentialRevoked(slave.CertSerial)
+	revoked, err := s.db.IsCredentialRevoked(context.Background(), slave.CertSerial)
 	if err != nil {
 		slog.Error("Failed to check revocation", "hostname", hostname, "error", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
@@ -172,7 +172,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	s.connMu.Unlock()
 
 	// Update last seen
-	if err := s.db.UpdateSlaveLastSeen(hostname); err != nil {
+	if err := s.db.UpdateSlaveLastSeen(context.Background(), hostname); err != nil {
 		slog.Error("Failed to update last seen", "hostname", hostname, "error", err)
 	}
 
@@ -334,7 +334,7 @@ func (s *Server) handleRegister(conn *slaveConnection, msg slavetypes.Message) {
 
 	// Update slave version in database
 	if reg.Version != "" {
-		if err := s.db.UpdateSlaveVersion(conn.hostname, reg.Version); err != nil {
+		if err := s.db.UpdateSlaveVersion(context.Background(), conn.hostname, reg.Version); err != nil {
 			slog.Error("Failed to update slave version", "hostname", conn.hostname, "error", err)
 		}
 	}

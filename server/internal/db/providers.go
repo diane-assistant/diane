@@ -1,5 +1,14 @@
 package db
 
+// TODO(emergent-migration): Provider entity is being migrated to Emergent.
+// Phase 1 (dual-write) is COMPLETE — see internal/store/provider_*.go.
+// Remaining phases:
+//   Phase 2: Switch reads from SQLite to Emergent (swap primary/secondary in DualWriteProviderStore)
+//   Phase 3: Remove SQLite writes, drop DualWriteProviderStore, use EmergentProviderStore directly
+//   Phase 4: Remove this file and all SQLite provider methods from *DB
+//   Phase 5: Run one-time data migration script to seed Emergent from SQLite
+// Tracking: docs/EMERGENT_MIGRATION_PLAN.md
+
 import (
 	"database/sql"
 	"encoding/json"

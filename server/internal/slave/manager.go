@@ -1,11 +1,13 @@
 package slave
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
 	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/mcpproxy"
+	"github.com/diane-assistant/diane/internal/store"
 )
 
 // Manager coordinates slave connections with the MCP proxy
@@ -13,19 +15,19 @@ type Manager struct {
 	registry *Registry
 	proxy    *mcpproxy.Proxy
 	server   *Server
-	db       *db.DB
+	db       store.SlaveStore
 	pairing  *PairingService
 }
 
 // NewManager creates a new slave manager
-func NewManager(database *db.DB, proxy *mcpproxy.Proxy, ca *CertificateAuthority) (*Manager, error) {
-	registry := NewRegistry(database, ca)
-	pairing := NewPairingService(database, ca)
+func NewManager(slaveStore store.SlaveStore, proxy *mcpproxy.Proxy, ca *CertificateAuthority) (*Manager, error) {
+	registry := NewRegistry(slaveStore, ca)
+	pairing := NewPairingService(slaveStore, ca)
 
 	m := &Manager{
 		registry: registry,
 		proxy:    proxy,
-		db:       database,
+		db:       slaveStore,
 		pairing:  pairing,
 	}
 
@@ -135,13 +137,13 @@ func (m *Manager) GetPairingService() *PairingService {
 // RevokeCredential revokes a slave's credentials
 func (m *Manager) RevokeCredential(hostname, reason string) error {
 	// Get slave info to get cert serial
-	slave, err := m.db.GetSlaveServerByHostID(hostname)
+	slave, err := m.db.GetSlaveServerByHostID(context.Background(), hostname)
 	if err != nil {
 		return fmt.Errorf("failed to find slave %s: %w", hostname, err)
 	}
 
 	// Add to revoked credentials
-	if err := m.db.RevokeSlaveCredential(hostname, slave.CertSerial, reason); err != nil {
+	if err := m.db.RevokeSlaveCredential(context.Background(), hostname, slave.CertSerial, reason); err != nil {
 		return fmt.Errorf("failed to revoke credential: %w", err)
 	}
 
@@ -149,7 +151,7 @@ func (m *Manager) RevokeCredential(hostname, reason string) error {
 	m.registry.Disconnect(hostname)
 
 	// Update slave status in DB
-	if err := m.db.UpdateSlaveStatus(hostname, false); err != nil {
+	if err := m.db.UpdateSlaveStatus(context.Background(), hostname, false); err != nil {
 		slog.Warn("Failed to disable slave", "hostname", hostname, "error", err)
 	}
 
@@ -158,7 +160,7 @@ func (m *Manager) RevokeCredential(hostname, reason string) error {
 
 // ListRevokedCredentials retrieves all revoked credentials
 func (m *Manager) ListRevokedCredentials() ([]*db.RevokedCredential, error) {
-	return m.db.ListRevokedCredentials()
+	return m.db.ListRevokedCredentials(context.Background())
 }
 
 // RestartSlave sends a restart command to a connected slave

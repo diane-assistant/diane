@@ -42,6 +42,8 @@ func NewRootCmd(client *api.Client, version string) *cobra.Command {
 	rootCmd.AddCommand(newRestartCmd(client))
 	rootCmd.AddCommand(newAgentsCmd(client))
 	rootCmd.AddCommand(newAgentCmd(client))
+	rootCmd.AddCommand(newSessionsCmd(client))
+	rootCmd.AddCommand(newSessionCmd(client))
 	rootCmd.AddCommand(newGalleryCmd(client))
 	rootCmd.AddCommand(newAuthCmd(client))
 	rootCmd.AddCommand(newContextCmd(client))

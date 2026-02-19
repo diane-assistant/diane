@@ -73,10 +73,10 @@ struct MCPRegistryView: View {
     
     private var headerView: some View {
         HStack(spacing: 12) {
-            Image(systemName: "book.closed")
+            Image(systemName: "server.rack")
                 .foregroundStyle(.secondary)
             
-            Text("MCP Registry")
+            Text("MCP Servers")
                 .font(.headline)
             
             Spacer()
@@ -157,8 +157,8 @@ struct MCPRegistryView: View {
     private var serversListView: some View {
         VStack(spacing: 0) {
             MasterListHeader(
-                icon: "book.closed",
-                title: "Server Definitions"
+                icon: "server.rack",
+                title: "All Servers"
             )
             
             Divider()
@@ -178,17 +178,22 @@ struct MCPRegistryView: View {
     }
     
     private func serverRow(_ server: MCPServer) -> some View {
-        HStack(spacing: 12) {
-            // Type icon
+        let isEnabled = viewModel.isServerEnabled(server)
+        let status = statusMonitor.status.mcpServers.first(where: { $0.name == server.name })
+        
+        return HStack(spacing: 12) {
+            // Type icon (colored blue when enabled)
             Image(systemName: serverTypeIcon(server.type))
-                .foregroundStyle(.blue)
+                .foregroundStyle(isEnabled ? .blue : .secondary)
                 .frame(width: 20)
             
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
+                // Server name
                 Text(server.name)
                     .font(.system(.body, design: .default))
                     .foregroundColor(.primary)
                 
+                // Type and badges
                 HStack(spacing: 6) {
                     Text(serverTypeDisplayName(server.type))
                         .font(.caption)
@@ -204,13 +209,63 @@ struct MCPRegistryView: View {
                             .cornerRadius(3)
                     }
                 }
+                
+                // Runtime capabilities (tools/prompts/resources) - only show when enabled
+                if isEnabled, let status = status, status.connected {
+                    HStack(spacing: 12) {
+                        if status.toolCount > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "wrench.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.blue)
+                                Text("\(status.toolCount)")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if status.promptCount > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "text.bubble.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.purple)
+                                Text("\(status.promptCount)")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if status.resourceCount > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.green)
+                                Text("\(status.resourceCount)")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
             }
             
             Spacer()
             
+            // Master Node Toggle
+            Toggle("", isOn: Binding(
+                get: { isEnabled },
+                set: { newValue in
+                    Task { await viewModel.toggleServer(server, enabled: newValue) }
+                }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .scaleEffect(0.7)
+            .frame(width: 30)
+            .padding(.trailing, 8)
+            
             if viewModel.selectedServer?.id == server.id {
-                Image(systemName: "checkmark")
-                    .foregroundStyle(.blue)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 12)
@@ -232,11 +287,14 @@ struct MCPRegistryView: View {
     
     private var noSelectionView: some View {
         VStack(spacing: 12) {
-            Image(systemName: "book.closed")
+            Image(systemName: "server.rack")
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
             Text("No server selected")
                 .font(.headline)
+                .foregroundStyle(.secondary)
+            Text("Select a server to view details or configure it.")
+                .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -426,12 +484,73 @@ struct MCPRegistryView: View {
                     }
                 }
                 
-                // Deployment info
-                InfoBox(
-                    icon: "info.circle",
-                    text: "To enable this server on specific nodes, go to the MCP Servers view.",
-                    color: .blue
-                )
+                // Available in Contexts
+                DetailSection(title: "Available in Contexts") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Contexts where AI clients can access this server")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        let contexts = viewModel.contextsForServer(server)
+                        if contexts.isEmpty {
+                            Text("Not in any context")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        } else {
+                            HStack(spacing: 6) {
+                                ForEach(contexts, id: \.self) { contextName in
+                                    Text(contextName)
+                                        .font(.caption2)
+                                        .fontWeight(.medium)
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(Color.blue)
+                                        .cornerRadius(4)
+                                }
+                            }
+                        }
+                        
+                        Text("Go to Contexts tab (Cmd+2) to manage")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 4)
+                    }
+                }
+                
+                // Deployed on Nodes
+                DetailSection(title: "Deployed on Nodes") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Nodes running this server")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        let nodes = viewModel.nodesForServer(server)
+                        if nodes.isEmpty {
+                            Text("Not deployed on any node")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        } else {
+                            HStack(spacing: 6) {
+                                ForEach(nodes, id: \.self) { nodeName in
+                                    Text(nodeName)
+                                        .font(.caption2)
+                                        .fontWeight(.medium)
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(Color.green)
+                                        .cornerRadius(4)
+                                }
+                            }
+                        }
+                        
+                        Text("Multi-node deployment coming soon")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 4)
+                    }
+                }
             }
             .padding()
         }

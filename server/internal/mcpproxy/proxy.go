@@ -157,7 +157,7 @@ func (p *Proxy) startClient(config ServerConfig) error {
 			return fmt.Errorf("remote slaves require hostname and URL (master address)")
 		}
 		client, err = NewWSClient(config.Name, config.Hostname, config.URL,
-			config.CertPath, config.KeyPath, config.CAPath, "unknown")
+			config.CertPath, config.KeyPath, config.CAPath, "unknown", nil)
 	case "stdio", "":
 		// Default to stdio
 		client, err = NewMCPClient(config.Name, config.Command, config.Args, config.Env)

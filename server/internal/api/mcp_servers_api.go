@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -8,17 +9,18 @@ import (
 	"time"
 
 	"github.com/diane-assistant/diane/internal/db"
+	"github.com/diane-assistant/diane/internal/store"
 )
 
 // MCPServersAPI handles MCP server configuration endpoints
 type MCPServersAPI struct {
-	db             *db.DB
+	db             store.MCPServerStore
 	statusProvider StatusProvider
 }
 
 // NewMCPServersAPI creates a new MCPServersAPI
-func NewMCPServersAPI(database *db.DB, statusProvider StatusProvider) *MCPServersAPI {
-	return &MCPServersAPI{db: database, statusProvider: statusProvider}
+func NewMCPServersAPI(mcpStore store.MCPServerStore, statusProvider StatusProvider) *MCPServersAPI {
+	return &MCPServersAPI{db: mcpStore, statusProvider: statusProvider}
 }
 
 // MCPServerResponse represents an MCP server in API responses
@@ -94,7 +96,7 @@ func (api *MCPServersAPI) listServers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add configured servers from database
-	servers, err := api.db.ListMCPServers()
+	servers, err := api.db.ListMCPServers(context.Background())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -215,7 +217,7 @@ func (api *MCPServersAPI) createServer(w http.ResponseWriter, r *http.Request) {
 		NodeMode: nodeMode,
 	}
 
-	if err := api.db.CreateMCPServer(server); err != nil {
+	if err := api.db.CreateMCPServer(context.Background(), server); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			w.WriteHeader(http.StatusConflict)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Server with this name already exists"})
@@ -280,7 +282,7 @@ func (api *MCPServersAPI) handleMCPServerAction(w http.ResponseWriter, r *http.R
 
 // getServer returns a single server by ID
 func (api *MCPServersAPI) getServer(w http.ResponseWriter, id int64) {
-	server, err := api.db.GetMCPServerByID(id)
+	server, err := api.db.GetMCPServerByID(context.Background(), id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -313,7 +315,7 @@ func (api *MCPServersAPI) getServer(w http.ResponseWriter, id int64) {
 // updateServer updates an existing server
 func (api *MCPServersAPI) updateServer(w http.ResponseWriter, r *http.Request, id int64) {
 	// First, fetch the existing server
-	server, err := api.db.GetMCPServerByID(id)
+	server, err := api.db.GetMCPServerByID(context.Background(), id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -398,7 +400,7 @@ func (api *MCPServersAPI) updateServer(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 
-	if err := api.db.UpdateMCPServer(server); err != nil {
+	if err := api.db.UpdateMCPServer(context.Background(), server); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			w.WriteHeader(http.StatusConflict)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Server with this name already exists"})
@@ -430,7 +432,7 @@ func (api *MCPServersAPI) updateServer(w http.ResponseWriter, r *http.Request, i
 // deleteServer deletes a server
 func (api *MCPServersAPI) deleteServer(w http.ResponseWriter, id int64) {
 	// First check if server exists
-	server, err := api.db.GetMCPServerByID(id)
+	server, err := api.db.GetMCPServerByID(context.Background(), id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -442,7 +444,7 @@ func (api *MCPServersAPI) deleteServer(w http.ResponseWriter, id int64) {
 		return
 	}
 
-	if err := api.db.DeleteMCPServer(server.Name); err != nil {
+	if err := api.db.DeleteMCPServer(context.Background(), server.Name); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
@@ -479,7 +481,7 @@ func (api *MCPServersAPI) handlePlacements(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	placements, err := api.db.GetPlacementsForHost(hostID)
+	placements, err := api.db.GetPlacementsForHost(context.Background(), hostID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -562,7 +564,7 @@ func (api *MCPServersAPI) updatePlacement(w http.ResponseWriter, r *http.Request
 	}
 
 	// Verify server exists
-	server, err := api.db.GetMCPServerByID(serverID)
+	server, err := api.db.GetMCPServerByID(context.Background(), serverID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -574,14 +576,14 @@ func (api *MCPServersAPI) updatePlacement(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := api.db.SetPlacementEnabled(serverID, hostID, body.Enabled); err != nil {
+	if err := api.db.SetPlacementEnabled(context.Background(), serverID, hostID, body.Enabled); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
 	// Return the updated placement
-	placement, err := api.db.GetPlacement(serverID, hostID)
+	placement, err := api.db.GetPlacement(context.Background(), serverID, hostID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -600,7 +602,7 @@ func (api *MCPServersAPI) updatePlacement(w http.ResponseWriter, r *http.Request
 
 // deletePlacement deletes a placement
 func (api *MCPServersAPI) deletePlacement(w http.ResponseWriter, serverID int64, hostID string) {
-	if err := api.db.DeletePlacement(serverID, hostID); err != nil {
+	if err := api.db.DeletePlacement(context.Background(), serverID, hostID); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/diane-assistant/diane/internal/store"
 )
 
 // AgentConfig represents a configured ACP agent
@@ -51,6 +53,13 @@ type Manager struct {
 	configPath   string
 	clients      map[string]*Client      // Legacy HTTP clients (deprecated)
 	stdioClients map[string]*StdioClient // ACP stdio clients
+
+	// Session management
+	sessions     map[string]*SessionState
+	sessionsMu   sync.RWMutex
+	idleTimeout  time.Duration
+	sessionStore store.ACPSessionStore
+	reaperCancel context.CancelFunc
 }
 
 // NewManager creates a new ACP manager
@@ -65,6 +74,8 @@ func NewManager() (*Manager, error) {
 		configPath:   configPath,
 		clients:      make(map[string]*Client),
 		stdioClients: make(map[string]*StdioClient),
+		sessions:     make(map[string]*SessionState),
+		idleTimeout:  DefaultIdleTimeout,
 	}
 
 	if err := m.loadConfig(); err != nil {

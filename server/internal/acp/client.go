@@ -129,6 +129,7 @@ type Run struct {
 	AgentName    string     `json:"agent_name"`
 	SessionID    string     `json:"session_id,omitempty"`
 	RunID        string     `json:"run_id"`
+	TurnNumber   int        `json:"turn_number,omitempty"`
 	Status       RunStatus  `json:"status"`
 	AwaitRequest *string    `json:"await_request,omitempty"`
 	Output       []Message  `json:"output"`

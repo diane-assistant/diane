@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/diane-assistant/diane/internal/db"
+	"github.com/diane-assistant/diane/internal/store"
 )
 
 // ToolProvider provides access to running MCP server tools
@@ -15,13 +17,14 @@ type ToolProvider interface {
 
 // ContextsAPI handles context-related API endpoints
 type ContextsAPI struct {
-	db           *db.DB
+	db           store.ContextStore
+	serverStore  store.MCPServerStore
 	toolProvider ToolProvider
 }
 
 // NewContextsAPI creates a new ContextsAPI
-func NewContextsAPI(database *db.DB) *ContextsAPI {
-	return &ContextsAPI{db: database}
+func NewContextsAPI(contextStore store.ContextStore, serverStore store.MCPServerStore) *ContextsAPI {
+	return &ContextsAPI{db: contextStore, serverStore: serverStore}
 }
 
 // SetToolProvider sets the tool provider for syncing tools from running servers
@@ -75,7 +78,7 @@ func (api *ContextsAPI) handleContexts(w http.ResponseWriter, r *http.Request) {
 
 // listContexts returns all contexts
 func (api *ContextsAPI) listContexts(w http.ResponseWriter, r *http.Request) {
-	contexts, err := api.db.ListContexts()
+	contexts, err := api.db.ListContexts(context.Background())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -116,7 +119,7 @@ func (api *ContextsAPI) createContext(w http.ResponseWriter, r *http.Request) {
 		Name:        body.Name,
 		Description: body.Description,
 	}
-	if err := api.db.CreateContext(ctx); err != nil {
+	if err := api.db.CreateContext(context.Background(), ctx); err != nil {
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
@@ -186,7 +189,7 @@ func (api *ContextsAPI) handleContextCRUD(w http.ResponseWriter, r *http.Request
 
 // getContextDetail returns full context details
 func (api *ContextsAPI) getContextDetail(w http.ResponseWriter, contextName string) {
-	detail, err := api.db.GetContextDetail(contextName)
+	detail, err := api.db.GetContextDetail(context.Background(), contextName)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -217,7 +220,7 @@ func (api *ContextsAPI) updateContext(w http.ResponseWriter, r *http.Request, co
 		Name:        contextName,
 		Description: body.Description,
 	}
-	if err := api.db.UpdateContext(ctx); err != nil {
+	if err := api.db.UpdateContext(context.Background(), ctx); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
@@ -228,7 +231,7 @@ func (api *ContextsAPI) updateContext(w http.ResponseWriter, r *http.Request, co
 
 // deleteContext deletes a context
 func (api *ContextsAPI) deleteContext(w http.ResponseWriter, contextName string) {
-	if err := api.db.DeleteContext(contextName); err != nil {
+	if err := api.db.DeleteContext(context.Background(), contextName); err != nil {
 		if err == db.ErrCannotDeleteDefault {
 			w.WriteHeader(http.StatusBadRequest)
 		} else {
@@ -249,7 +252,7 @@ func (api *ContextsAPI) handleSetDefault(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if err := api.db.SetDefaultContext(contextName); err != nil {
+	if err := api.db.SetDefaultContext(context.Background(), contextName); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
@@ -281,7 +284,7 @@ func (api *ContextsAPI) handleConnect(w http.ResponseWriter, r *http.Request, co
 	}
 
 	// Check if context exists
-	ctx, err := api.db.GetContext(contextName)
+	ctx, err := api.db.GetContext(context.Background(), contextName)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -328,7 +331,7 @@ func (api *ContextsAPI) handleSyncTools(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Check if context exists
-	ctx, err := api.db.GetContext(contextName)
+	ctx, err := api.db.GetContext(context.Background(), contextName)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -350,7 +353,7 @@ func (api *ContextsAPI) handleSyncTools(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Get servers in this context
-	contextServers, err := api.db.GetServersForContext(contextName)
+	contextServers, err := api.db.GetServersForContext(context.Background(), contextName)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -371,7 +374,7 @@ func (api *ContextsAPI) handleSyncTools(w http.ResponseWriter, r *http.Request, 
 		}
 
 		// Get existing tool settings
-		existingTools, err := api.db.GetToolsForContextServer(contextName, serverName)
+		existingTools, err := api.db.GetToolsForContextServer(context.Background(), contextName, serverName)
 		if err != nil {
 			continue
 		}
@@ -389,7 +392,7 @@ func (api *ContextsAPI) handleSyncTools(w http.ResponseWriter, r *http.Request, 
 		}
 
 		if len(toolUpdates) > 0 {
-			if err := api.db.BulkSetToolsEnabled(contextName, serverName, toolUpdates); err != nil {
+			if err := api.db.BulkSetToolsEnabled(context.Background(), contextName, serverName, toolUpdates); err != nil {
 				// Log error but continue
 				continue
 			}
@@ -439,7 +442,7 @@ func (api *ContextsAPI) handleAvailableServers(w http.ResponseWriter, r *http.Re
 	}
 
 	// Get servers already in this context
-	contextServers, err := api.db.GetServersForContext(contextName)
+	contextServers, err := api.db.GetServersForContext(context.Background(), contextName)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})

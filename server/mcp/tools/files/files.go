@@ -24,6 +24,8 @@ import (
 
 	sdk "github.com/emergent-company/emergent/apps/server-go/pkg/sdk"
 	"github.com/emergent-company/emergent/apps/server-go/pkg/sdk/graph"
+
+	"github.com/diane-assistant/diane/internal/emergent"
 )
 
 // Tool represents an MCP tool definition
@@ -39,76 +41,20 @@ type Provider struct {
 }
 
 // NewProvider creates a new files provider using Emergent as the backend.
-// Configuration is read from ~/.diane/secrets/emergent-config.json first,
-// falling back to environment variables:
-//   - EMERGENT_BASE_URL (default: http://localhost:3002)
-//   - EMERGENT_API_KEY (required)
-//   - EMERGENT_PROJECT_ID (required)
+// Configuration is managed by the shared emergent package, reading from
+// ~/.diane/secrets/emergent-config.json or environment variables
+// (EMERGENT_BASE_URL, EMERGENT_API_KEY).
+//
+// The API key is project-scoped — no project ID is needed.
 func NewProvider() (*Provider, error) {
-	baseURL, apiKey, projectID := loadConfig()
-
-	if apiKey == "" {
-		return nil, fmt.Errorf("Emergent API key not configured. Create ~/.diane/secrets/emergent-config.json or set EMERGENT_API_KEY")
-	}
-	if projectID == "" {
-		return nil, fmt.Errorf("Emergent project ID not configured. Create ~/.diane/secrets/emergent-config.json or set EMERGENT_PROJECT_ID")
-	}
-	if baseURL == "" {
-		baseURL = "http://localhost:3002"
-	}
-
-	client, err := sdk.New(sdk.Config{
-		ServerURL: baseURL,
-		Auth: sdk.AuthConfig{
-			Mode:   "apikey",
-			APIKey: apiKey,
-		},
-		ProjectID: projectID,
-	})
+	client, err := emergent.GetClient()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Emergent client: %w", err)
+		return nil, fmt.Errorf("failed to initialize Emergent client: %w", err)
 	}
 
 	return &Provider{
 		client: client,
 	}, nil
-}
-
-// emergentConfig represents the JSON config file structure
-type emergentConfig struct {
-	BaseURL   string `json:"base_url"`
-	APIKey    string `json:"api_key"`
-	ProjectID string `json:"project_id"`
-}
-
-// loadConfig reads config from ~/.diane/secrets/emergent-config.json,
-// falling back to environment variables for any missing values.
-func loadConfig() (baseURL, apiKey, projectID string) {
-	// Try config file first
-	home, err := os.UserHomeDir()
-	if err == nil {
-		configPath := fmt.Sprintf("%s/.diane/secrets/emergent-config.json", home)
-		if data, err := os.ReadFile(configPath); err == nil {
-			var cfg emergentConfig
-			if err := json.Unmarshal(data, &cfg); err == nil {
-				baseURL = cfg.BaseURL
-				apiKey = cfg.APIKey
-				projectID = cfg.ProjectID
-			}
-		}
-	}
-
-	// Fall back to env vars for any missing values
-	if baseURL == "" {
-		baseURL = os.Getenv("EMERGENT_BASE_URL")
-	}
-	if apiKey == "" {
-		apiKey = os.Getenv("EMERGENT_API_KEY")
-	}
-	if projectID == "" {
-		projectID = os.Getenv("EMERGENT_PROJECT_ID")
-	}
-	return
 }
 
 // Close is a no-op for the Emergent-backed provider (HTTP client, no persistent connections)

@@ -16,22 +16,29 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// ToolProvider interface for retrieving local tools
+type ToolProvider interface {
+	ListTools() ([]map[string]interface{}, error)
+	CallTool(name string, arguments map[string]interface{}) (map[string]interface{}, error)
+}
+
 // WSClient is a WebSocket-based MCP client for remote slave connections
 type WSClient struct {
-	name       string
-	hostname   string
-	masterAddr string
-	version    string // Version to send in registration
-	conn       *websocket.Conn
-	connMu     sync.RWMutex
-	connected  bool
-	encoder    *json.Encoder
-	decoder    *json.Decoder
-	mu         sync.Mutex
-	notifyChan chan string
-	nextID     int
-	pendingMu  sync.Mutex
-	pending    map[interface{}]chan MCPResponse
+	name         string
+	hostname     string
+	masterAddr   string
+	version      string // Version to send in registration
+	toolProvider ToolProvider
+	conn         *websocket.Conn
+	connMu       sync.RWMutex
+	connected    bool
+	encoder      *json.Encoder
+	decoder      *json.Decoder
+	mu           sync.Mutex
+	notifyChan   chan string
+	nextID       int
+	pendingMu    sync.Mutex
+	pending      map[interface{}]chan MCPResponse
 
 	// Cache
 	cachedToolCount     int
@@ -50,17 +57,18 @@ type WSClient struct {
 }
 
 // NewWSClient creates a new WebSocket MCP client
-func NewWSClient(name, hostname, masterAddr, certPath, keyPath, caPath, version string) (*WSClient, error) {
+func NewWSClient(name, hostname, masterAddr, certPath, keyPath, caPath, version string, toolProvider ToolProvider) (*WSClient, error) {
 	client := &WSClient{
-		name:       name,
-		hostname:   hostname,
-		masterAddr: masterAddr,
-		version:    version,
-		notifyChan: make(chan string, 10),
-		pending:    make(map[interface{}]chan MCPResponse),
-		certPath:   certPath,
-		keyPath:    keyPath,
-		caPath:     caPath,
+		name:         name,
+		hostname:     hostname,
+		masterAddr:   masterAddr,
+		version:      version,
+		toolProvider: toolProvider,
+		notifyChan:   make(chan string, 10),
+		pending:      make(map[interface{}]chan MCPResponse),
+		certPath:     certPath,
+		keyPath:      keyPath,
+		caPath:       caPath,
 	}
 
 	// Connect to master
@@ -162,9 +170,10 @@ func (c *WSClient) register() error {
 
 // getLocalTools queries local MCP servers for tools
 func (c *WSClient) getLocalTools() ([]map[string]interface{}, error) {
-	// TODO: This should query the local Diane instance's MCP servers
-	// For now, return empty list
-	return []map[string]interface{}{}, nil
+	if c.toolProvider == nil {
+		return []map[string]interface{}{}, nil
+	}
+	return c.toolProvider.ListTools()
 }
 
 // readLoop reads messages from WebSocket connection
@@ -251,9 +260,16 @@ func (c *WSClient) handleToolCall(msg slavetypes.Message) {
 
 // executeLocalTool executes a tool on the local Diane instance
 func (c *WSClient) executeLocalTool(tool string, arguments map[string]interface{}) (json.RawMessage, error) {
-	// TODO: This should call the local Diane instance's tool execution
-	// For now, return an error
-	return nil, fmt.Errorf("tool execution not yet implemented")
+	if c.toolProvider == nil {
+		return nil, fmt.Errorf("tool provider not initialized")
+	}
+
+	result, err := c.toolProvider.CallTool(tool, arguments)
+	if err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(result)
 }
 
 // handleResponse processes response to a request we sent

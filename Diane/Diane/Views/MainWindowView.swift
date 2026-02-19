@@ -3,21 +3,20 @@ import AppKit
 
 /// Main window view with sidebar navigation and detail view
 /// 
-/// This consolidates all functionality (MCP Servers, Scheduler, Agents, Contexts, Providers, Usage, Settings)
+/// This consolidates all functionality (MCP Servers, Scheduler, Agents, Providers, Usage, Settings)
 /// into a single unified desktop application interface.
 ///
 /// ## Navigation Structure
-/// - **Sidebar**: List of 7 sections with icons and labels
+/// - **Sidebar**: List of 6 sections with icons and labels
 /// - **Detail View**: Dynamically switches based on selected section
 /// - **Persistence**: Selected section is saved and restored across app launches
 ///
 /// ## Keyboard Shortcuts
-/// - Cmd+1: MCP Servers
+/// - Cmd+1: MCP Servers (unified view - configuration + deployment)
 /// - Cmd+2: Scheduler
 /// - Cmd+3: Agents
-/// - Cmd+4: Contexts
-/// - Cmd+5: Providers
-/// - Cmd+6: Usage
+/// - Cmd+4: Providers
+/// - Cmd+5: Usage
 /// - Cmd+,: Settings
 ///
 /// ## Features
@@ -32,11 +31,10 @@ struct MainWindowView: View {
     
     /// Navigation section enum defining all available sections in the sidebar
     enum Section: String, CaseIterable, Identifiable {
-        case mcpRegistry = "MCP Registry"
         case mcpServers = "MCP Servers"
+        case contexts = "Contexts"
         case scheduler = "Scheduler"
         case agents = "Agents"
-        case contexts = "Contexts"
         case providers = "Providers"
         case usage = "Usage"
         case settings = "Settings"
@@ -46,16 +44,14 @@ struct MainWindowView: View {
         /// SF Symbol icon for each section
         var icon: String {
             switch self {
-            case .mcpRegistry:
-                return "book.closed"
             case .mcpServers:
                 return "server.rack"
+            case .contexts:
+                return "square.stack.3d.up"
             case .scheduler:
                 return "calendar.badge.clock"
             case .agents:
                 return "person.3.fill"
-            case .contexts:
-                return "square.stack.3d.up"
             case .providers:
                 return "cpu"
             case .usage:
@@ -76,7 +72,6 @@ struct MainWindowView: View {
                 NavigationLink(value: section) {
                     Label(section.rawValue, systemImage: section.icon)
                 }
-                .keyboardShortcut(shortcutKey(for: section), modifiers: .command)
             }
             .navigationTitle("Diane")
             .listStyle(.sidebar)
@@ -93,6 +88,28 @@ struct MainWindowView: View {
                         toolbarControls
                     }
                 }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToSection"))) { notification in
+            if let sectionName = notification.object as? String {
+                switch sectionName {
+                case "mcpServers":
+                    selectedSection = .mcpServers
+                case "contexts":
+                    selectedSection = .contexts
+                case "scheduler":
+                    selectedSection = .scheduler
+                case "agents":
+                    selectedSection = .agents
+                case "providers":
+                    selectedSection = .providers
+                case "usage":
+                    selectedSection = .usage
+                case "settings":
+                    selectedSection = .settings
+                default:
+                    break
+                }
+            }
         }
     }
     
@@ -185,16 +202,14 @@ struct MainWindowView: View {
     @ViewBuilder
     private func detailView(for section: Section?) -> some View {
         switch section {
-        case .mcpRegistry:
-            MCPRegistryView()
         case .mcpServers:
-            MCPServersView()
+            MCPRegistryView() // Unified view (was Registry, now "MCP Servers")
+        case .contexts:
+            ContextsView()
         case .scheduler:
             SchedulerView()
         case .agents:
             AgentsView()
-        case .contexts:
-            ContextsView()
         case .providers:
             ProvidersView()
         case .usage:
@@ -210,11 +225,10 @@ struct MainWindowView: View {
     /// Returns keyboard shortcut key for each section
     private func shortcutKey(for section: Section) -> KeyEquivalent {
         switch section {
-        case .mcpRegistry: return "0"
         case .mcpServers: return "1"
-        case .scheduler: return "2"
-        case .agents: return "3"
-        case .contexts: return "4"
+        case .contexts: return "2"
+        case .scheduler: return "3"
+        case .agents: return "4"
         case .providers: return "5"
         case .usage: return "6"
         case .settings: return ","

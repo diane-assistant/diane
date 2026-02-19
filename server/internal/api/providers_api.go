@@ -12,19 +12,22 @@ import (
 
 	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/models"
+	"github.com/diane-assistant/diane/internal/store"
 	"github.com/diane-assistant/diane/mcp/tools/google/auth"
 	"golang.org/x/oauth2"
 )
 
 // ProvidersAPI handles provider-related API endpoints
 type ProvidersAPI struct {
-	db       *db.DB
-	registry *models.Registry
+	db        *db.DB              // retained for usage tracking (RecordUsage, GetUsage*)
+	providers store.ProviderStore // provider CRUD — backed by SQLite, Emergent, or dual-write
+	registry  *models.Registry
 }
 
-// NewProvidersAPI creates a new ProvidersAPI
-func NewProvidersAPI(database *db.DB, registry *models.Registry) *ProvidersAPI {
-	return &ProvidersAPI{db: database, registry: registry}
+// NewProvidersAPI creates a new ProvidersAPI. The ProviderStore is used for
+// all provider CRUD; the raw *db.DB is retained for usage tracking only.
+func NewProvidersAPI(database *db.DB, providerStore store.ProviderStore, registry *models.Registry) *ProvidersAPI {
+	return &ProvidersAPI{db: database, providers: providerStore, registry: registry}
 }
 
 // RegisterRoutes registers the provider API routes
@@ -135,9 +138,9 @@ func (api *ProvidersAPI) listProviders(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if typeFilter != "" {
-		providers, err = api.db.ListProvidersByType(db.ProviderType(typeFilter))
+		providers, err = api.providers.ListProvidersByType(db.ProviderType(typeFilter))
 	} else {
-		providers, err = api.db.ListProviders()
+		providers, err = api.providers.ListProviders()
 	}
 
 	if err != nil {
@@ -203,7 +206,7 @@ func (api *ProvidersAPI) createProvider(w http.ResponseWriter, r *http.Request) 
 		Config:     req.Config,
 	}
 
-	id, err := api.db.CreateProvider(provider)
+	id, err := api.providers.CreateProvider(provider)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
 			http.Error(w, "Provider with this name already exists", http.StatusConflict)
@@ -298,7 +301,7 @@ func (api *ProvidersAPI) handleProviderAction(w http.ResponseWriter, r *http.Req
 }
 
 func (api *ProvidersAPI) getProvider(w http.ResponseWriter, r *http.Request, id int64) {
-	provider, err := api.db.GetProvider(id)
+	provider, err := api.providers.GetProvider(id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -313,7 +316,7 @@ func (api *ProvidersAPI) getProvider(w http.ResponseWriter, r *http.Request, id 
 }
 
 func (api *ProvidersAPI) updateProvider(w http.ResponseWriter, r *http.Request, id int64) {
-	provider, err := api.db.GetProvider(id)
+	provider, err := api.providers.GetProvider(id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -345,14 +348,14 @@ func (api *ProvidersAPI) updateProvider(w http.ResponseWriter, r *http.Request, 
 		provider.Config = *req.Config
 	}
 
-	if err := api.db.UpdateProvider(provider); err != nil {
+	if err := api.providers.UpdateProvider(provider); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// If setting as default, update other providers
 	if req.IsDefault != nil && *req.IsDefault {
-		if err := api.db.SetDefaultProvider(id); err != nil {
+		if err := api.providers.SetDefaultProvider(id); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -363,7 +366,7 @@ func (api *ProvidersAPI) updateProvider(w http.ResponseWriter, r *http.Request, 
 }
 
 func (api *ProvidersAPI) deleteProvider(w http.ResponseWriter, r *http.Request, id int64) {
-	if err := api.db.DeleteProvider(id); err != nil {
+	if err := api.providers.DeleteProvider(id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -372,41 +375,41 @@ func (api *ProvidersAPI) deleteProvider(w http.ResponseWriter, r *http.Request, 
 }
 
 func (api *ProvidersAPI) enableProvider(w http.ResponseWriter, r *http.Request, id int64) {
-	if err := api.db.EnableProvider(id); err != nil {
+	if err := api.providers.EnableProvider(id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	provider, _ := api.db.GetProvider(id)
+	provider, _ := api.providers.GetProvider(id)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(providerToResponse(provider, true))
 }
 
 func (api *ProvidersAPI) disableProvider(w http.ResponseWriter, r *http.Request, id int64) {
-	if err := api.db.DisableProvider(id); err != nil {
+	if err := api.providers.DisableProvider(id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	provider, _ := api.db.GetProvider(id)
+	provider, _ := api.providers.GetProvider(id)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(provider)
 }
 
 func (api *ProvidersAPI) setDefaultProvider(w http.ResponseWriter, r *http.Request, id int64) {
-	if err := api.db.SetDefaultProvider(id); err != nil {
+	if err := api.providers.SetDefaultProvider(id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	provider, _ := api.db.GetProvider(id)
+	provider, _ := api.providers.GetProvider(id)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(providerToResponse(provider, true))
 }
 
 // GetDefaultEmbeddingProvider is a helper to get the default embedding provider
 func (api *ProvidersAPI) GetDefaultEmbeddingProvider() (*db.Provider, error) {
-	return api.db.GetDefaultProvider(db.ProviderTypeEmbedding)
+	return api.providers.GetDefaultProvider(db.ProviderTypeEmbedding)
 }
 
 // ProviderTestResult contains the result of testing a provider
@@ -418,7 +421,7 @@ type ProviderTestResult struct {
 }
 
 func (api *ProvidersAPI) testProvider(w http.ResponseWriter, r *http.Request, id int64) {
-	provider, err := api.db.GetProvider(id)
+	provider, err := api.providers.GetProvider(id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

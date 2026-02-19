@@ -17,9 +17,11 @@ import (
 	"github.com/diane-assistant/diane/internal/acp"
 	"github.com/diane-assistant/diane/internal/config"
 	"github.com/diane-assistant/diane/internal/db"
+	"github.com/diane-assistant/diane/internal/emergent"
 	"github.com/diane-assistant/diane/internal/models"
 	"github.com/diane-assistant/diane/internal/pairing"
 	"github.com/diane-assistant/diane/internal/slave"
+	"github.com/diane-assistant/diane/internal/store"
 )
 
 // MCPServerStatus represents the status of an MCP server
@@ -203,6 +205,62 @@ type Server struct {
 	pairLimiter    *pairing.RateLimiter // rate limiter for pairing attempts
 }
 
+// buildProviderStore creates the ProviderStore backed by Emergent.
+func buildProviderStore() store.ProviderStore {
+	client, err := emergent.GetClient()
+	if err != nil {
+		slog.Error("Emergent not configured — provider store unavailable", "error", err)
+		return nil
+	}
+
+	slog.Info("Provider store: Emergent")
+	return store.NewEmergentProviderStore(client)
+}
+
+// buildSlaveStore creates the SlaveStore backed by Emergent.
+func buildSlaveStore() store.SlaveStore {
+	client, err := emergent.GetClient()
+	if err != nil {
+		slog.Error("Emergent not configured — slave store unavailable", "error", err)
+		return nil
+	}
+	slog.Info("Slave store: Emergent")
+	return store.NewEmergentSlaveStore(client)
+}
+
+// buildMCPServerStore creates the MCPServerStore backed by Emergent.
+func buildMCPServerStore() store.MCPServerStore {
+	client, err := emergent.GetClient()
+	if err != nil {
+		slog.Error("Emergent not configured — MCP server store unavailable", "error", err)
+		return nil
+	}
+	slog.Info("MCP server store: Emergent")
+	return store.NewEmergentMCPServerStore(client)
+}
+
+// buildACPSessionStore creates the ACPSessionStore backed by Emergent.
+func buildACPSessionStore() store.ACPSessionStore {
+	client, err := emergent.GetClient()
+	if err != nil {
+		slog.Error("Emergent not configured — ACP session store unavailable", "error", err)
+		return nil
+	}
+	slog.Info("ACP session store: Emergent")
+	return store.NewEmergentACPSessionStore(client)
+}
+
+// buildContextStore creates the ContextStore backed by Emergent.
+func buildContextStore() store.ContextStore {
+	client, err := emergent.GetClient()
+	if err != nil {
+		slog.Error("Emergent not configured — context store unavailable", "error", err)
+		return nil
+	}
+	slog.Info("Context store: Emergent")
+	return store.NewEmergentContextStore(client)
+}
+
 // NewServer creates a new API server
 func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config, slaveManager *slave.Manager) (*Server, error) {
 	home, err := os.UserHomeDir()
@@ -229,16 +287,31 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 		slog.Warn("Failed to initialize ACP gallery", "error", err)
 	}
 
-	// Initialize Contexts API with database
+	// Wire ACP session store into manager
+	if acpManager != nil {
+		sessionStore := buildACPSessionStore()
+		if sessionStore != nil {
+			acpManager.SetSessionStore(sessionStore)
+			acpManager.InitSessions(context.Background())
+		}
+	}
+
+	// Build Emergent-backed stores
+	slaveStore := buildSlaveStore()
+	mcpServerStore := buildMCPServerStore()
+	contextStore := buildContextStore()
+
+	// Initialize Contexts API with stores
 	var contextsAPI *ContextsAPI
-	if database != nil {
-		contextsAPI = NewContextsAPI(database)
+	if contextStore != nil && mcpServerStore != nil {
+		contextsAPI = NewContextsAPI(contextStore, mcpServerStore)
 		contextsAPI.SetToolProvider(statusProvider)
 	}
 
-	// Initialize Providers API with models registry (uses same database)
+	// Initialize Providers API with models registry
 	var providersAPI *ProvidersAPI
-	if database != nil {
+	providerStore := buildProviderStore()
+	if providerStore != nil {
 		// Initialize models registry
 		modelsRegistry := models.NewRegistry(filepath.Join(home, ".diane"))
 		// Load registry in background (don't block startup)
@@ -249,23 +322,23 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 				slog.Info("Models registry loaded successfully")
 			}
 		}()
-		providersAPI = NewProvidersAPI(database, modelsRegistry)
+		providersAPI = NewProvidersAPI(database, providerStore, modelsRegistry)
 	}
 
-	// Initialize MCP Servers API (uses same database)
+	// Initialize MCP Servers API
 	var mcpServersAPI *MCPServersAPI
-	if database != nil {
-		mcpServersAPI = NewMCPServersAPI(database, statusProvider)
+	if mcpServerStore != nil {
+		mcpServersAPI = NewMCPServersAPI(mcpServerStore, statusProvider)
 	}
 
 	// Initialize Hosts API (shows master + slaves)
 	var hostsAPI *HostsAPI
-	slog.Info("NewServer: About to initialize Hosts API", "database_nil", database == nil, "slaveManager_nil", slaveManager == nil)
-	if database != nil {
-		hostsAPI = NewHostsAPI(database, slaveManager)
+	slog.Info("NewServer: About to initialize Hosts API", "slaveStore_nil", slaveStore == nil, "slaveManager_nil", slaveManager == nil)
+	if slaveStore != nil {
+		hostsAPI = NewHostsAPI(slaveStore, slaveManager)
 		slog.Info("NewServer: Hosts API initialized", "hostsAPI_nil", hostsAPI == nil)
 	} else {
-		slog.Warn("NewServer: Database is nil, Hosts API not initialized")
+		slog.Warn("NewServer: Slave store is nil, Hosts API not initialized")
 	}
 
 	return &Server{
@@ -371,6 +444,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/agents", s.handleAgents)
 	mux.HandleFunc("/agents/logs", s.handleAgentLogs)
 	mux.HandleFunc("/agents/", s.handleAgentAction)
+	mux.HandleFunc("/sessions", s.handleSessions)
 	mux.HandleFunc("/gallery", s.handleGallery)
 	mux.HandleFunc("/gallery/", s.handleGalleryAction)
 	mux.HandleFunc("/auth", s.handleAuth)
@@ -451,6 +525,12 @@ func (s *Server) Start() error {
 func (s *Server) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Clean up ACP sessions
+	if s.acpManager != nil {
+		s.acpManager.StopIdleReaper()
+		s.acpManager.CloseAllSessions()
+	}
 
 	// Shut down TCP HTTP listener first (if running)
 	if s.httpServer != nil {
@@ -1198,6 +1278,9 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request) {
 
 		json.NewEncoder(w).Encode(map[string]string{"status": "updated", "agent": agentName})
 
+	case "sessions":
+		s.handleAgentSessions(w, r, agentName, parts)
+
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Unknown action: " + action})
@@ -1586,4 +1669,197 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"api_key": s.httpAPIKey,
 	})
+}
+
+// GetACPManager returns the ACP manager for use by external callers (e.g. MCP tool handlers).
+func (s *Server) GetACPManager() *acp.Manager {
+	return s.acpManager
+}
+
+// handleSessions lists all sessions across all agents.
+// GET /sessions?agent=<name>&status=<status>
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.acpManager == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "ACP manager not initialized"})
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	agentName := r.URL.Query().Get("agent")
+	status := r.URL.Query().Get("status")
+
+	sessions, err := s.acpManager.ListSessionsFromStore(agentName, status)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(sessions)
+}
+
+// handleAgentSessions handles session sub-routes under /agents/{name}/sessions/...
+// Routes:
+//
+//	POST   /agents/{name}/sessions             → StartSession
+//	GET    /agents/{name}/sessions              → ListSessions for agent
+//	GET    /agents/{name}/sessions/{id}         → GetSessionInfo
+//	POST   /agents/{name}/sessions/{id}/prompt  → PromptSession
+//	POST   /agents/{name}/sessions/{id}/config  → SetSessionConfig
+//	DELETE /agents/{name}/sessions/{id}         → CloseSession
+//	GET    /agents/{name}/sessions/{id}/messages → GetSessionMessages
+func (s *Server) handleAgentSessions(w http.ResponseWriter, r *http.Request, agentName string, parts []string) {
+	// parts[0] = agentName, parts[1] = "sessions", parts[2..] = sessionID / action
+	sessionID := ""
+	subAction := ""
+	if len(parts) > 2 && parts[2] != "" {
+		sessionID = parts[2]
+	}
+	if len(parts) > 3 && parts[3] != "" {
+		subAction = parts[3]
+	}
+
+	// /agents/{name}/sessions (no session ID)
+	if sessionID == "" {
+		switch r.Method {
+		case http.MethodGet:
+			// List sessions for this agent
+			status := r.URL.Query().Get("status")
+			sessions, err := s.acpManager.ListSessionsFromStore(agentName, status)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(sessions)
+
+		case http.MethodPost:
+			// Start a new session
+			var body struct {
+				WorkDir string `json:"workdir"`
+				Title   string `json:"title"`
+			}
+			if r.Body != nil {
+				json.NewDecoder(r.Body).Decode(&body)
+			}
+
+			info, err := s.acpManager.StartSession(agentName, body.WorkDir, body.Title)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(info)
+
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		}
+		return
+	}
+
+	// /agents/{name}/sessions/{id}[/action]
+	switch subAction {
+	case "": // GET or DELETE /agents/{name}/sessions/{id}
+		switch r.Method {
+		case http.MethodGet:
+			info, err := s.acpManager.GetSessionInfo(sessionID)
+			if err != nil {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(info)
+
+		case http.MethodDelete:
+			if err := s.acpManager.CloseSession(sessionID); err != nil {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"status": "closed", "session_id": sessionID})
+
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		}
+
+	case "prompt":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+		var body struct {
+			Prompt string `json:"prompt"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+			return
+		}
+		if body.Prompt == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Prompt is required"})
+			return
+		}
+
+		run, err := s.acpManager.PromptSession(sessionID, body.Prompt)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(run)
+
+	case "config":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+		var body struct {
+			ConfigID string `json:"config_id"`
+			Value    string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ConfigID == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "config_id and value are required"})
+			return
+		}
+
+		if err := s.acpManager.SetSessionConfig(sessionID, body.ConfigID, body.Value); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "session_id": sessionID, "config_id": body.ConfigID})
+
+	case "messages":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+
+		messages, err := s.acpManager.GetSessionMessages(sessionID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(messages)
+
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Unknown session action: " + subAction})
+	}
 }

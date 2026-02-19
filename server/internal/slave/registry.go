@@ -1,12 +1,13 @@
 package slave
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/slavetypes"
+	"github.com/diane-assistant/diane/internal/store"
 	"github.com/gorilla/websocket"
 )
 
@@ -35,7 +36,7 @@ type SlaveConnection struct {
 type Registry struct {
 	connections   map[string]*SlaveConnection // hostID -> connection
 	mu            sync.RWMutex
-	db            *db.DB
+	db            store.SlaveStore
 	ca            *CertificateAuthority
 	notifyChannel chan *RegistryNotification
 }
@@ -48,10 +49,10 @@ type RegistryNotification struct {
 }
 
 // NewRegistry creates a new slave registry
-func NewRegistry(database *db.DB, ca *CertificateAuthority) *Registry {
+func NewRegistry(slaveStore store.SlaveStore, ca *CertificateAuthority) *Registry {
 	r := &Registry{
 		connections:   make(map[string]*SlaveConnection),
-		db:            database,
+		db:            slaveStore,
 		ca:            ca,
 		notifyChannel: make(chan *RegistryNotification, 10),
 	}
@@ -87,7 +88,7 @@ func (r *Registry) Register(hostID string, conn *websocket.Conn, certSerial stri
 	r.connections[hostID] = slaveConn
 
 	// Update database
-	if err := r.db.UpdateSlaveLastSeen(hostID); err != nil {
+	if err := r.db.UpdateSlaveLastSeen(context.Background(), hostID); err != nil {
 		fmt.Printf("Warning: failed to update last seen for %s: %v\n", hostID, err)
 	}
 
@@ -146,7 +147,7 @@ func (r *Registry) GetConnectedSlaves() []*SlaveConnection {
 // GetAllSlaves returns all slaves (connected and disconnected from DB)
 func (r *Registry) GetAllSlaves() ([]*SlaveInfo, error) {
 	// Get from database
-	dbSlaves, err := r.db.ListSlaveServers()
+	dbSlaves, err := r.db.ListSlaveServers(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to list slaves from DB: %w", err)
 	}
@@ -223,7 +224,7 @@ func (r *Registry) UpdateHeartbeat(hostID string) error {
 	conn.mu.Unlock()
 
 	// Update database
-	return r.db.UpdateSlaveLastSeen(hostID)
+	return r.db.UpdateSlaveLastSeen(context.Background(), hostID)
 }
 
 // IsConnected checks if a slave is currently connected

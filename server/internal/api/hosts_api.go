@@ -1,24 +1,25 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 
-	"github.com/diane-assistant/diane/internal/db"
 	"github.com/diane-assistant/diane/internal/slave"
+	"github.com/diane-assistant/diane/internal/store"
 )
 
 // HostsAPI handles host/node information endpoints
 type HostsAPI struct {
-	db           *db.DB
+	db           store.SlaveStore
 	slaveManager *slave.Manager
 }
 
 // NewHostsAPI creates a new HostsAPI
-func NewHostsAPI(database *db.DB, slaveManager *slave.Manager) *HostsAPI {
-	slog.Info("NewHostsAPI called", "database_nil", database == nil, "slaveManager_nil", slaveManager == nil)
-	return &HostsAPI{db: database, slaveManager: slaveManager}
+func NewHostsAPI(slaveStore store.SlaveStore, slaveManager *slave.Manager) *HostsAPI {
+	slog.Info("NewHostsAPI called", "database_nil", slaveStore == nil, "slaveManager_nil", slaveManager == nil)
+	return &HostsAPI{db: slaveStore, slaveManager: slaveManager}
 }
 
 // HostInfo represents a host/node in the system
@@ -59,7 +60,7 @@ func (api *HostsAPI) handleHosts(w http.ResponseWriter, r *http.Request) {
 
 	// Add slave nodes from database
 	if api.db != nil {
-		slaves, err := api.db.ListSlaveServers()
+		slaves, err := api.db.ListSlaveServers(context.Background())
 		if err != nil {
 			// Log error but don't fail the request
 			w.WriteHeader(http.StatusInternalServerError)

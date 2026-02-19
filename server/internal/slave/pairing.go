@@ -1,18 +1,19 @@
 package slave
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"math/big"
 	"sync"
 	"time"
 
-	"github.com/diane-assistant/diane/internal/db"
+	"github.com/diane-assistant/diane/internal/store"
 )
 
 // PairingService manages slave pairing requests
 type PairingService struct {
-	db              *db.DB
+	db              store.SlaveStore
 	ca              *CertificateAuthority
 	pendingRequests map[string]*PairingRequestInfo
 	mu              sync.RWMutex
@@ -37,9 +38,9 @@ type PairingNotification struct {
 }
 
 // NewPairingService creates a new pairing service
-func NewPairingService(database *db.DB, ca *CertificateAuthority) *PairingService {
+func NewPairingService(slaveStore store.SlaveStore, ca *CertificateAuthority) *PairingService {
 	ps := &PairingService{
-		db:              database,
+		db:              slaveStore,
 		ca:              ca,
 		pendingRequests: make(map[string]*PairingRequestInfo),
 		notifyChannel:   make(chan *PairingNotification, 10),
@@ -80,7 +81,7 @@ func (ps *PairingService) CreatePairingRequest(hostID string, csrPEM []byte, pla
 	}
 
 	// Clean up any pending requests for this host in the database
-	if err := ps.db.DeletePendingPairingRequestsForHost(hostID); err != nil {
+	if err := ps.db.DeletePendingPairingRequestsForHost(context.Background(), hostID); err != nil {
 		// Log but don't fail - we can continue even if cleanup fails
 		fmt.Printf("Warning: failed to cleanup old pairing requests for host %s: %v\n", hostID, err)
 	}
@@ -108,7 +109,7 @@ func (ps *PairingService) CreatePairingRequest(hostID string, csrPEM []byte, pla
 	ps.pendingRequests[pairingCode] = req
 
 	// Persist to database
-	if err := ps.db.CreatePairingRequest(hostID, pairingCode, string(csrPEM), platform, expiresAt); err != nil {
+	if err := ps.db.CreatePairingRequest(context.Background(), hostID, pairingCode, string(csrPEM), platform, expiresAt); err != nil {
 		delete(ps.pendingRequests, pairingCode)
 		return "", fmt.Errorf("failed to persist pairing request: %w", err)
 	}
@@ -156,7 +157,7 @@ func (ps *PairingService) ApprovePairingRequest(hostID, pairingCode string) (cer
 	}
 
 	// Check if slave server record already exists
-	existingSlave, err := ps.db.GetSlaveServerByHostID(hostID)
+	existingSlave, err := ps.db.GetSlaveServerByHostID(context.Background(), hostID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to check for existing slave: %w", err)
 	}
@@ -167,20 +168,20 @@ func (ps *PairingService) ApprovePairingRequest(hostID, pairingCode string) (cer
 
 	if existingSlave != nil {
 		// Update existing slave with new credentials
-		err = ps.db.UpdateSlaveServerCredentials(hostID, serialNumber, req.Platform, now, expiresAt)
+		err = ps.db.UpdateSlaveServerCredentials(context.Background(), hostID, serialNumber, req.Platform, now, expiresAt)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to update slave server credentials: %w", err)
 		}
 	} else {
 		// Create new slave server record
-		_, err = ps.db.CreateSlaveServer(hostID, serialNumber, req.Platform, now, expiresAt)
+		_, err = ps.db.CreateSlaveServer(context.Background(), hostID, serialNumber, req.Platform, now, expiresAt)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create slave server record: %w", err)
 		}
 	}
 
 	// Update request status and store certificate
-	if err := ps.db.UpdatePairingRequestApproved(hostID, pairingCode, string(certPEM)); err != nil {
+	if err := ps.db.UpdatePairingRequestApproved(context.Background(), hostID, pairingCode, string(certPEM)); err != nil {
 		// Log error but don't fail
 		fmt.Printf("Warning: failed to update pairing request status: %v\n", err)
 	}
@@ -210,7 +211,7 @@ func (ps *PairingService) GetPairingStatus(pairingCode string) (string, string, 
 	}
 
 	// Check database for approved/denied requests
-	dbReq, err := ps.db.GetPairingRequest(pairingCode)
+	dbReq, err := ps.db.GetPairingRequest(context.Background(), pairingCode)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get pairing request: %w", err)
 	}
@@ -241,7 +242,7 @@ func (ps *PairingService) DenyPairingRequest(hostID, pairingCode string) error {
 	}
 
 	// Update request status
-	if err := ps.db.UpdatePairingRequestStatus(hostID, pairingCode, "denied"); err != nil {
+	if err := ps.db.UpdatePairingRequestStatus(context.Background(), hostID, pairingCode, "denied"); err != nil {
 		return fmt.Errorf("failed to update pairing request status: %w", err)
 	}
 
@@ -310,7 +311,7 @@ func (ps *PairingService) cleanupExpiredRequests() {
 		ps.mu.Unlock()
 
 		// Cleanup database
-		if err := ps.db.CleanupExpiredPairingRequests(); err != nil {
+		if err := ps.db.CleanupExpiredPairingRequests(context.Background()); err != nil {
 			fmt.Printf("Warning: failed to cleanup expired pairing requests: %v\n", err)
 		}
 	}

@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 )
 
@@ -184,121 +183,6 @@ func (db *DB) CountMCPServers() (int, error) {
 	var count int
 	err := db.conn.QueryRow("SELECT COUNT(*) FROM mcp_servers").Scan(&count)
 	return count, err
-}
-
-// MigrateFromJSON performs one-time migration from mcp-servers.json to database.
-// It checks if migration is needed (no servers in DB + JSON file exists) and:
-// 1. Imports all servers from the JSON file
-// 2. Creates a "default" context if none exists
-// 3. Adds all imported servers to the default context with all tools enabled
-// Returns the number of servers imported and any error.
-// After migration the JSON file is no longer used; the database is the sole source of truth.
-func (db *DB) MigrateFromJSON(jsonPath string) (int, error) {
-	// Check if we already have servers in the database
-	count, err := db.CountMCPServers()
-	if err != nil {
-		return 0, fmt.Errorf("failed to count existing servers: %w", err)
-	}
-
-	// If we already have servers, no migration needed
-	if count > 0 {
-		return 0, nil
-	}
-
-	// Check if JSON file exists
-	if _, err := os.Stat(jsonPath); os.IsNotExist(err) {
-		return 0, nil // No JSON file, nothing to migrate
-	}
-
-	// Read and parse the JSON file
-	data, err := os.ReadFile(jsonPath)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read JSON file: %w", err)
-	}
-
-	var config struct {
-		Servers []struct {
-			Name    string            `json:"name"`
-			Enabled bool              `json:"enabled"`
-			Type    string            `json:"type"`
-			Command string            `json:"command"`
-			Args    []string          `json:"args"`
-			Env     map[string]string `json:"env"`
-			URL     string            `json:"url,omitempty"`
-			Headers map[string]string `json:"headers,omitempty"`
-			OAuth   *OAuthConfig      `json:"oauth,omitempty"`
-		} `json:"servers"`
-	}
-
-	if err := json.Unmarshal(data, &config); err != nil {
-		return 0, fmt.Errorf("failed to parse JSON: %w", err)
-	}
-
-	// Import servers
-	imported := 0
-	for _, s := range config.Servers {
-		serverType := s.Type
-		if serverType == "" {
-			serverType = "stdio"
-		}
-
-		server := &MCPServer{
-			Name:    s.Name,
-			Enabled: s.Enabled,
-			Type:    serverType,
-			Command: s.Command,
-			Args:    s.Args,
-			Env:     s.Env,
-			URL:     s.URL,
-			Headers: s.Headers,
-			OAuth:   s.OAuth,
-		}
-
-		if err := db.CreateMCPServer(server); err != nil {
-			return imported, fmt.Errorf("failed to create server %s: %w", s.Name, err)
-		}
-		imported++
-	}
-
-	if imported == 0 {
-		return 0, nil
-	}
-
-	// Create or get the default context
-	defaultCtx, err := db.GetDefaultContext()
-	if err != nil {
-		return imported, fmt.Errorf("failed to get default context: %w", err)
-	}
-
-	var contextName string
-	if defaultCtx == nil {
-		// Create a default context
-		ctx := &Context{
-			Name:        "default",
-			Description: "Default context with all MCP servers",
-			IsDefault:   true,
-		}
-		if err := db.CreateContext(ctx); err != nil {
-			return imported, fmt.Errorf("failed to create default context: %w", err)
-		}
-		contextName = ctx.Name
-	} else {
-		contextName = defaultCtx.Name
-	}
-
-	// Add all imported servers to the default context
-	servers, err := db.ListMCPServers()
-	if err != nil {
-		return imported, fmt.Errorf("failed to list servers: %w", err)
-	}
-
-	for _, server := range servers {
-		if err := db.AddServerToContext(contextName, server.Name, true); err != nil {
-			continue
-		}
-	}
-
-	return imported, nil
 }
 
 // scanMCPServer scans a row into an MCPServer
