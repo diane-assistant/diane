@@ -117,6 +117,13 @@ func (s *Server) GetCertPaths() (certPath, keyPath string, err error) {
 
 // handleConnect handles WebSocket upgrade and slave connection
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
+	// Check if database is available
+	if s.db == nil {
+		slog.Error("Slave connection rejected: database not available")
+		http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Verify client certificate
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		http.Error(w, "Client certificate required", http.StatusUnauthorized)
@@ -130,6 +137,11 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	slave, err := s.db.GetSlaveServerByHostID(context.Background(), hostname)
 	if err != nil {
 		slog.Error("Failed to get slave server", "hostname", hostname, "error", err)
+		http.Error(w, "Unknown slave", http.StatusUnauthorized)
+		return
+	}
+	if slave == nil {
+		slog.Error("Unknown slave hostname", "hostname", hostname)
 		http.Error(w, "Unknown slave", http.StatusUnauthorized)
 		return
 	}

@@ -201,8 +201,7 @@ func (s *Service) deleteFromCache(messageID string) error {
 		return nil
 	}
 
-	_, err := s.cache.db.Exec("DELETE FROM emails WHERE gmail_id = ?", messageID)
-	return err
+	return s.cache.DeleteEmail(messageID)
 }
 
 // GetSyncState returns the current sync state
@@ -220,8 +219,7 @@ func (s *Service) ForceFullSync(maxMessages int64) (*SyncResult, error) {
 	}
 
 	// Clear sync state
-	_, err := s.cache.db.Exec("DELETE FROM sync_state WHERE account = ?", s.account)
-	if err != nil {
+	if err := s.cache.DeleteSyncState(s.account); err != nil {
 		return nil, fmt.Errorf("failed to clear sync state: %w", err)
 	}
 
@@ -234,37 +232,7 @@ func (s *Service) GetCacheStats() (*CacheStats, error) {
 		return nil, nil
 	}
 
-	stats := &CacheStats{}
-
-	// Count emails
-	row := s.cache.db.QueryRow("SELECT COUNT(*) FROM emails")
-	row.Scan(&stats.TotalEmails)
-
-	// Count emails with content
-	row = s.cache.db.QueryRow("SELECT COUNT(*) FROM emails WHERE content_cached_at IS NOT NULL")
-	row.Scan(&stats.EmailsWithContent)
-
-	// Count attachments
-	row = s.cache.db.QueryRow("SELECT COUNT(*) FROM attachments")
-	row.Scan(&stats.TotalAttachments)
-
-	// Count downloaded attachments
-	row = s.cache.db.QueryRow("SELECT COUNT(*) FROM attachments WHERE local_path IS NOT NULL")
-	row.Scan(&stats.DownloadedAttachments)
-
-	// Get sync state
-	state, _ := s.cache.GetSyncState(s.account)
-	if state != nil {
-		stats.LastFullSync = state.LastFullSync
-		stats.LastIncrementalSync = state.LastIncrementalSync
-		stats.HistoryID = state.HistoryID
-	}
-
-	// Get date range
-	row = s.cache.db.QueryRow("SELECT MIN(date), MAX(date) FROM emails")
-	row.Scan(&stats.OldestEmail, &stats.NewestEmail)
-
-	return stats, nil
+	return s.cache.GetCacheStats(s.account)
 }
 
 // CacheStats contains statistics about the local cache

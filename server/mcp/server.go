@@ -70,8 +70,11 @@ var downloadsProvider *downloads.Provider // File download tools
 var filesProvider *files.Provider         // File index tools
 var apiServer *api.Server
 var mcpHTTPServer *api.MCPHTTPServer
-var database *db.DB                 // Shared database instance
-var contextStore store.ContextStore // Shared Emergent-backed context store
+var database *db.DB                     // Shared database instance
+var contextStore store.ContextStore     // Shared Emergent-backed context store
+var jobStore store.JobStore             // Shared Emergent-backed job store
+var executionStore store.ExecutionStore // Shared Emergent-backed execution store
+var agentStore store.AgentStore         // Shared Emergent-backed agent store
 var startTime time.Time
 
 // DBConfigProvider implements mcpproxy.ConfigProvider, loading server configs from the Emergent-backed store
@@ -353,20 +356,16 @@ func (d *DianeStatusProvider) ReloadConfig() error {
 }
 
 // TODO(emergent-migration): GetJobs, GetJobLogs, ToggleJob, GetAgentLogs, and CreateAgentLog
-// all use direct *db.DB calls (ListJobs, GetJobByName, ListJobExecutions, UpdateJob,
-// ListAgentLogs, CreateAgentLog). These should be routed through store.JobStore,
-// store.ExecutionStore, and store.AgentStore interfaces once those are implemented.
-// See db/jobs.go, db/executions.go, and db/agents.go for the migration plan.
+// now use Emergent-backed stores (jobStore, executionStore, agentStore).
 
 // GetJobs returns all scheduled jobs
 func (d *DianeStatusProvider) GetJobs() ([]api.Job, error) {
-	database, err := getDB()
-	if err != nil {
-		return nil, err
+	if jobStore == nil {
+		return nil, fmt.Errorf("job store not initialized")
 	}
-	defer database.Close()
 
-	dbJobs, err := database.ListJobs(false)
+	ctx := context.Background()
+	dbJobs, err := jobStore.ListJobs(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -390,31 +389,30 @@ func (d *DianeStatusProvider) GetJobs() ([]api.Job, error) {
 
 // GetJobLogs returns job execution logs
 func (d *DianeStatusProvider) GetJobLogs(jobName string, limit int) ([]api.JobExecution, error) {
-	database, err := getDB()
-	if err != nil {
-		return nil, err
+	if jobStore == nil || executionStore == nil {
+		return nil, fmt.Errorf("stores not initialized")
 	}
-	defer database.Close()
 
+	ctx := context.Background()
 	var jobID *int64
 	var jobNameMap = make(map[int64]string)
 
 	// Build job name map for all jobs
-	allJobs, _ := database.ListJobs(false)
+	allJobs, _ := jobStore.ListJobs(ctx, false)
 	for _, j := range allJobs {
 		jobNameMap[j.ID] = j.Name
 	}
 
 	// If filtering by job name, get the job ID
 	if jobName != "" {
-		job, err := database.GetJobByName(jobName)
+		job, err := jobStore.GetJobByName(ctx, jobName)
 		if err != nil {
 			return nil, fmt.Errorf("job not found: %s", jobName)
 		}
 		jobID = &job.ID
 	}
 
-	dbExecs, err := database.ListJobExecutions(jobID, limit, 0)
+	dbExecs, err := executionStore.ListJobExecutions(ctx, jobID, limit, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -439,34 +437,32 @@ func (d *DianeStatusProvider) GetJobLogs(jobName string, limit int) ([]api.JobEx
 
 // ToggleJob enables or disables a job
 func (d *DianeStatusProvider) ToggleJob(name string, enabled bool) error {
-	database, err := getDB()
-	if err != nil {
-		return err
+	if jobStore == nil {
+		return fmt.Errorf("job store not initialized")
 	}
-	defer database.Close()
 
-	job, err := database.GetJobByName(name)
+	ctx := context.Background()
+	job, err := jobStore.GetJobByName(ctx, name)
 	if err != nil {
 		return fmt.Errorf("job not found: %s", name)
 	}
 
-	return database.UpdateJob(job.ID, nil, nil, &enabled)
+	return jobStore.UpdateJob(ctx, job.ID, nil, nil, &enabled)
 }
 
 // GetAgentLogs returns agent communication logs
 func (d *DianeStatusProvider) GetAgentLogs(agentName string, limit int) ([]api.AgentLog, error) {
-	database, err := getDB()
-	if err != nil {
-		return nil, err
+	if agentStore == nil {
+		return nil, fmt.Errorf("agent store not initialized")
 	}
-	defer database.Close()
 
+	ctx := context.Background()
 	var agentNamePtr *string
 	if agentName != "" {
 		agentNamePtr = &agentName
 	}
 
-	dbLogs, err := database.ListAgentLogs(agentNamePtr, limit, 0)
+	dbLogs, err := agentStore.ListAgentLogs(ctx, agentNamePtr, limit, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -490,13 +486,12 @@ func (d *DianeStatusProvider) GetAgentLogs(agentName string, limit int) ([]api.A
 
 // CreateAgentLog creates an agent communication log entry
 func (d *DianeStatusProvider) CreateAgentLog(agentName, direction, messageType string, content, errMsg *string, durationMs *int) error {
-	database, err := getDB()
-	if err != nil {
-		return err
+	if agentStore == nil {
+		return fmt.Errorf("agent store not initialized")
 	}
-	defer database.Close()
 
-	_, err = database.CreateAgentLog(agentName, direction, messageType, content, errMsg, durationMs)
+	ctx := context.Background()
+	_, err := agentStore.CreateAgentLog(ctx, agentName, direction, messageType, content, errMsg, durationMs)
 	return err
 }
 
@@ -1665,7 +1660,10 @@ func main() {
 		slaveStore = store.NewEmergentSlaveStore(emergentClient)
 		contextStore = store.NewEmergentContextStore(emergentClient)
 		mcpServerStore = store.NewEmergentMCPServerStore(emergentClient)
-		slog.Info("Emergent stores initialized (slave, context, mcp_server)")
+		jobStore = store.NewEmergentJobStore(emergentClient)
+		executionStore = store.NewEmergentExecutionStore(emergentClient)
+		agentStore = store.NewEmergentAgentStore(emergentClient)
+		slog.Info("Emergent stores initialized (slave, context, mcp_server, job, execution, agent)")
 	}
 
 	// One-time migration: copy MCP servers, placements, contexts, and tool
@@ -4001,18 +3999,17 @@ func mcpTextResponse(text string) MCPResponse {
 }
 
 func jobList(args map[string]interface{}) MCPResponse {
-	database, err := getDB()
-	if err != nil {
-		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	if jobStore == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "job store not initialized"}}
 	}
-	defer database.Close()
 
 	enabledOnly := false
 	if val, ok := args["enabled_only"].(bool); ok {
 		enabledOnly = val
 	}
 
-	jobs, err := database.ListJobs(enabledOnly)
+	ctx := context.Background()
+	jobs, err := jobStore.ListJobs(ctx, enabledOnly)
 	if err != nil {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 	}
@@ -4041,13 +4038,12 @@ func jobAdd(args map[string]interface{}) MCPResponse {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: "name, schedule, and command are required"}}
 	}
 
-	database, err := getDB()
-	if err != nil {
-		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	if jobStore == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "job store not initialized"}}
 	}
-	defer database.Close()
 
-	job, err := database.CreateJob(name, command, schedule)
+	ctx := context.Background()
+	job, err := jobStore.CreateJob(ctx, name, command, schedule)
 	if err != nil {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 	}
@@ -4063,19 +4059,18 @@ func jobEnable(args map[string]interface{}) MCPResponse {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: "job identifier is required"}}
 	}
 
-	database, err := getDB()
-	if err != nil {
-		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	if jobStore == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "job store not initialized"}}
 	}
-	defer database.Close()
 
-	job, err := database.GetJobByName(jobIdentifier)
+	ctx := context.Background()
+	job, err := jobStore.GetJobByName(ctx, jobIdentifier)
 	if err != nil {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 	}
 
 	enabled := true
-	if err := database.UpdateJob(job.ID, nil, nil, &enabled); err != nil {
+	if err := jobStore.UpdateJob(ctx, job.ID, nil, nil, &enabled); err != nil {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 	}
 
@@ -4088,19 +4083,18 @@ func jobDisable(args map[string]interface{}) MCPResponse {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: "job identifier is required"}}
 	}
 
-	database, err := getDB()
-	if err != nil {
-		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	if jobStore == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "job store not initialized"}}
 	}
-	defer database.Close()
 
-	job, err := database.GetJobByName(jobIdentifier)
+	ctx := context.Background()
+	job, err := jobStore.GetJobByName(ctx, jobIdentifier)
 	if err != nil {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 	}
 
 	enabled := false
-	if err := database.UpdateJob(job.ID, nil, nil, &enabled); err != nil {
+	if err := jobStore.UpdateJob(ctx, job.ID, nil, nil, &enabled); err != nil {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 	}
 
@@ -4113,18 +4107,17 @@ func jobDelete(args map[string]interface{}) MCPResponse {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: "job identifier is required"}}
 	}
 
-	database, err := getDB()
+	if jobStore == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "job store not initialized"}}
+	}
+
+	ctx := context.Background()
+	job, err := jobStore.GetJobByName(ctx, jobIdentifier)
 	if err != nil {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 	}
-	defer database.Close()
 
-	job, err := database.GetJobByName(jobIdentifier)
-	if err != nil {
-		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
-	}
-
-	if err := database.DeleteJob(job.ID); err != nil {
+	if err := jobStore.DeleteJob(ctx, job.ID); err != nil {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 	}
 
@@ -4132,13 +4125,12 @@ func jobDelete(args map[string]interface{}) MCPResponse {
 }
 
 func pauseAll() MCPResponse {
-	database, err := getDB()
-	if err != nil {
-		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	if jobStore == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "job store not initialized"}}
 	}
-	defer database.Close()
 
-	jobs, err := database.ListJobs(true)
+	ctx := context.Background()
+	jobs, err := jobStore.ListJobs(ctx, true)
 	if err != nil {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 	}
@@ -4146,7 +4138,7 @@ func pauseAll() MCPResponse {
 	count := 0
 	enabled := false
 	for _, job := range jobs {
-		if err := database.UpdateJob(job.ID, nil, nil, &enabled); err != nil {
+		if err := jobStore.UpdateJob(ctx, job.ID, nil, nil, &enabled); err != nil {
 			return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 		}
 		count++
@@ -4156,13 +4148,12 @@ func pauseAll() MCPResponse {
 }
 
 func resumeAll() MCPResponse {
-	database, err := getDB()
-	if err != nil {
-		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	if jobStore == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "job store not initialized"}}
 	}
-	defer database.Close()
 
-	allJobs, err := database.ListJobs(false)
+	ctx := context.Background()
+	allJobs, err := jobStore.ListJobs(ctx, false)
 	if err != nil {
 		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 	}
@@ -4171,7 +4162,7 @@ func resumeAll() MCPResponse {
 	enabled := true
 	for _, job := range allJobs {
 		if !job.Enabled {
-			if err := database.UpdateJob(job.ID, nil, nil, &enabled); err != nil {
+			if err := jobStore.UpdateJob(ctx, job.ID, nil, nil, &enabled); err != nil {
 				return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
 			}
 			count++
@@ -4182,11 +4173,9 @@ func resumeAll() MCPResponse {
 }
 
 func getLogs(args map[string]interface{}) MCPResponse {
-	database, err := getDB()
-	if err != nil {
-		return MCPResponse{Error: &MCPError{Code: -1, Message: err.Error()}}
+	if jobStore == nil || executionStore == nil {
+		return MCPResponse{Error: &MCPError{Code: -1, Message: "stores not initialized"}}
 	}
-	defer database.Close()
 
 	limit := 10
 	if val, ok := args["limit"].(float64); ok {
@@ -4198,21 +4187,22 @@ func getLogs(args map[string]interface{}) MCPResponse {
 		jobName = val
 	}
 
+	ctx := context.Background()
 	// Get executions
 	var executions []*db.JobExecution
 	if jobName != "" {
-		job, jobErr := database.GetJobByName(jobName)
+		job, jobErr := jobStore.GetJobByName(ctx, jobName)
 		if jobErr != nil {
 			return MCPResponse{Error: &MCPError{Code: -1, Message: jobErr.Error()}}
 		}
 		var execErr error
-		executions, execErr = database.ListJobExecutions(&job.ID, limit, 0)
+		executions, execErr = executionStore.ListJobExecutions(ctx, &job.ID, limit, 0)
 		if execErr != nil {
 			return MCPResponse{Error: &MCPError{Code: -1, Message: execErr.Error()}}
 		}
 	} else {
 		var execErr error
-		executions, execErr = database.ListJobExecutions(nil, limit, 0)
+		executions, execErr = executionStore.ListJobExecutions(ctx, nil, limit, 0)
 		if execErr != nil {
 			return MCPResponse{Error: &MCPError{Code: -1, Message: execErr.Error()}}
 		}

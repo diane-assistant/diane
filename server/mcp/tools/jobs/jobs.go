@@ -2,31 +2,45 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/diane-assistant/diane/internal/db"
+	"github.com/diane-assistant/diane/internal/emergent"
+	"github.com/diane-assistant/diane/internal/store"
 	"github.com/diane-assistant/diane/mcp/tools"
 )
 
 // Provider implements ToolProvider for job management
 type Provider struct {
-	dbPath string
+	jobStore       store.JobStore
+	executionStore store.ExecutionStore
 }
 
 // NewProvider creates a new jobs tools provider
 func NewProvider() *Provider {
-	home, _ := os.UserHomeDir()
+	// Initialize Emergent-backed stores
+	client, err := emergent.GetClient()
+	if err != nil {
+		// Return provider with nil stores; CheckDependencies will catch this
+		return &Provider{}
+	}
+
 	return &Provider{
-		dbPath: filepath.Join(home, ".diane", "cron.db"),
+		jobStore:       store.NewEmergentJobStore(client),
+		executionStore: store.NewEmergentExecutionStore(client),
 	}
 }
 
-// NewProviderWithPath creates a provider with a specific database path (for testing)
-func NewProviderWithPath(dbPath string) *Provider {
-	return &Provider{dbPath: dbPath}
+// NewProviderWithStores creates a provider with injected stores (for testing)
+func NewProviderWithStores(jobStore store.JobStore, executionStore store.ExecutionStore) *Provider {
+	return &Provider{
+		jobStore:       jobStore,
+		executionStore: executionStore,
+	}
 }
 
 // Name returns the provider name
@@ -34,13 +48,14 @@ func (p *Provider) Name() string {
 	return "jobs"
 }
 
-// CheckDependencies verifies the database is accessible
+// CheckDependencies verifies the stores are initialized
 func (p *Provider) CheckDependencies() error {
-	database, err := db.New(p.dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open jobs database: %w", err)
+	if p.jobStore == nil {
+		return fmt.Errorf("job store not initialized")
 	}
-	database.Close()
+	if p.executionStore == nil {
+		return fmt.Errorf("execution store not initialized")
+	}
 	return nil
 }
 
@@ -171,20 +186,11 @@ func (p *Provider) Call(name string, args map[string]interface{}) (interface{}, 
 	}
 }
 
-func (p *Provider) getDB() (*db.DB, error) {
-	return db.New(p.dbPath)
-}
-
 func (p *Provider) jobList(args map[string]interface{}) (interface{}, error) {
-	database, err := p.getDB()
-	if err != nil {
-		return nil, err
-	}
-	defer database.Close()
-
 	enabledOnly := tools.GetBool(args, "enabled_only", false)
 
-	jobs, err := database.ListJobs(enabledOnly)
+	ctx := context.Background()
+	jobs, err := p.jobStore.ListJobs(ctx, enabledOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -206,13 +212,8 @@ func (p *Provider) jobAdd(args map[string]interface{}) (interface{}, error) {
 		return nil, err
 	}
 
-	database, err := p.getDB()
-	if err != nil {
-		return nil, err
-	}
-	defer database.Close()
-
-	job, err := database.CreateJob(name, command, schedule)
+	ctx := context.Background()
+	job, err := p.jobStore.CreateJob(ctx, name, command, schedule)
 	if err != nil {
 		return nil, err
 	}
@@ -227,19 +228,14 @@ func (p *Provider) jobEnable(args map[string]interface{}) (interface{}, error) {
 		return nil, err
 	}
 
-	database, err := p.getDB()
-	if err != nil {
-		return nil, err
-	}
-	defer database.Close()
-
-	job, err := database.GetJobByName(jobIdentifier)
+	ctx := context.Background()
+	job, err := p.jobStore.GetJobByName(ctx, jobIdentifier)
 	if err != nil {
 		return nil, err
 	}
 
 	enabled := true
-	if err := database.UpdateJob(job.ID, nil, nil, &enabled); err != nil {
+	if err := p.jobStore.UpdateJob(ctx, job.ID, nil, nil, &enabled); err != nil {
 		return nil, err
 	}
 
@@ -252,19 +248,14 @@ func (p *Provider) jobDisable(args map[string]interface{}) (interface{}, error) 
 		return nil, err
 	}
 
-	database, err := p.getDB()
-	if err != nil {
-		return nil, err
-	}
-	defer database.Close()
-
-	job, err := database.GetJobByName(jobIdentifier)
+	ctx := context.Background()
+	job, err := p.jobStore.GetJobByName(ctx, jobIdentifier)
 	if err != nil {
 		return nil, err
 	}
 
 	enabled := false
-	if err := database.UpdateJob(job.ID, nil, nil, &enabled); err != nil {
+	if err := p.jobStore.UpdateJob(ctx, job.ID, nil, nil, &enabled); err != nil {
 		return nil, err
 	}
 
@@ -277,18 +268,13 @@ func (p *Provider) jobDelete(args map[string]interface{}) (interface{}, error) {
 		return nil, err
 	}
 
-	database, err := p.getDB()
-	if err != nil {
-		return nil, err
-	}
-	defer database.Close()
-
-	job, err := database.GetJobByName(jobIdentifier)
+	ctx := context.Background()
+	job, err := p.jobStore.GetJobByName(ctx, jobIdentifier)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := database.DeleteJob(job.ID); err != nil {
+	if err := p.jobStore.DeleteJob(ctx, job.ID); err != nil {
 		return nil, err
 	}
 
@@ -296,13 +282,8 @@ func (p *Provider) jobDelete(args map[string]interface{}) (interface{}, error) {
 }
 
 func (p *Provider) jobPause() (interface{}, error) {
-	database, err := p.getDB()
-	if err != nil {
-		return nil, err
-	}
-	defer database.Close()
-
-	jobs, err := database.ListJobs(true)
+	ctx := context.Background()
+	jobs, err := p.jobStore.ListJobs(ctx, true)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +291,7 @@ func (p *Provider) jobPause() (interface{}, error) {
 	count := 0
 	enabled := false
 	for _, job := range jobs {
-		if err := database.UpdateJob(job.ID, nil, nil, &enabled); err != nil {
+		if err := p.jobStore.UpdateJob(ctx, job.ID, nil, nil, &enabled); err != nil {
 			return nil, err
 		}
 		count++
@@ -320,13 +301,8 @@ func (p *Provider) jobPause() (interface{}, error) {
 }
 
 func (p *Provider) jobResume() (interface{}, error) {
-	database, err := p.getDB()
-	if err != nil {
-		return nil, err
-	}
-	defer database.Close()
-
-	allJobs, err := database.ListJobs(false)
+	ctx := context.Background()
+	allJobs, err := p.jobStore.ListJobs(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +311,7 @@ func (p *Provider) jobResume() (interface{}, error) {
 	enabled := true
 	for _, job := range allJobs {
 		if !job.Enabled {
-			if err := database.UpdateJob(job.ID, nil, nil, &enabled); err != nil {
+			if err := p.jobStore.UpdateJob(ctx, job.ID, nil, nil, &enabled); err != nil {
 				return nil, err
 			}
 			count++
@@ -346,24 +322,21 @@ func (p *Provider) jobResume() (interface{}, error) {
 }
 
 func (p *Provider) jobLogs(args map[string]interface{}) (interface{}, error) {
-	database, err := p.getDB()
-	if err != nil {
-		return nil, err
-	}
-	defer database.Close()
-
 	limit := tools.GetInt(args, "limit", 10)
 	jobName := tools.GetString(args, "job_name")
 
+	ctx := context.Background()
 	var executions []*db.JobExecution
+	var err error
+
 	if jobName != "" {
-		job, jobErr := database.GetJobByName(jobName)
+		job, jobErr := p.jobStore.GetJobByName(ctx, jobName)
 		if jobErr != nil {
 			return nil, jobErr
 		}
-		executions, err = database.ListJobExecutions(&job.ID, limit, 0)
+		executions, err = p.executionStore.ListJobExecutions(ctx, &job.ID, limit, 0)
 	} else {
-		executions, err = database.ListJobExecutions(nil, limit, 0)
+		executions, err = p.executionStore.ListJobExecutions(ctx, nil, limit, 0)
 	}
 
 	if err != nil {

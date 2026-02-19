@@ -185,30 +185,7 @@ func (s *Service) ListDownloadedAttachments() ([]Attachment, error) {
 		return nil, nil
 	}
 
-	// Query attachments with local_path set
-	rows, err := s.cache.db.Query(`
-		SELECT id, gmail_id, attachment_id, filename, mime_type, size, local_path, downloaded_at
-		FROM attachments WHERE local_path IS NOT NULL
-		ORDER BY downloaded_at DESC
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var result []Attachment
-	for rows.Next() {
-		var a Attachment
-		var downloadedAt *time.Time
-		err := rows.Scan(&a.ID, &a.GmailID, &a.AttachmentID, &a.Filename, &a.MimeType, &a.Size, &a.LocalPath, &downloadedAt)
-		if err != nil {
-			continue
-		}
-		a.DownloadedAt = downloadedAt
-		result = append(result, a)
-	}
-
-	return result, nil
+	return s.cache.ListDownloadedAttachments()
 }
 
 // CleanupOldAttachments removes attachment files older than the specified duration

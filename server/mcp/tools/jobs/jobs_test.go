@@ -1,12 +1,136 @@
 package jobs
 
 import (
-	"os"
-	"path/filepath"
+	"context"
+	"fmt"
+	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/diane-assistant/diane/internal/db"
 )
+
+// ---------------------------------------------------------------------------
+// In-memory mock stores for testing
+// ---------------------------------------------------------------------------
+
+type mockJobStore struct {
+	mu   sync.Mutex
+	jobs map[int64]*db.Job
+	seq  int64
+}
+
+func newMockJobStore() *mockJobStore {
+	return &mockJobStore{jobs: make(map[int64]*db.Job)}
+}
+
+func (s *mockJobStore) CreateJob(_ context.Context, name, command, schedule string) (*db.Job, error) {
+	return s.CreateJobWithAction(context.Background(), name, command, schedule, "shell", nil)
+}
+
+func (s *mockJobStore) CreateJobWithAction(_ context.Context, name, command, schedule, actionType string, agentName *string) (*db.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if j.Name == name {
+			return nil, fmt.Errorf("duplicate job name: %s", name)
+		}
+	}
+	s.seq++
+	now := time.Now()
+	j := &db.Job{
+		ID: s.seq, Name: name, Command: command, Schedule: schedule,
+		Enabled: true, ActionType: actionType, AgentName: agentName,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	s.jobs[j.ID] = j
+	return j, nil
+}
+
+func (s *mockJobStore) GetJob(_ context.Context, id int64) (*db.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, ok := s.jobs[id]
+	if !ok {
+		return nil, fmt.Errorf("job not found: id=%d", id)
+	}
+	return j, nil
+}
+
+func (s *mockJobStore) GetJobByName(_ context.Context, name string) (*db.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if j.Name == name {
+			return j, nil
+		}
+	}
+	return nil, fmt.Errorf("job not found: name=%s", name)
+}
+
+func (s *mockJobStore) ListJobs(_ context.Context, enabledOnly bool) ([]*db.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result []*db.Job
+	for _, j := range s.jobs {
+		if enabledOnly && !j.Enabled {
+			continue
+		}
+		result = append(result, j)
+	}
+	sort.Slice(result, func(i, k int) bool { return result[i].Name < result[k].Name })
+	return result, nil
+}
+
+func (s *mockJobStore) UpdateJob(_ context.Context, id int64, command, schedule *string, enabled *bool) error {
+	return s.UpdateJobFull(context.Background(), id, command, schedule, enabled, nil, nil)
+}
+
+func (s *mockJobStore) UpdateJobFull(_ context.Context, id int64, command, schedule *string, enabled *bool, _ *string, _ *string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, ok := s.jobs[id]
+	if !ok {
+		return fmt.Errorf("job not found: id=%d", id)
+	}
+	if command != nil {
+		j.Command = *command
+	}
+	if schedule != nil {
+		j.Schedule = *schedule
+	}
+	if enabled != nil {
+		j.Enabled = *enabled
+	}
+	j.UpdatedAt = time.Now()
+	return nil
+}
+
+func (s *mockJobStore) DeleteJob(_ context.Context, id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.jobs, id)
+	return nil
+}
+
+type mockExecutionStore struct{}
+
+func (s *mockExecutionStore) CreateJobExecution(_ context.Context, _ int64) (int64, error) {
+	return 1, nil
+}
+func (s *mockExecutionStore) UpdateJobExecution(_ context.Context, _ int64, _ int, _, _ string, _ error) error {
+	return nil
+}
+func (s *mockExecutionStore) GetJobExecution(_ context.Context, _ int64) (*db.JobExecution, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (s *mockExecutionStore) ListJobExecutions(_ context.Context, _ *int64, _, _ int) ([]*db.JobExecution, error) {
+	return nil, nil
+}
+func (s *mockExecutionStore) DeleteOldExecutions(_ context.Context, _ int) (int64, error) {
+	return 0, nil
+}
 
 func TestProviderName(t *testing.T) {
 	p := NewProvider()
@@ -104,30 +228,11 @@ func TestToolInputSchemas(t *testing.T) {
 	}
 }
 
-// --- Integration tests with temp database ---
+// --- Integration tests with mock stores ---
 
 func setupTestDB(t *testing.T) (*Provider, func()) {
-	tmpDir, err := os.MkdirTemp("", "jobs-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-
-	dbPath := filepath.Join(tmpDir, "test.db")
-	p := NewProviderWithPath(dbPath)
-
-	// Initialize the database by opening it once
-	database, err := db.New(dbPath)
-	if err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("failed to create test database: %v", err)
-	}
-	database.Close()
-
-	cleanup := func() {
-		os.RemoveAll(tmpDir)
-	}
-
-	return p, cleanup
+	p := NewProviderWithStores(newMockJobStore(), &mockExecutionStore{})
+	return p, func() {}
 }
 
 func TestJobList(t *testing.T) {
