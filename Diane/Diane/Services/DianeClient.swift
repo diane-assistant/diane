@@ -60,8 +60,8 @@ class DianeClient: DianeClientProtocol {
     init() {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         self.socketPath = homeDir.appendingPathComponent(".diane/diane.sock").path
-        logger.info("DianeClient initialized with socket path: \(self.socketPath)")
-        FileLogger.shared.info("DianeClient initialized with socket path: \(self.socketPath)", category: "DianeClient")
+        logger.debug("DianeClient initialized with socket path: \(self.socketPath)")
+        FileLogger.shared.debug("DianeClient initialized with socket path: \(self.socketPath)", category: "DianeClient")
         
         // Create a custom URLSession configuration for Unix socket
         let config = URLSessionConfiguration.default

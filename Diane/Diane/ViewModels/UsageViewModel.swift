@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.diane.Diane", category: "Usage")
 
 /// Drives the Usage tab — loads summary and recent usage data, manages
 /// time‐range selection and loading/error state.
@@ -45,6 +48,7 @@ final class UsageViewModel {
     func loadData() async {
         isLoading = true
         error = nil
+        FileLogger.shared.info("Loading usage data for time range '\(selectedTimeRange.rawValue)'...", category: "Usage")
 
         do {
             let loadedSummary = try await client.getUsageSummary(from: selectedTimeRange.from, to: nil)
@@ -52,8 +56,10 @@ final class UsageViewModel {
 
             usageSummary = loadedSummary
             recentUsage = loadedRecent
+            FileLogger.shared.info("Loaded usage data: \(loadedSummary.summary.count) summary records, \(loadedRecent.records.count) recent entries", category: "Usage")
         } catch {
             self.error = error.localizedDescription
+            FileLogger.shared.error("Failed to load usage data: \(error.localizedDescription)", category: "Usage")
         }
 
         isLoading = false

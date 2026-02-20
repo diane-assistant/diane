@@ -215,8 +215,8 @@ class StatusMonitor: ObservableObject {
                 status = newStatus
                 connectionState = .connected
                 lastError = nil
-                logger.info("Remote status refresh successful: connected, \(newStatus.totalTools) tools")
-                FileLogger.shared.info("Remote status refresh successful", category: "StatusMonitor")
+                logger.debug("Remote status refresh successful: connected, \(newStatus.totalTools) tools")
+                FileLogger.shared.debug("Remote status refresh successful", category: "StatusMonitor")
             } catch {
                 logger.error("Remote status refresh failed: \(error.localizedDescription)")
                 FileLogger.shared.error("Remote status refresh failed: \(error.localizedDescription)", category: "StatusMonitor")
@@ -228,8 +228,8 @@ class StatusMonitor: ObservableObject {
             // Local mode: check socket and process
             let socketExists = client.socketExists
             let processRunning = client.isProcessRunning()
-            logger.info("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)")
-            FileLogger.shared.info("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)", category: "StatusMonitor")
+            logger.debug("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)")
+            FileLogger.shared.debug("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)", category: "StatusMonitor")
             
             // Quick check if socket exists
             guard socketExists || processRunning else {
@@ -245,8 +245,8 @@ class StatusMonitor: ObservableObject {
                 status = newStatus
                 connectionState = .connected
                 lastError = nil
-                logger.info("Status refresh successful: connected, \(newStatus.totalTools) tools")
-                FileLogger.shared.info("Status refresh successful: connected, \(newStatus.totalTools) tools", category: "StatusMonitor")
+                logger.debug("Status refresh successful: connected, \(newStatus.totalTools) tools")
+                FileLogger.shared.debug("Status refresh successful: connected, \(newStatus.totalTools) tools", category: "StatusMonitor")
             } catch {
                 logger.error("Status refresh failed: \(error.localizedDescription)")
                 FileLogger.shared.error("Status refresh failed: \(error.localizedDescription)", category: "StatusMonitor")

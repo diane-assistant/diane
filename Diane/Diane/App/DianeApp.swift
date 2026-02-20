@@ -24,6 +24,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         
         // Ensure the main window activates on launch
         NSApp.activate(ignoringOtherApps: true)
+        
+        // Set window minimum size directly on NSWindow to avoid recursive constraint
+        // updates in SwiftUI's NSHostingView (rdar://FB-style: updateConstraints →
+        // updateWindowContentSizeExtremaIfNecessary → _sizeThatFits → graphDidChange
+        // → setNeedsUpdateConstraints loop). Using .frame(minWidth:minHeight:) in the
+        // SwiftUI view hierarchy causes this recursion when observable state changes
+        // (e.g. StatusMonitor.connectionState) coincide with a constraint update cycle.
+        DispatchQueue.main.async {
+            for window in NSApp.windows {
+                if window.title == "Diane" || window.identifier?.rawValue.contains("main") == true {
+                    window.minSize = NSSize(width: 800, height: 600)
+                } else if window.identifier?.rawValue.contains("settings") == true
+                            || window.title == "Settings" {
+                    window.minSize = NSSize(width: 450, height: 300)
+                }
+            }
+        }
     }
     
     /// Register notification categories with action buttons
@@ -144,7 +161,6 @@ struct DianeApp: App {
                         .environmentObject(statusMonitor)
                         .environmentObject(updateChecker)
                         .environment(serverConfig)
-                        .frame(minWidth: 800, minHeight: 600)
                         .task {
                             await startServicesIfNeeded()
                         }
@@ -217,6 +233,25 @@ struct DianeApp: App {
             MenuBarView()
                 .environmentObject(statusMonitor)
                 .environmentObject(updateChecker)
+                // Disable all SwiftUI animations inside the MenuBarExtra panel.
+                // On macOS 26.x, animated content size changes trigger a recursive
+                // constraint update in NSHostingView.updateAnimatedWindowSize():
+                //   windowDidLayout → updateAnimatedWindowSize → setFrameSize → KVO
+                //   → invalidateSafeAreaCornerInsets → setNeedsUpdateConstraints → CRASH
+                .transaction { $0.animation = nil }
+                .onAppear {
+                    // Stabilize the MenuBarExtra's NSPanel to prevent the
+                    // updateAnimatedWindowSize crash. The panel is created lazily
+                    // on first click, so we disable animation on it here.
+                    DispatchQueue.main.async {
+                        for window in NSApp.windows {
+                            if window is NSPanel {
+                                window.animationBehavior = .none
+                                window.contentView?.layerContentsRedrawPolicy = .onSetNeedsDisplay
+                            }
+                        }
+                    }
+                }
                 .task {
                     await startServicesIfNeeded()
                 }
@@ -235,7 +270,6 @@ struct DianeApp: App {
                 .environmentObject(statusMonitor)
                 .environmentObject(updateChecker)
                 .environment(serverConfig)
-                .frame(minWidth: 450, minHeight: 300)
         }
     }
     

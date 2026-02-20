@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+import os.log
+
+private let logger = Logger(subsystem: "com.diane.Diane", category: "Scheduler")
 
 /// ViewModel for SchedulerView that owns all scheduler state and business logic.
 ///
@@ -44,6 +47,7 @@ final class SchedulerViewModel {
     func loadData() async {
         isLoading = true
         error = nil
+        FileLogger.shared.info("Loading scheduler data...", category: "Scheduler")
 
         do {
             let loadedJobs = try await client.getJobs()
@@ -51,28 +55,35 @@ final class SchedulerViewModel {
 
             jobs = loadedJobs
             executions = loadedLogs
+            FileLogger.shared.info("Loaded \(loadedJobs.count) jobs and \(loadedLogs.count) executions", category: "Scheduler")
         } catch {
             self.error = error.localizedDescription
+            FileLogger.shared.error("Failed to load scheduler data: \(error.localizedDescription)", category: "Scheduler")
         }
 
         isLoading = false
     }
 
     func loadLogs(forJob jobName: String?) async {
+        FileLogger.shared.info("Loading logs for job: \(jobName ?? "all")", category: "Scheduler")
         do {
             executions = try await client.getJobLogs(jobName: jobName, limit: 100)
         } catch {
             // Silently fail for log refresh (matches original behavior)
+            FileLogger.shared.error("Failed to load logs for job '\(jobName ?? "all")': \(error.localizedDescription)", category: "Scheduler")
         }
     }
 
     func toggleJob(_ job: Job, enabled: Bool) async {
+        FileLogger.shared.info("Toggling job '\(job.name)' enabled=\(enabled)", category: "Scheduler")
         do {
             try await client.toggleJob(name: job.name, enabled: enabled)
             // Refresh job list
             jobs = try await client.getJobs()
+            FileLogger.shared.info("Toggled job '\(job.name)' successfully", category: "Scheduler")
         } catch {
             // Silently fail (matches original behavior)
+            FileLogger.shared.error("Failed to toggle job '\(job.name)': \(error.localizedDescription)", category: "Scheduler")
         }
     }
 

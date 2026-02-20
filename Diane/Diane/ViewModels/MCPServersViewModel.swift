@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+import os.log
+
+private let logger = Logger(subsystem: "com.diane.Diane", category: "MCPServers")
 
 /// ViewModel for MCPServersView that manages node-centric MCP deployment.
 ///
@@ -77,6 +80,7 @@ final class MCPServersViewModel {
 
     /// Load all data needed for the view: hosts, servers, and placements for selected host.
     func loadData() async {
+        FileLogger.shared.info("Loading MCP servers deployment data...", category: "MCPServers")
         await loadHosts()
         await loadServers()
         await loadPlacements()
@@ -89,6 +93,7 @@ final class MCPServersViewModel {
 
         do {
             hosts = try await client.getHosts()
+            FileLogger.shared.info("Loaded \(hosts.count) hosts", category: "MCPServers")
             
             // Auto-select master on first load if nothing selected
             if selectedHost == nil {
@@ -96,6 +101,8 @@ final class MCPServersViewModel {
             }
         } catch {
             hostsError = error.localizedDescription
+            FileLogger.shared.error("Failed to load hosts: \(error.localizedDescription)", category: "MCPServers")
+            logger.error("Failed to load hosts: \(error.localizedDescription)")
         }
 
         isLoadingHosts = false
@@ -108,8 +115,11 @@ final class MCPServersViewModel {
         
         do {
             allServers = try await client.getMCPServerConfigs()
+            FileLogger.shared.info("Loaded \(allServers.count) server definitions", category: "MCPServers")
         } catch {
             serversError = error.localizedDescription
+            FileLogger.shared.error("Failed to load server definitions: \(error.localizedDescription)", category: "MCPServers")
+            logger.error("Failed to load server definitions: \(error.localizedDescription)")
         }
         
         isLoadingServers = false
@@ -124,8 +134,11 @@ final class MCPServersViewModel {
 
         do {
             placements = try await client.getPlacements(hostID: currentHostID)
+            FileLogger.shared.info("Loaded \(placements.count) placements for host '\(currentHostID)'", category: "MCPServers")
         } catch {
             placementsError = error.localizedDescription
+            FileLogger.shared.error("Failed to load placements for '\(currentHostID)': \(error.localizedDescription)", category: "MCPServers")
+            logger.error("Failed to load placements for '\(self.currentHostID)': \(error.localizedDescription)")
         }
 
         isLoadingPlacements = false
@@ -139,6 +152,7 @@ final class MCPServersViewModel {
 
     /// Toggle a server's enabled state on the current host.
     func toggleServerOnCurrentHost(server: MCPServer, enabled: Bool) async {
+        FileLogger.shared.info("Toggling server '\(server.name)' on '\(currentHostID)' enabled=\(enabled)", category: "MCPServers")
         do {
             let updatedPlacement = try await client.updatePlacement(
                 serverID: server.id,
@@ -153,20 +167,27 @@ final class MCPServersViewModel {
                 // Placement didn't exist before, add it now
                 placements.append(updatedPlacement)
             }
+            FileLogger.shared.info("Toggled server '\(server.name)' on '\(currentHostID)' successfully", category: "MCPServers")
         } catch {
             placementsError = error.localizedDescription
+            FileLogger.shared.error("Failed to toggle server '\(server.name)' on '\(currentHostID)': \(error.localizedDescription)", category: "MCPServers")
+            logger.error("Failed to toggle server '\(server.name)' on '\(self.currentHostID)': \(error.localizedDescription)")
         }
     }
     
     /// Delete a placement (reset to default OFF state).
     func deletePlacement(server: MCPServer) async {
+        FileLogger.shared.info("Deleting placement for '\(server.name)' on '\(currentHostID)'", category: "MCPServers")
         do {
             try await client.deletePlacement(serverID: server.id, hostID: currentHostID)
             
             // Remove from local state
             placements.removeAll(where: { $0.serverID == server.id })
+            FileLogger.shared.info("Deleted placement for '\(server.name)' on '\(currentHostID)' successfully", category: "MCPServers")
         } catch {
             placementsError = error.localizedDescription
+            FileLogger.shared.error("Failed to delete placement for '\(server.name)' on '\(currentHostID)': \(error.localizedDescription)", category: "MCPServers")
+            logger.error("Failed to delete placement for '\(server.name)' on '\(self.currentHostID)': \(error.localizedDescription)")
         }
     }
 }

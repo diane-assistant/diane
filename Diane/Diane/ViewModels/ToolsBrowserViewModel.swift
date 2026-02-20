@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.diane.Diane", category: "ToolsBrowser")
 
 /// Drives the Tools Browser tab — loads tool list from the daemon,
 /// manages filtering by search text and server name.
@@ -43,11 +46,14 @@ final class ToolsBrowserViewModel {
     func loadTools() async {
         isLoading = true
         error = nil
+        FileLogger.shared.info("Loading tools...", category: "ToolsBrowser")
 
         do {
             tools = try await client.getTools()
+            FileLogger.shared.info("Loaded \(tools.count) tools", category: "ToolsBrowser")
         } catch {
             self.error = "Failed to load tools: \(error)"
+            FileLogger.shared.error("Failed to load tools: \(error.localizedDescription)", category: "ToolsBrowser")
         }
 
         isLoading = false

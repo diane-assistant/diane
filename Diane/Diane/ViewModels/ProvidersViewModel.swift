@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+import os.log
+
+private let logger = Logger(subsystem: "com.diane.Diane", category: "Providers")
 
 /// ViewModel for ProvidersView that owns all provider state and business logic.
 ///
@@ -82,6 +85,7 @@ final class ProvidersViewModel {
     func loadData() async {
         isLoading = true
         error = nil
+        FileLogger.shared.info("Loading providers data...", category: "Providers")
 
         do {
             let loadedProviders = try await client.getProviders(type: typeFilter)
@@ -89,6 +93,7 @@ final class ProvidersViewModel {
 
             providers = loadedProviders
             templates = loadedTemplates
+            FileLogger.shared.info("Loaded \(loadedProviders.count) providers and \(loadedTemplates.count) templates", category: "Providers")
 
             // Update selected provider if it still exists
             if let selected = selectedProvider {
@@ -96,6 +101,7 @@ final class ProvidersViewModel {
             }
         } catch {
             self.error = error.localizedDescription
+            FileLogger.shared.error("Failed to load providers: \(error.localizedDescription)", category: "Providers")
         }
 
         isLoading = false
@@ -106,6 +112,7 @@ final class ProvidersViewModel {
 
         isCreating = true
         createError = nil
+        FileLogger.shared.info("Creating provider '\(newProviderName)' with service '\(template.service)'", category: "Providers")
 
         do {
             // Build config
@@ -142,9 +149,11 @@ final class ProvidersViewModel {
             selectedProvider = newProvider
             showCreateProvider = false
             resetCreateForm()
+            FileLogger.shared.info("Created provider '\(newProvider.name)' (id: \(newProvider.id)) successfully", category: "Providers")
 
         } catch {
             createError = error.localizedDescription
+            FileLogger.shared.error("Failed to create provider '\(newProviderName)': \(error.localizedDescription)", category: "Providers")
         }
 
         isCreating = false
@@ -156,6 +165,7 @@ final class ProvidersViewModel {
 
         isEditing = true
         editError = nil
+        FileLogger.shared.info("Updating provider '\(provider.name)' (id: \(provider.id))", category: "Providers")
 
         do {
             // Build config
@@ -191,15 +201,18 @@ final class ProvidersViewModel {
             }
             selectedProvider = updated
             editingProvider = nil
+            FileLogger.shared.info("Updated provider '\(updated.name)' successfully", category: "Providers")
 
         } catch {
             editError = error.localizedDescription
+            FileLogger.shared.error("Failed to update provider '\(provider.name)': \(error.localizedDescription)", category: "Providers")
         }
 
         isEditing = false
     }
 
     func toggleProvider(_ provider: Provider, enabled: Bool) async {
+        FileLogger.shared.info("Toggling provider '\(provider.name)' (id: \(provider.id)) enabled=\(enabled)", category: "Providers")
         do {
             let updated: Provider
             if enabled {
@@ -214,12 +227,15 @@ final class ProvidersViewModel {
             if selectedProvider?.id == provider.id {
                 selectedProvider = updated
             }
+            FileLogger.shared.info("Toggled provider '\(provider.name)' successfully", category: "Providers")
         } catch {
             self.error = error.localizedDescription
+            FileLogger.shared.error("Failed to toggle provider '\(provider.name)': \(error.localizedDescription)", category: "Providers")
         }
     }
 
     func setDefault(_ provider: Provider) async {
+        FileLogger.shared.info("Setting provider '\(provider.name)' (id: \(provider.id)) as default", category: "Providers")
         do {
             let updated = try await client.setDefaultProvider(id: provider.id)
 
@@ -227,20 +243,25 @@ final class ProvidersViewModel {
             await loadData()
 
             selectedProvider = updated
+            FileLogger.shared.info("Set provider '\(provider.name)' as default successfully", category: "Providers")
         } catch {
             self.error = error.localizedDescription
+            FileLogger.shared.error("Failed to set provider '\(provider.name)' as default: \(error.localizedDescription)", category: "Providers")
         }
     }
 
     func deleteProvider(_ provider: Provider) async {
+        FileLogger.shared.info("Deleting provider '\(provider.name)' (id: \(provider.id))", category: "Providers")
         do {
             try await client.deleteProvider(id: provider.id)
             providers.removeAll { $0.id == provider.id }
             if selectedProvider?.id == provider.id {
                 selectedProvider = nil
             }
+            FileLogger.shared.info("Deleted provider '\(provider.name)' successfully", category: "Providers")
         } catch {
             self.error = error.localizedDescription
+            FileLogger.shared.error("Failed to delete provider '\(provider.name)': \(error.localizedDescription)", category: "Providers")
         }
     }
 
@@ -274,11 +295,13 @@ final class ProvidersViewModel {
     func fetchModels(service: String) async {
         isLoadingModels = true
         modelsError = nil
+        FileLogger.shared.info("Fetching models for service '\(service)'", category: "Providers")
 
         do {
             // Get project_id from config values if available
             let projectID = configValues["project_id"]
             availableModels = try await client.listModels(service: service, projectID: projectID)
+            FileLogger.shared.info("Fetched \(availableModels.count) models for service '\(service)'", category: "Providers")
 
             // If we got models and there's a model field, set default to first available
             if let firstModel = availableModels.first, configValues["model"]?.isEmpty ?? true {
@@ -286,6 +309,7 @@ final class ProvidersViewModel {
             }
         } catch {
             modelsError = "Failed to fetch models: \(error.localizedDescription)"
+            FileLogger.shared.error("Failed to fetch models for service '\(service)': \(error.localizedDescription)", category: "Providers")
             // Keep static options as fallback
         }
 
@@ -296,11 +320,14 @@ final class ProvidersViewModel {
 
     func checkGoogleAuthStatus() async {
         isCheckingGoogleAuth = true
+        FileLogger.shared.info("Checking Google auth status...", category: "Providers")
 
         do {
             googleAuthStatus = try await client.getGoogleAuthStatus(account: "default")
+            FileLogger.shared.info("Google auth status: \(googleAuthStatus != nil ? "loaded" : "nil")", category: "Providers")
         } catch {
             // Status check failed, leave as nil
+            FileLogger.shared.error("Failed to check Google auth status: \(error.localizedDescription)", category: "Providers")
             googleAuthStatus = nil
         }
 
@@ -310,6 +337,7 @@ final class ProvidersViewModel {
     func startGoogleAuth() async {
         deviceCodeResponse = nil
         googleAuthError = nil
+        FileLogger.shared.info("Starting Google auth device flow...", category: "Providers")
 
         do {
             // Start device flow
@@ -322,6 +350,7 @@ final class ProvidersViewModel {
             }
         } catch {
             googleAuthError = error.localizedDescription
+            FileLogger.shared.error("Failed to start Google auth: \(error.localizedDescription)", category: "Providers")
         }
     }
 
@@ -368,6 +397,7 @@ final class ProvidersViewModel {
             } catch {
                 // On error, check if it's a pending response (202) which throws
                 // Continue polling on network errors
+                FileLogger.shared.error("Google auth polling error: \(error.localizedDescription)", category: "Providers")
                 continue
             }
         }

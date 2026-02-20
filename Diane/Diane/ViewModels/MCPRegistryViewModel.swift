@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+import os.log
+
+private let logger = Logger(subsystem: "com.diane.Diane", category: "MCPRegistry")
 
 /// ViewModel for MCPRegistryView that manages MCP server definitions (not placements).
 ///
@@ -105,6 +108,8 @@ final class MCPRegistryViewModel {
     func loadData() async {
         isLoading = true
         error = nil
+        
+        FileLogger.shared.info("Loading MCP registry data...", category: "MCPRegistry")
 
         do {
             async let fetchedServers = client.getMCPServerConfigs()
@@ -116,6 +121,8 @@ final class MCPRegistryViewModel {
             servers = s
             placements = p
             contexts = c
+            
+            FileLogger.shared.info("Loaded \(s.count) servers, \(p.count) placements, \(c.count) contexts", category: "MCPRegistry")
             
             // Load context servers for each context
             var contextServerMap: [String: [ContextServer]] = [:]
@@ -132,6 +139,8 @@ final class MCPRegistryViewModel {
             }
         } catch {
             self.error = error.localizedDescription
+            FileLogger.shared.error("Failed to load MCP registry: \(error.localizedDescription)", category: "MCPRegistry")
+            logger.error("Failed to load MCP registry: \(error.localizedDescription)")
         }
 
         isLoading = false
@@ -139,6 +148,7 @@ final class MCPRegistryViewModel {
 
     /// Toggle a server's enabled state on the master node.
     func toggleServer(_ server: MCPServer, enabled: Bool) async {
+        FileLogger.shared.info("Toggling server '\(server.name)' (id:\(server.id)) enabled=\(enabled)", category: "MCPRegistry")
         // Optimistic update
         let oldEnabled = isServerEnabled(server)
         updateLocalPlacement(serverID: server.id, enabled: enabled)
@@ -161,10 +171,13 @@ final class MCPRegistryViewModel {
             if enabled {
                 try? await client.addServerToContext(contextName: "personal", serverName: server.name, enabled: true)
             }
+            FileLogger.shared.info("Server '\(server.name)' toggled successfully", category: "MCPRegistry")
         } catch {
             // Revert on error
             updateLocalPlacement(serverID: server.id, enabled: oldEnabled)
             self.error = error.localizedDescription
+            FileLogger.shared.error("Failed to toggle server '\(server.name)': \(error.localizedDescription)", category: "MCPRegistry")
+            logger.error("Failed to toggle server '\(server.name)': \(error.localizedDescription)")
         }
     }
     
@@ -205,6 +218,8 @@ final class MCPRegistryViewModel {
     func createServer() async {
         isCreating = true
         createError = nil
+        
+        FileLogger.shared.info("Creating MCP server '\(newServerName)' type=\(newServerType.rawValue)", category: "MCPRegistry")
 
         do {
             let command = newServerType == .stdio ? (newServerCommand.isEmpty ? nil : newServerCommand) : nil
@@ -241,8 +256,11 @@ final class MCPRegistryViewModel {
 
             showCreateServer = false
             resetCreateForm()
+            FileLogger.shared.info("Created MCP server '\(server.name)' id=\(server.id)", category: "MCPRegistry")
         } catch {
             createError = error.localizedDescription
+            FileLogger.shared.error("Failed to create server '\(newServerName)': \(error.localizedDescription)", category: "MCPRegistry")
+            logger.error("Failed to create server '\(self.newServerName)': \(error.localizedDescription)")
         }
 
         isCreating = false
@@ -251,6 +269,8 @@ final class MCPRegistryViewModel {
     func updateServer(_ server: MCPServer) async {
         isEditing = true
         editError = nil
+        
+        FileLogger.shared.info("Updating MCP server '\(server.name)' (id:\(server.id))", category: "MCPRegistry")
 
         do {
             let command = editType == .stdio ? (editCommand.isEmpty ? nil : editCommand) : nil
@@ -277,26 +297,34 @@ final class MCPRegistryViewModel {
             }
             selectedServer = updatedServer
             editingServer = nil
+            FileLogger.shared.info("Updated MCP server '\(updatedServer.name)' successfully", category: "MCPRegistry")
         } catch {
             editError = error.localizedDescription
+            FileLogger.shared.error("Failed to update server '\(server.name)': \(error.localizedDescription)", category: "MCPRegistry")
+            logger.error("Failed to update server '\(server.name)': \(error.localizedDescription)")
         }
 
         isEditing = false
     }
 
     func deleteServer(_ server: MCPServer) async {
+        FileLogger.shared.info("Deleting MCP server '\(server.name)' (id:\(server.id))", category: "MCPRegistry")
         do {
             try await client.deleteMCPServerConfig(id: server.id)
             servers.removeAll { $0.id == server.id }
             if selectedServer?.id == server.id {
                 selectedServer = servers.first
             }
+            FileLogger.shared.info("Deleted MCP server '\(server.name)' successfully", category: "MCPRegistry")
         } catch {
             self.error = error.localizedDescription
+            FileLogger.shared.error("Failed to delete server '\(server.name)': \(error.localizedDescription)", category: "MCPRegistry")
+            logger.error("Failed to delete server '\(server.name)': \(error.localizedDescription)")
         }
     }
 
     func duplicateServer(_ server: MCPServer) async {
+        FileLogger.shared.info("Duplicating MCP server '\(server.name)'", category: "MCPRegistry")
         do {
             // Generate a new name with number suffix
             let newName = generateDuplicateName(from: server.name)
@@ -320,8 +348,10 @@ final class MCPRegistryViewModel {
             // Add to list and select it
             servers.append(duplicatedServer)
             selectedServer = duplicatedServer
+            FileLogger.shared.info("Duplicated server '\(server.name)' -> '\(duplicatedServer.name)'", category: "MCPRegistry")
         } catch {
             self.error = error.localizedDescription
+            FileLogger.shared.error("Failed to duplicate server '\(server.name)': \(error.localizedDescription)", category: "MCPRegistry")
         }
     }
 
