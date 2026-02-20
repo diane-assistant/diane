@@ -51,7 +51,33 @@ func newSlavePairCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "pair <master-url>",
 		Short: "Initiate pairing with master (run on slave)",
-		Args:  cobra.ExactArgs(1),
+		Long: `Initiate pairing with the master Diane server.
+
+The master URL should be the HTTPS address of your master server on port 8766.
+
+Examples:
+  diane slave pair https://master.example.com:8766
+  diane slave pair https://100.71.82.7:8766
+  diane slave pair master.example.com:8766  (https:// added automatically)
+
+The pairing process will:
+  1. Generate a key pair for secure communication
+  2. Send a pairing request to the master
+  3. Display a pairing code for verification
+  4. Wait for master approval
+  5. Save credentials and start the slave daemon
+
+After running this command, approve the request on the master with:
+  diane slave approve`,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return fmt.Errorf("master URL is required\n\nUsage: diane slave pair <master-url>\n\nExamples:\n  diane slave pair https://master.example.com:8766\n  diane slave pair https://100.71.82.7:8766\n\nThe master URL should point to your master Diane server on port 8766 (HTTPS).")
+			}
+			if len(args) > 1 {
+				return fmt.Errorf("too many arguments: expected 1 URL, got %d\n\nUsage: diane slave pair <master-url>", len(args))
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			masterURL := args[0]
 
