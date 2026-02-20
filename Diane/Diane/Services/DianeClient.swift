@@ -32,6 +32,9 @@ private func makeGoCompatibleDecoder() -> JSONDecoder {
 /// Client for communicating with Diane via Unix socket
 @MainActor
 class DianeClient: DianeClientProtocol {
+    /// Shared singleton instance
+    static let shared = DianeClient()
+    
     private let socketPath: String
     private let session: URLSession
     
@@ -57,11 +60,11 @@ class DianeClient: DianeClientProtocol {
         return symlinkPath
     }
     
-    init() {
+    private init() {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         self.socketPath = homeDir.appendingPathComponent(".diane/diane.sock").path
-        logger.debug("DianeClient initialized with socket path: \(self.socketPath)")
-        FileLogger.shared.debug("DianeClient initialized with socket path: \(self.socketPath)", category: "DianeClient")
+        logger.info("DianeClient singleton initialized with socket path: \(self.socketPath)")
+        FileLogger.shared.info("DianeClient singleton initialized with socket path: \(self.socketPath)", category: "DianeClient")
         
         // Create a custom URLSession configuration for Unix socket
         let config = URLSessionConfiguration.default
@@ -134,8 +137,7 @@ class DianeClient: DianeClientProtocol {
     /// Check if the socket file exists
     var socketExists: Bool {
         let exists = FileManager.default.fileExists(atPath: socketPath)
-        logger.debug("Socket exists check: \(exists)")
-        FileLogger.shared.debug("Socket exists check: \(exists)", category: "DianeClient")
+        // Removed excessive debug logging (checked every 5 seconds)
         return exists
     }
     

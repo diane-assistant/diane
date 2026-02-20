@@ -999,7 +999,7 @@ struct ProviderDetailView: View {
     @State private var modelInfo: AvailableModel?
     @State private var isLoadingModelInfo = false
     
-    private let client = DianeClient()
+    private let client = DianeClient.shared
     
     /// Check if the test result indicates an auth problem
     private var isAuthError: Bool {

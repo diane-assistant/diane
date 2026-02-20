@@ -29,8 +29,8 @@ class StatusMonitor: ObservableObject {
     
     private var client: DianeClientProtocol?
     
-    /// Dedicated client for local process management (always a DianeClient, independent of mode)
-    private let localProcessClient = DianeClient()
+    /// Dedicated client for local process management (always a DianeClient singleton, independent of mode)
+    private let localProcessClient = DianeClient.shared
     
     /// The configured client instance for use by ViewModels
     /// This allows ViewModels to use the same remote/local client as StatusMonitor
@@ -54,7 +54,7 @@ class StatusMonitor: ObservableObject {
     func configureLocal() {
         logger.info("StatusMonitor configuring for local mode")
         FileLogger.shared.info("StatusMonitor configuring for local mode", category: "StatusMonitor")
-        client = DianeClient()
+        client = DianeClient.shared
         isRemoteMode = false
         remoteURL = nil
         serverDisplayName = "Local"
@@ -215,8 +215,7 @@ class StatusMonitor: ObservableObject {
                 status = newStatus
                 connectionState = .connected
                 lastError = nil
-                logger.debug("Remote status refresh successful: connected, \(newStatus.totalTools) tools")
-                FileLogger.shared.debug("Remote status refresh successful", category: "StatusMonitor")
+                // Only log on first connection or state change, not every refresh
             } catch {
                 logger.error("Remote status refresh failed: \(error.localizedDescription)")
                 FileLogger.shared.error("Remote status refresh failed: \(error.localizedDescription)", category: "StatusMonitor")
@@ -228,13 +227,14 @@ class StatusMonitor: ObservableObject {
             // Local mode: check socket and process
             let socketExists = client.socketExists
             let processRunning = client.isProcessRunning()
-            logger.debug("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)")
-            FileLogger.shared.debug("Refresh: socketExists=\(socketExists), processRunning=\(processRunning)", category: "StatusMonitor")
+            // Removed excessive debug logging that runs every 5 seconds
             
             // Quick check if socket exists
             guard socketExists || processRunning else {
-                logger.info("No socket and no process, setting disconnected")
-                FileLogger.shared.info("No socket and no process, setting disconnected", category: "StatusMonitor")
+                if connectionState != .disconnected {
+                    logger.info("No socket and no process, setting disconnected")
+                    FileLogger.shared.info("No socket and no process, setting disconnected", category: "StatusMonitor")
+                }
                 connectionState = .disconnected
                 status = .empty
                 return
@@ -245,19 +245,22 @@ class StatusMonitor: ObservableObject {
                 status = newStatus
                 connectionState = .connected
                 lastError = nil
-                logger.debug("Status refresh successful: connected, \(newStatus.totalTools) tools")
-                FileLogger.shared.debug("Status refresh successful: connected, \(newStatus.totalTools) tools", category: "StatusMonitor")
+                // Only log on first connection or state change, not every refresh
             } catch {
                 logger.error("Status refresh failed: \(error.localizedDescription)")
                 FileLogger.shared.error("Status refresh failed: \(error.localizedDescription)", category: "StatusMonitor")
                 // Fallback: check if process is running via PID
                 if client.isProcessRunning() {
-                    logger.warning("Process running but API failed, setting error state")
-                    FileLogger.shared.warning("Process running but API failed, setting error state", category: "StatusMonitor")
+                    if connectionState != .error("API unavailable") {
+                        logger.warning("Process running but API failed, setting error state")
+                        FileLogger.shared.warning("Process running but API failed, setting error state", category: "StatusMonitor")
+                    }
                     connectionState = .error("API unavailable")
                 } else {
-                    logger.info("Process not running, setting disconnected")
-                    FileLogger.shared.info("Process not running, setting disconnected", category: "StatusMonitor")
+                    if connectionState != .disconnected {
+                        logger.info("Process not running, setting disconnected")
+                        FileLogger.shared.info("Process not running, setting disconnected", category: "StatusMonitor")
+                    }
                     connectionState = .disconnected
                     status = .empty
                 }

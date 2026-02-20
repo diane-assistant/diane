@@ -20,7 +20,7 @@ final class UsageViewModel {
 
     private let client: DianeClientProtocol
 
-    init(client: DianeClientProtocol = DianeClient()) {
+    init(client: DianeClientProtocol = DianeClient.shared) {
         self.client = client
     }
 
