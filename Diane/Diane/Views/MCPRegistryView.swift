@@ -562,7 +562,6 @@ struct MCPRegistryView: View {
                                         }
                                     }
                                     .toggleStyle(.checkbox)
-                                    .disabled(!host.online)
                                 }
                             }
                         }
