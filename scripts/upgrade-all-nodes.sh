@@ -60,8 +60,20 @@ upgrade_node() {
             return 2
         fi
         
+        # Find diane binary (try multiple common locations)
+        # On macOS, prefer diane-binary over symlinked diane to avoid conflicts with Diane.app
+        DIANE_BIN=$(ssh "${user}@${host}" "if [ -x ~/.diane/bin/diane-binary ]; then echo ~/.diane/bin/diane-binary; elif which diane >/dev/null 2>&1; then which diane; else echo ~/.diane/bin/diane; fi" 2>/dev/null)
+        
+        # Verify the binary exists and is executable
+        if ! ssh "${user}@${host}" "test -x $DIANE_BIN" 2>/dev/null; then
+            echo -e "${YELLOW}⚠ ${node_name}: Diane binary not found or not executable at $DIANE_BIN (skipping)${NC}"
+            return 2
+        fi
+        
+        echo "Using diane binary: $DIANE_BIN"
+        
         # Try to upgrade
-        if ssh "${user}@${host}" "diane upgrade $FORCE_FLAG" 2>&1; then
+        if ssh "${user}@${host}" "$DIANE_BIN upgrade $FORCE_FLAG" 2>&1; then
             echo -e "${GREEN}✓ ${node_name}: Upgrade successful${NC}"
             return 0
         else
