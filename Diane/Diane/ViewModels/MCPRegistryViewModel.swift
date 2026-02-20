@@ -26,6 +26,8 @@ final class MCPRegistryViewModel {
 
     var servers: [MCPServer] = []
     var placements: [MCPServerPlacement] = []
+    var allPlacementsByHost: [String: [MCPServerPlacement]] = [:] // hostID -> placements
+    var hosts: [HostInfo] = []
     var contexts: [Context] = []
     var contextServers: [String: [ContextServer]] = [:] // contextName -> list of servers
     var selectedServer: MCPServer?
@@ -113,16 +115,28 @@ final class MCPRegistryViewModel {
 
         do {
             async let fetchedServers = client.getMCPServerConfigs()
-            async let fetchedPlacements = client.getPlacements(hostID: "master")
+            async let fetchedHosts = client.getHosts()
             async let fetchedContexts = client.getContexts()
             
-            let (s, p, c) = try await (fetchedServers, fetchedPlacements, fetchedContexts)
+            let (s, h, c) = try await (fetchedServers, fetchedHosts, fetchedContexts)
             
             servers = s
-            placements = p
+            hosts = h
             contexts = c
             
-            FileLogger.shared.info("Loaded \(s.count) servers, \(p.count) placements, \(c.count) contexts", category: "MCPRegistry")
+            // Load placements for all hosts
+            var placementsByHost: [String: [MCPServerPlacement]] = [:]
+            for host in h {
+                if let hostPlacements = try? await client.getPlacements(hostID: host.id) {
+                    placementsByHost[host.id] = hostPlacements
+                }
+            }
+            allPlacementsByHost = placementsByHost
+            
+            // Keep master placements in the original variable for compatibility
+            placements = placementsByHost["master"] ?? []
+            
+            FileLogger.shared.info("Loaded \(s.count) servers, \(h.count) hosts, \(c.count) contexts", category: "MCPRegistry")
             
             // Load context servers for each context
             var contextServerMap: [String: [ContextServer]] = [:]
@@ -205,14 +219,16 @@ final class MCPRegistryViewModel {
     }
     
     /// Get all nodes (placements) where this server is deployed
-    /// Currently only shows "master" since we only load master placements
     func nodesForServer(_ server: MCPServer) -> [String] {
-        // For now we only show master node
-        // In future when multi-node is implemented, we'd fetch all placements
-        if isServerEnabled(server) {
-            return ["master"]
+        var result: [String] = []
+        for (hostID, placements) in allPlacementsByHost {
+            if let placement = placements.first(where: { $0.serverID == server.id }), placement.enabled {
+                if let host = hosts.first(where: { $0.id == hostID }) {
+                    result.append(host.name)
+                }
+            }
         }
-        return []
+        return result.sorted()
     }
 
     func createServer() async {
@@ -449,6 +465,91 @@ final class MCPRegistryViewModel {
         }
 
         return candidateName
+    }
+    
+    // MARK: - Context Management
+    
+    /// Add or remove a server from a context
+    func toggleServerInContext(server: MCPServer, context: Context, enabled: Bool) async {
+        FileLogger.shared.info("Toggling server '\(server.name)' in context '\(context.name)' enabled=\(enabled)", category: "MCPRegistry")
+        
+        do {
+            if enabled {
+                // Add server to context
+                try await client.addServerToContext(contextName: context.name, serverName: server.name, enabled: true)
+            } else {
+                // Remove server from context
+                try await client.removeServerFromContext(contextName: context.name, serverName: server.name)
+            }
+            
+            // Reload context servers
+            if let servers = try? await client.getContextServers(contextName: context.name) {
+                contextServers[context.name] = servers
+            }
+            
+            FileLogger.shared.info("Successfully updated server in context", category: "MCPRegistry")
+        } catch {
+            FileLogger.shared.error("Failed to update server in context: \(error.localizedDescription)", category: "MCPRegistry")
+            logger.error("Failed to update server in context: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - Node Placement Management
+    
+    /// Toggle a server's deployment on a specific node
+    func toggleServerOnNode(server: MCPServer, hostID: String, enabled: Bool) async {
+        FileLogger.shared.info("Toggling server '\(server.name)' on host '\(hostID)' enabled=\(enabled)", category: "MCPRegistry")
+        
+        do {
+            let hostPlacements = allPlacementsByHost[hostID] ?? []
+            
+            if let existingPlacement = hostPlacements.first(where: { $0.serverID == server.id }) {
+                // Update existing placement
+                let updated = try await client.updatePlacement(serverID: server.id, hostID: hostID, enabled: enabled)
+                
+                // Update local state
+                var updatedPlacements = hostPlacements
+                if let index = updatedPlacements.firstIndex(where: { $0.id == existingPlacement.id }) {
+                    updatedPlacements[index] = updated
+                }
+                allPlacementsByHost[hostID] = updatedPlacements
+                
+                if hostID == "master" {
+                    placements = updatedPlacements
+                }
+            } else if enabled {
+                // Create new placement - this requires backend support
+                // For now, we'll try to update even if it doesn't exist
+                // The backend will create it if needed
+                let updated = try await client.updatePlacement(serverID: server.id, hostID: hostID, enabled: true)
+                
+                // Add to local state
+                var updatedPlacements = hostPlacements
+                updatedPlacements.append(updated)
+                allPlacementsByHost[hostID] = updatedPlacements
+                
+                if hostID == "master" {
+                    placements = updatedPlacements
+                }
+            }
+            
+            FileLogger.shared.info("Successfully updated server placement", category: "MCPRegistry")
+        } catch {
+            FileLogger.shared.error("Failed to update server placement: \(error.localizedDescription)", category: "MCPRegistry")
+            logger.error("Failed to update server placement: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Check if a server is enabled on a specific host
+    func isServerEnabledOnHost(server: MCPServer, hostID: String) -> Bool {
+        guard let hostPlacements = allPlacementsByHost[hostID] else { return false }
+        return hostPlacements.contains(where: { $0.serverID == server.id && $0.enabled })
+    }
+    
+    /// Check if a server is in a specific context
+    func isServerInContext(server: MCPServer, context: Context) -> Bool {
+        guard let servers = contextServers[context.name] else { return false }
+        return servers.contains(where: { $0.name == server.name })
     }
 
     // MARK: - Private Helpers

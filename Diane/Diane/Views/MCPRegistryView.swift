@@ -487,27 +487,87 @@ struct MCPRegistryView: View {
                 // Available in Contexts
                 DetailSection(title: "Available in Contexts") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Contexts where AI clients can access this server")
+                        Text("Select which contexts can use this server")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        let contexts = viewModel.contextsForServer(server)
-                        if contexts.isEmpty {
-                            Text("Not in any context")
+                        if viewModel.contexts.isEmpty {
+                            Text("No contexts defined")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         } else {
-                            HStack(spacing: 6) {
-                                ForEach(contexts, id: \.self) { contextName in
-                                    Text(contextName)
-                                        .font(.caption2)
-                                        .fontWeight(.medium)
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .background(Color.blue)
-                                        .cornerRadius(4)
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(viewModel.contexts) { context in
+                                    Toggle(isOn: Binding(
+                                        get: { viewModel.isServerInContext(server: server, context: context) },
+                                        set: { newValue in
+                                            Task {
+                                                await viewModel.toggleServerInContext(server: server, context: context, enabled: newValue)
+                                            }
+                                        }
+                                    )) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "square.stack.3d.up")
+                                                .font(.caption)
+                                                .foregroundStyle(.blue)
+                                            Text(context.name)
+                                                .font(.caption)
+                                            if context.isDefault {
+                                                Text("(Default)")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                    .toggleStyle(.checkbox)
                                 }
+                            }
+                        }
+                    }
+                }
+                
+                // Deployed on Nodes
+                DetailSection(title: "Deployed on Nodes") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Select which nodes should run this server")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        if viewModel.hosts.isEmpty {
+                            Text("No nodes available")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        } else {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(viewModel.hosts) { host in
+                                    Toggle(isOn: Binding(
+                                        get: { viewModel.isServerEnabledOnHost(server: server, hostID: host.id) },
+                                        set: { newValue in
+                                            Task {
+                                                await viewModel.toggleServerOnNode(server: server, hostID: host.id, enabled: newValue)
+                                            }
+                                        }
+                                    )) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: host.isMaster ? "server.rack" : "externaldrive.connected.to.line.below")
+                                                .font(.caption)
+                                                .foregroundStyle(host.online ? .green : .secondary)
+                                            Text(host.name)
+                                                .font(.caption)
+                                            if !host.online {
+                                                Text("(Offline)")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                    .toggleStyle(.checkbox)
+                                    .disabled(!host.online)
+                                }
+                            }
+                        }
+                    }
+                }
                             }
                         }
                         
