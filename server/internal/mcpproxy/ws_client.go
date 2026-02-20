@@ -54,6 +54,11 @@ type WSClient struct {
 	certPath string
 	keyPath  string
 	caPath   string
+
+	// Reverse proxy: master tools flowing to this slave
+	proxy          *Proxy                        // The slave's local proxy, for registering master tool clients
+	masterClients  map[string]*MasterProxyClient // serverName -> client
+	masterClientMu sync.Mutex
 }
 
 // NewWSClient creates a new WebSocket MCP client
@@ -218,6 +223,8 @@ func (c *WSClient) handleMessage(msg slavetypes.Message) {
 		c.handleRestart(msg)
 	case slavetypes.MessageTypeUpgrade:
 		c.handleUpgrade(msg)
+	case slavetypes.MessageTypeMasterTools:
+		c.handleMasterTools(msg)
 	default:
 		slog.Warn("Unknown message type", "type", msg.Type)
 	}
@@ -374,6 +381,146 @@ func (c *WSClient) handleUpgrade(msg slavetypes.Message) {
 		// Exit to allow process manager to restart with new binary
 		os.Exit(0)
 	}()
+}
+
+// SetProxy sets the slave's local proxy so that master tools can be registered as clients.
+// This must be called after creating the WSClient but before master tools arrive.
+func (c *WSClient) SetProxy(proxy *Proxy) {
+	c.masterClientMu.Lock()
+	defer c.masterClientMu.Unlock()
+	c.proxy = proxy
+	if c.masterClients == nil {
+		c.masterClients = make(map[string]*MasterProxyClient)
+	}
+}
+
+// handleMasterTools processes a master_tools message, registering each master
+// MCP server's tools as a MasterProxyClient with the slave's local proxy.
+// Also stores context-to-server mappings so the slave can filter by context.
+func (c *WSClient) handleMasterTools(msg slavetypes.Message) {
+	var masterTools slavetypes.MasterToolsMessage
+	if err := json.Unmarshal(msg.Data, &masterTools); err != nil {
+		slog.Error("Failed to unmarshal master tools", "error", err)
+		return
+	}
+
+	c.masterClientMu.Lock()
+	proxy := c.proxy
+	c.masterClientMu.Unlock()
+
+	if proxy == nil {
+		slog.Warn("Received master tools but proxy not set, ignoring")
+		return
+	}
+
+	// Store context-to-server mappings on the proxy (if provided by master)
+	if masterTools.ContextMappings != nil {
+		proxy.SetMasterContextMappings(masterTools.ContextMappings)
+	}
+
+	totalTools := 0
+	for serverName, tools := range masterTools.Servers {
+		totalTools += len(tools)
+
+		c.masterClientMu.Lock()
+		existing, exists := c.masterClients[serverName]
+		c.masterClientMu.Unlock()
+
+		if exists {
+			// Update existing client's tools
+			existing.UpdateTools(tools)
+			slog.Info("Updated master tools", "server", serverName, "tools", len(tools))
+		} else {
+			// Create new MasterProxyClient and register with proxy
+			client := NewMasterProxyClient(serverName, tools, c.sendMasterToolCall)
+
+			if err := proxy.RegisterSlaveClient(serverName, client); err != nil {
+				slog.Error("Failed to register master tool client",
+					"server", serverName, "error", err)
+				continue
+			}
+
+			c.masterClientMu.Lock()
+			c.masterClients[serverName] = client
+			c.masterClientMu.Unlock()
+
+			slog.Info("Registered master tools", "server", serverName, "tools", len(tools))
+		}
+	}
+
+	// Remove clients for servers no longer present in the update
+	c.masterClientMu.Lock()
+	for serverName, client := range c.masterClients {
+		if _, stillExists := masterTools.Servers[serverName]; !stillExists {
+			client.Close()
+			proxy.UnregisterSlaveClient(serverName)
+			delete(c.masterClients, serverName)
+			slog.Info("Removed master tools (server no longer present)", "server", serverName)
+		}
+	}
+	c.masterClientMu.Unlock()
+
+	slog.Info("Master tools synchronized", "servers", len(masterTools.Servers), "total_tools", totalTools)
+}
+
+// sendMasterToolCall sends a tool call request to the master via WebSocket
+// and waits for the response. This is used as the MasterToolCallFunc.
+func (c *WSClient) sendMasterToolCall(serverName, toolName string, arguments map[string]interface{}) (json.RawMessage, error) {
+	callMsg := slavetypes.MasterToolCallMessage{
+		Server:    serverName,
+		Tool:      toolName,
+		Arguments: arguments,
+	}
+
+	data, err := json.Marshal(callMsg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal master tool call: %w", err)
+	}
+
+	msgID := c.getNextID()
+	msg := slavetypes.Message{
+		Type:      slavetypes.MessageTypeMasterToolCall,
+		ID:        msgID,
+		Timestamp: time.Now(),
+		Data:      data,
+	}
+
+	// Create response channel
+	respChan := make(chan MCPResponse, 1)
+	c.pendingMu.Lock()
+	c.pending[msgID] = respChan
+	c.pendingMu.Unlock()
+
+	defer func() {
+		c.pendingMu.Lock()
+		delete(c.pending, msgID)
+		c.pendingMu.Unlock()
+	}()
+
+	// Send message
+	if err := c.sendMessage(msg); err != nil {
+		return nil, fmt.Errorf("failed to send master tool call: %w", err)
+	}
+
+	// Wait for response with timeout
+	select {
+	case resp := <-respChan:
+		if resp.Error != nil {
+			return nil, fmt.Errorf("master tool call failed: %s (code %d)", resp.Error.Message, resp.Error.Code)
+		}
+		// The response wraps a ToolCallResponse
+		var toolResp slavetypes.ToolCallResponse
+		if err := json.Unmarshal(resp.Result, &toolResp); err != nil {
+			// If it doesn't parse as ToolCallResponse, return raw result
+			return resp.Result, nil
+		}
+		if toolResp.Error != "" {
+			return nil, fmt.Errorf("master tool execution error: %s", toolResp.Error)
+		}
+		return toolResp.Result, nil
+	case <-time.After(60 * time.Second):
+		return nil, fmt.Errorf("master tool call timed out after 60s")
+	}
 }
 
 // handleDisconnect handles connection loss

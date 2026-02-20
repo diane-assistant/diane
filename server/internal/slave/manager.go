@@ -12,23 +12,25 @@ import (
 
 // Manager coordinates slave connections with the MCP proxy
 type Manager struct {
-	registry *Registry
-	proxy    *mcpproxy.Proxy
-	server   *Server
-	db       store.SlaveStore
-	pairing  *PairingService
+	registry     *Registry
+	proxy        *mcpproxy.Proxy
+	server       *Server
+	db           store.SlaveStore
+	pairing      *PairingService
+	contextStore store.ContextStore
 }
 
 // NewManager creates a new slave manager
-func NewManager(slaveStore store.SlaveStore, proxy *mcpproxy.Proxy, ca *CertificateAuthority) (*Manager, error) {
+func NewManager(slaveStore store.SlaveStore, proxy *mcpproxy.Proxy, ca *CertificateAuthority, contextStore store.ContextStore) (*Manager, error) {
 	registry := NewRegistry(slaveStore, ca)
 	pairing := NewPairingService(slaveStore, ca)
 
 	m := &Manager{
-		registry: registry,
-		proxy:    proxy,
-		db:       slaveStore,
-		pairing:  pairing,
+		registry:     registry,
+		proxy:        proxy,
+		db:           slaveStore,
+		pairing:      pairing,
+		contextStore: contextStore,
 	}
 
 	// Start monitoring registry notifications
@@ -42,6 +44,14 @@ func (m *Manager) StartServer(addr string, ca *CertificateAuthority) error {
 	server, err := Start(addr, ca, m.registry, m.db, m.pairing)
 	if err != nil {
 		return fmt.Errorf("failed to start slave server: %w", err)
+	}
+
+	// Pass the proxy to the server so it can send master tools to slaves
+	server.SetProxy(m.proxy)
+
+	// Pass the context store so the server can include context-to-server mappings
+	if m.contextStore != nil {
+		server.SetContextStore(m.contextStore)
 	}
 
 	m.server = server

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diane-assistant/diane/internal/mcpproxy"
 	"github.com/diane-assistant/diane/internal/slavetypes"
 	"github.com/diane-assistant/diane/internal/store"
 	"github.com/gorilla/websocket"
@@ -33,6 +34,8 @@ type Server struct {
 	pendingCalls    map[string]chan slavetypes.Message
 	responseMu      sync.RWMutex
 	heartbeatTicker *time.Ticker
+	proxy           *mcpproxy.Proxy    // Master's MCP proxy, for collecting tools to send to slaves
+	contextStore    store.ContextStore // Master's context store, for building context mappings
 }
 
 // slaveConnection represents an active WebSocket connection to a slave
@@ -302,6 +305,8 @@ func (s *Server) handleConnection(conn *slaveConnection) {
 			s.handleHeartbeat(conn, msg)
 		case slavetypes.MessageTypeToolUpdate:
 			s.handleToolUpdate(conn, msg)
+		case slavetypes.MessageTypeMasterToolCall:
+			s.handleMasterToolCall(conn, msg)
 		case slavetypes.MessageTypeResponse, slavetypes.MessageTypeError:
 			// Route response to pending call if any
 			s.responseMu.RLock()
@@ -358,6 +363,9 @@ func (s *Server) handleRegister(conn *slaveConnection, msg slavetypes.Message) {
 		Timestamp: time.Now(),
 		Data:      json.RawMessage(`{"status":"registered"}`),
 	})
+
+	// After registration, send master tools to the slave
+	go s.sendMasterToolsToSlave(conn)
 }
 
 // handleHeartbeat processes heartbeat from slave
@@ -529,6 +537,221 @@ func (s *Server) sendError(conn *slaveConnection, id, errMsg string) {
 
 	if err := s.sendMessage(conn, msg); err != nil {
 		slog.Error("Failed to send error message", "hostname", conn.hostname, "error", err)
+	}
+}
+
+// SetProxy sets the master's MCP proxy so the server can collect tools to send to slaves.
+func (s *Server) SetProxy(proxy *mcpproxy.Proxy) {
+	s.proxy = proxy
+}
+
+// SetContextStore sets the master's context store so the server can include
+// context-to-server mappings when broadcasting tools to slaves.
+func (s *Server) SetContextStore(cs store.ContextStore) {
+	s.contextStore = cs
+}
+
+// sendMasterToolsToSlave collects all non-slave tools from the master's proxy
+// and sends them to the specified slave connection, along with context-to-server
+// mappings so the slave can filter tools by context.
+func (s *Server) sendMasterToolsToSlave(conn *slaveConnection) {
+	if s.proxy == nil {
+		slog.Debug("No proxy set, skipping master tools broadcast", "hostname", conn.hostname)
+		return
+	}
+
+	// Get all tools from the master's proxy, grouped by server name.
+	// We call ListAllTools which returns tools prefixed with server name.
+	// We need to group them by server.
+	allTools, err := s.proxy.ListAllTools()
+	if err != nil {
+		slog.Error("Failed to list master tools for slave", "hostname", conn.hostname, "error", err)
+		return
+	}
+
+	// Group tools by server name, excluding tools from this slave itself
+	serverTools := make(map[string][]map[string]interface{})
+	for _, tool := range allTools {
+		serverName, _ := tool["_server"].(string)
+		if serverName == "" {
+			continue
+		}
+		// Don't send slave's own tools back to it
+		if serverName == conn.hostname {
+			continue
+		}
+		// Create a clean copy of the tool (without the server prefix and _server metadata)
+		cleanTool := make(map[string]interface{})
+		for k, v := range tool {
+			cleanTool[k] = v
+		}
+		// Restore original tool name (strip server prefix)
+		if prefixedName, ok := cleanTool["name"].(string); ok {
+			prefix := serverName + "_"
+			if strings.HasPrefix(prefixedName, prefix) {
+				cleanTool["name"] = strings.TrimPrefix(prefixedName, prefix)
+			}
+		}
+		delete(cleanTool, "_server")
+		serverTools[serverName] = append(serverTools[serverName], cleanTool)
+	}
+
+	if len(serverTools) == 0 {
+		slog.Debug("No master tools to send to slave", "hostname", conn.hostname)
+		return
+	}
+
+	// Build context-to-server mappings from the master's context store.
+	// For each context, we record which servers (that we're sending tools for)
+	// are enabled, so the slave can filter master-proxied tools by context.
+	var contextMappings map[string][]string
+	if s.contextStore != nil {
+		contextMappings = s.buildContextMappings(serverTools)
+	}
+
+	toolsMsg := slavetypes.MasterToolsMessage{
+		Servers:         serverTools,
+		ContextMappings: contextMappings,
+	}
+
+	data, err := json.Marshal(toolsMsg)
+	if err != nil {
+		slog.Error("Failed to marshal master tools", "hostname", conn.hostname, "error", err)
+		return
+	}
+
+	msg := slavetypes.Message{
+		Type:      slavetypes.MessageTypeMasterTools,
+		ID:        fmt.Sprintf("master-tools-%d", time.Now().UnixNano()),
+		Timestamp: time.Now(),
+		Data:      data,
+	}
+
+	if err := s.sendMessage(conn, msg); err != nil {
+		slog.Error("Failed to send master tools to slave", "hostname", conn.hostname, "error", err)
+		return
+	}
+
+	totalTools := 0
+	for _, tools := range serverTools {
+		totalTools += len(tools)
+	}
+	slog.Info("Sent master tools to slave",
+		"hostname", conn.hostname,
+		"servers", len(serverTools),
+		"total_tools", totalTools,
+		"context_mappings", len(contextMappings))
+}
+
+// buildContextMappings queries the context store for all contexts and builds a
+// mapping of contextName -> []serverName for servers that are in serverTools.
+func (s *Server) buildContextMappings(serverTools map[string][]map[string]interface{}) map[string][]string {
+	ctx := context.Background()
+
+	contexts, err := s.contextStore.ListContexts(ctx)
+	if err != nil {
+		slog.Warn("Failed to list contexts for master tool mappings", "error", err)
+		return nil
+	}
+
+	mappings := make(map[string][]string, len(contexts))
+	for _, c := range contexts {
+		servers, err := s.contextStore.GetServersForContext(ctx, c.Name)
+		if err != nil {
+			slog.Warn("Failed to get servers for context", "context", c.Name, "error", err)
+			continue
+		}
+
+		var enabledServers []string
+		for _, srv := range servers {
+			if srv.Enabled {
+				// Only include servers whose tools we're actually sending
+				if _, hasTool := serverTools[srv.ServerName]; hasTool {
+					enabledServers = append(enabledServers, srv.ServerName)
+				}
+			}
+		}
+
+		if len(enabledServers) > 0 {
+			mappings[c.Name] = enabledServers
+		}
+	}
+
+	return mappings
+}
+
+// handleMasterToolCall processes a master_tool_call from a slave.
+// It routes the call to the appropriate MCP server via the master's proxy.
+func (s *Server) handleMasterToolCall(conn *slaveConnection, msg slavetypes.Message) {
+	var callMsg slavetypes.MasterToolCallMessage
+	if err := json.Unmarshal(msg.Data, &callMsg); err != nil {
+		slog.Error("Failed to unmarshal master tool call", "hostname", conn.hostname, "error", err)
+		s.sendError(conn, msg.ID, "Invalid master tool call message")
+		return
+	}
+
+	if s.proxy == nil {
+		s.sendError(conn, msg.ID, "Master proxy not available")
+		return
+	}
+
+	slog.Debug("Handling master tool call from slave",
+		"hostname", conn.hostname,
+		"server", callMsg.Server,
+		"tool", callMsg.Tool)
+
+	// Call the tool on the master's proxy using the prefixed name (server_tool)
+	prefixedName := callMsg.Server + "_" + callMsg.Tool
+	result, err := s.proxy.CallTool(prefixedName, callMsg.Arguments)
+
+	response := slavetypes.ToolCallResponse{
+		Success: err == nil,
+		Result:  result,
+	}
+	if err != nil {
+		response.Error = err.Error()
+	}
+
+	respData, _ := json.Marshal(response)
+
+	// Wrap in an MCPResponse-like structure so the slave's handleResponse can parse it
+	mcpResult, _ := json.Marshal(response)
+	mcpResp := struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      string          `json:"id"`
+		Result  json.RawMessage `json:"result,omitempty"`
+	}{
+		JSONRPC: "2.0",
+		ID:      msg.ID,
+		Result:  mcpResult,
+	}
+	respData, _ = json.Marshal(mcpResp)
+
+	respMsg := slavetypes.Message{
+		Type:      slavetypes.MessageTypeResponse,
+		ID:        msg.ID,
+		Timestamp: time.Now(),
+		Data:      respData,
+	}
+
+	if err := s.sendMessage(conn, respMsg); err != nil {
+		slog.Error("Failed to send master tool call response",
+			"hostname", conn.hostname, "error", err)
+	}
+}
+
+// BroadcastMasterTools sends the current master tools to all connected slaves.
+// Call this when a new MCP server starts on the master.
+func (s *Server) BroadcastMasterTools() {
+	s.connMu.RLock()
+	conns := make([]*slaveConnection, 0, len(s.connections))
+	for _, conn := range s.connections {
+		conns = append(conns, conn)
+	}
+	s.connMu.RUnlock()
+
+	for _, conn := range conns {
+		go s.sendMasterToolsToSlave(conn)
 	}
 }
 

@@ -69,6 +69,11 @@ type Proxy struct {
 	initErrors     map[string]string // Store initialization errors per server
 	initializing   map[string]bool   // Track servers currently initializing
 	initWg         sync.WaitGroup    // Wait group for initial startup
+
+	// masterContextMappings stores context-to-server mappings received from the master.
+	// This allows the slave to filter master-proxied tools by context, achieving parity
+	// with the master's context filtering. Map: contextName -> set of enabled server names.
+	masterContextMappings map[string]map[string]bool
 }
 
 // NewProxy creates a new MCP proxy that loads config from the given provider
@@ -291,13 +296,19 @@ func (p *Proxy) ListAllTools() ([]map[string]interface{}, error) {
 			continue
 		}
 
-		// Prefix tool names with server name to avoid conflicts
+		// Prefix tool names with server name to avoid conflicts.
+		// IMPORTANT: Copy the tool map to avoid mutating the client's cached data.
+		// Without this copy, each call to ListAllTools() would add another prefix layer.
 		for _, tool := range tools {
 			if name, ok := tool["name"].(string); ok {
-				tool["name"] = serverName + "_" + name
-				tool["_server"] = serverName // Track which server this tool belongs to
+				toolCopy := make(map[string]interface{}, len(tool)+1)
+				for k, v := range tool {
+					toolCopy[k] = v
+				}
+				toolCopy["name"] = serverName + "_" + name
+				toolCopy["_server"] = serverName // Track which server this tool belongs to
+				allTools = append(allTools, toolCopy)
 			}
-			allTools = append(allTools, tool)
 		}
 	}
 
@@ -847,6 +858,42 @@ func (p *Proxy) UnregisterSlaveClient(name string) error {
 	return nil
 }
 
+// SetMasterContextMappings stores context-to-server mappings received from the master.
+// This converts the wire format (context -> []serverName) into an efficient lookup
+// (context -> set of serverNames) for use during context filtering.
+func (p *Proxy) SetMasterContextMappings(mappings map[string][]string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.masterContextMappings = make(map[string]map[string]bool, len(mappings))
+	for contextName, servers := range mappings {
+		serverSet := make(map[string]bool, len(servers))
+		for _, s := range servers {
+			serverSet[s] = true
+		}
+		p.masterContextMappings[contextName] = serverSet
+	}
+
+	slog.Info("Updated master context mappings", "contexts", len(mappings))
+}
+
+// isMasterServerInContext checks whether a master-proxied server is enabled in the
+// given context according to the master's context mappings. If no mappings have been
+// received (e.g. running on master, or old master without context support), returns
+// true to preserve backward compatibility (include all master tools).
+func (p *Proxy) isMasterServerInContext(contextName, serverName string) bool {
+	if p.masterContextMappings == nil {
+		// No mappings received — fall back to including everything (backward compat)
+		return true
+	}
+	serverSet, ok := p.masterContextMappings[contextName]
+	if !ok {
+		// Context not known in master mappings — exclude
+		return false
+	}
+	return serverSet[serverName]
+}
+
 // GetClient returns a client by name (useful for testing and debugging)
 func (p *Proxy) GetClient(name string) (Client, bool) {
 	p.mu.RLock()
@@ -915,23 +962,39 @@ func (p *Proxy) ListToolsForContext(contextName string, contextFilter ContextFil
 				continue
 			}
 
-			// If context filtering is enabled, check if tool is enabled
+			_, isMasterProxy := client.(*MasterProxyClient)
+
+			// Apply context filtering
 			if contextFilter != nil && contextName != "" {
-				enabled, err := contextFilter.IsToolEnabledInContext(contextName, serverName, name)
-				if err != nil {
-					slog.Warn("Failed to check tool context", "context", contextName, "server", serverName, "tool", name, "error", err)
-					// On error, exclude the tool (fail closed)
-					enabled = false
-				}
-				if !enabled {
-					continue
+				if isMasterProxy {
+					// For master-proxied clients, use the master's context mappings
+					// instead of the local Emergent graph (which has no knowledge of them).
+					if !p.isMasterServerInContext(contextName, serverName) {
+						continue
+					}
+				} else {
+					// For local clients, use the local context filter
+					enabled, err := contextFilter.IsToolEnabledInContext(contextName, serverName, name)
+					if err != nil {
+						slog.Warn("Failed to check tool context", "context", contextName, "server", serverName, "tool", name, "error", err)
+						// On error, exclude the tool (fail closed)
+						enabled = false
+					}
+					if !enabled {
+						continue
+					}
 				}
 			}
 
-			// Prefix tool names with server name to avoid conflicts
-			tool["name"] = serverName + "_" + name
-			tool["_server"] = serverName
-			allTools = append(allTools, tool)
+			// Prefix tool names with server name to avoid conflicts.
+			// IMPORTANT: Copy the tool map to avoid mutating the client's cached data.
+			toolCopy := make(map[string]interface{}, len(tool)+1)
+			for k, v := range tool {
+				toolCopy[k] = v
+			}
+			toolCopy["name"] = serverName + "_" + name
+			toolCopy["_server"] = serverName
+			allTools = append(allTools, toolCopy)
 		}
 	}
 
@@ -959,20 +1022,29 @@ func (p *Proxy) CallToolForContext(contextName, toolName string, arguments map[s
 		return nil, fmt.Errorf("unknown tool: %s", toolName)
 	}
 
-	// Validate context access if filtering is enabled
-	if contextFilter != nil && contextName != "" {
-		enabled, err := contextFilter.IsToolEnabledInContext(contextName, serverName, actualToolName)
-		if err != nil {
-			slog.Warn("Failed to check tool context access", "context", contextName, "server", serverName, "tool", actualToolName, "error", err)
-			return nil, fmt.Errorf("failed to verify context access for tool %s", toolName)
-		} else if !enabled {
-			return nil, fmt.Errorf("tool %s is not enabled in context %s", toolName, contextName)
-		}
-	}
-
 	client, ok := p.clients[serverName]
 	if !ok {
 		return nil, fmt.Errorf("server not found: %s", serverName)
+	}
+
+	_, isMasterProxy := client.(*MasterProxyClient)
+
+	// Validate context access if filtering is enabled
+	if contextFilter != nil && contextName != "" {
+		if isMasterProxy {
+			// For master-proxied clients, use the master's context mappings
+			if !p.isMasterServerInContext(contextName, serverName) {
+				return nil, fmt.Errorf("tool %s is not enabled in context %s", toolName, contextName)
+			}
+		} else {
+			enabled, err := contextFilter.IsToolEnabledInContext(contextName, serverName, actualToolName)
+			if err != nil {
+				slog.Warn("Failed to check tool context access", "context", contextName, "server", serverName, "tool", actualToolName, "error", err)
+				return nil, fmt.Errorf("failed to verify context access for tool %s", toolName)
+			} else if !enabled {
+				return nil, fmt.Errorf("tool %s is not enabled in context %s", toolName, contextName)
+			}
+		}
 	}
 
 	return client.CallTool(actualToolName, arguments)

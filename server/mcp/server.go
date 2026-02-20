@@ -1681,6 +1681,10 @@ func main() {
 		}
 	}
 
+	// Store slave config globally BEFORE creating the MCP proxy, so that
+	// LoadMCPServerConfigs() can use the correct hostID for placement filtering.
+	slaveConfig = cfg.Slave
+
 	// Initialize MCP proxy from Emergent-backed store
 	if mcpServerStore != nil {
 		provider := &DBConfigProvider{store: mcpServerStore}
@@ -1704,7 +1708,7 @@ func main() {
 		if err != nil {
 			slog.Warn("Failed to initialize CA for slave manager", "error", err)
 		} else {
-			slaveManager, err = slave.NewManager(slaveStore, proxy, ca)
+			slaveManager, err = slave.NewManager(slaveStore, proxy, ca, contextStore)
 			if err != nil {
 				slog.Warn("Failed to initialize slave manager", "error", err)
 			} else {
@@ -1724,7 +1728,7 @@ func main() {
 	}()
 
 	// Initialize slave client (for connecting to a master as a slave)
-	slaveConfig = cfg.Slave // Store config globally
+	// NOTE: slaveConfig was already set above (before proxy init) for correct placement filtering.
 	// Slave client will be initialized after providers are loaded (to sync tools)
 
 	// Helper function to check if a builtin server should be enabled
@@ -1933,6 +1937,10 @@ func main() {
 						slog.Error("Failed to initialize slave client", "error", err, "master", cfg.Slave.MasterURL)
 					} else {
 						slaveClient = client
+						// Wire up the proxy so master tools can be registered on the slave
+						if proxy != nil {
+							slaveClient.SetProxy(proxy)
+						}
 						slog.Info("Slave client initialized and connected to master", "master", cfg.Slave.MasterURL)
 					}
 				} else {
