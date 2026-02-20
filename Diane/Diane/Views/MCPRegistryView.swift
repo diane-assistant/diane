@@ -303,6 +303,31 @@ struct MCPRegistryView: View {
     private func serverDetailView(_ server: MCPServer) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                // Error banner
+                if let error = viewModel.error {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Configuration Error")
+                                .font(.headline)
+                            Text(error)
+                                .font(.caption)
+                        }
+                        Spacer()
+                        Button {
+                            viewModel.error = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding()
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                
                 // Header with actions
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {

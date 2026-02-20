@@ -487,10 +487,14 @@ final class MCPRegistryViewModel {
                 contextServers[context.name] = servers
             }
             
+            // Clear any previous errors
+            self.error = nil
             FileLogger.shared.info("Successfully updated server in context", category: "MCPRegistry")
         } catch {
-            FileLogger.shared.error("Failed to update server in context: \(error.localizedDescription)", category: "MCPRegistry")
-            logger.error("Failed to update server in context: \(error.localizedDescription)")
+            let errorMsg = error.localizedDescription
+            self.error = errorMsg.contains("read-only") ? "Configuration changes must be made on the master node" : errorMsg
+            FileLogger.shared.error("Failed to update server in context: \(errorMsg)", category: "MCPRegistry")
+            logger.error("Failed to update server in context: \(errorMsg)")
         }
     }
     
@@ -533,10 +537,14 @@ final class MCPRegistryViewModel {
                 }
             }
             
+            // Clear any previous errors
+            self.error = nil
             FileLogger.shared.info("Successfully updated server placement", category: "MCPRegistry")
         } catch {
-            FileLogger.shared.error("Failed to update server placement: \(error.localizedDescription)", category: "MCPRegistry")
-            logger.error("Failed to update server placement: \(error.localizedDescription)")
+            let errorMsg = error.localizedDescription
+            self.error = errorMsg.contains("read-only") ? "Configuration changes must be made on the master node" : errorMsg
+            FileLogger.shared.error("Failed to update server placement: \(errorMsg)", category: "MCPRegistry")
+            logger.error("Failed to update server placement: \(errorMsg)")
         }
     }
     
