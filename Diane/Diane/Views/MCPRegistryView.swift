@@ -568,49 +568,6 @@ struct MCPRegistryView: View {
                         }
                     }
                 }
-                            }
-                        }
-                        
-                        Text("Go to Contexts tab (Cmd+2) to manage")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .padding(.top, 4)
-                    }
-                }
-                
-                // Deployed on Nodes
-                DetailSection(title: "Deployed on Nodes") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Nodes running this server")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        
-                        let nodes = viewModel.nodesForServer(server)
-                        if nodes.isEmpty {
-                            Text("Not deployed on any node")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        } else {
-                            HStack(spacing: 6) {
-                                ForEach(nodes, id: \.self) { nodeName in
-                                    Text(nodeName)
-                                        .font(.caption2)
-                                        .fontWeight(.medium)
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .background(Color.green)
-                                        .cornerRadius(4)
-                                }
-                            }
-                        }
-                        
-                        Text("Multi-node deployment coming soon")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .padding(.top, 4)
-                    }
-                }
             }
             .padding()
         }
