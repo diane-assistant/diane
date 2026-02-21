@@ -8,6 +8,7 @@ default.profraw
 *.test
 *.out
 server/diane
+server/diane-ctl
 server/mcp/mcp
 
 # IDE
