@@ -20,7 +20,7 @@ import (
 // AgentConfig represents a configured ACP agent
 type AgentConfig struct {
 	Name        string            `json:"name"`
-	URL         string            `json:"url"`
+	URL         string            `json:"url,omitempty"`
 	Type        string            `json:"type,omitempty"`      // "acp" (default), "stdio" for local agents
 	Command     string            `json:"command,omitempty"`   // For stdio agents
 	Args        []string          `json:"args,omitempty"`      // For stdio agents
@@ -28,9 +28,10 @@ type AgentConfig struct {
 	WorkDir     string            `json:"workdir,omitempty"`   // Working directory/project path for the agent
 	Port        int               `json:"port,omitempty"`      // Port for ACP server (auto-assigned if 0)
 	SubAgent    string            `json:"sub_agent,omitempty"` // Sub-agent name to use (for servers with multiple agents)
-	Enabled     bool              `json:"enabled"`
-	Description string            `json:"description,omitempty"`
-	Tags        []string          `json:"tags,omitempty"`
+	Enabled         bool                   `json:"enabled"`
+	Description     string                 `json:"description,omitempty"`
+	Tags            []string               `json:"tags,omitempty"`
+	WorkspaceConfig *store.WorkspaceConfig `json:"workspace_config,omitempty"`
 }
 
 // UniqueKey returns a unique identifier for this agent instance (name + workdir)
@@ -59,10 +60,28 @@ type Manager struct {
 	sessionsMu   sync.RWMutex
 	idleTimeout  time.Duration
 	sessionStore store.ACPSessionStore
+	agentStore   store.ACPAgentStore
 	reaperCancel context.CancelFunc
 }
 
 // NewManager creates a new ACP manager
+
+// SetAgentStore injects a persistent agent store.
+func (m *Manager) SetAgentStore(s store.ACPAgentStore) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.agentStore = s
+	
+	// Sync local config to store if store is empty
+	ctx := context.Background()
+	storeAgents, err := s.ListAgents(ctx)
+	if err == nil && len(storeAgents) == 0 && len(m.config.Agents) > 0 {
+		for _, a := range m.config.Agents {
+			_ = s.SaveAgent(ctx, m.toStore(a))
+		}
+	}
+}
+
 func NewManager() (*Manager, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -124,6 +143,15 @@ func (m *Manager) saveConfig() error {
 
 // AddAgent adds a new ACP agent
 func (m *Manager) AddAgent(agent AgentConfig) error {
+
+	if m.agentStore != nil {
+		storeAgent := m.toStore(agent)
+		existing, err := m.agentStore.GetAgent(context.Background(), agent.Name)
+		if err == nil && existing != nil {
+			return fmt.Errorf("agent '%s' already exists", agent.Name)
+		}
+		return m.agentStore.SaveAgent(context.Background(), storeAgent)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -145,6 +173,21 @@ func (m *Manager) AddAgent(agent AgentConfig) error {
 
 // RemoveAgent removes an ACP agent by name
 func (m *Manager) RemoveAgent(name string) error {
+
+	if m.agentStore != nil {
+		// Remove caches
+		m.mu.Lock()
+		if client, ok := m.clients[name]; ok {
+			_ = client
+			delete(m.clients, name)
+		}
+		if client, ok := m.stdioClients[name]; ok {
+			client.Close()
+			delete(m.stdioClients, name)
+		}
+		m.mu.Unlock()
+		return m.agentStore.DeleteAgent(context.Background(), name)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -171,6 +214,18 @@ func (m *Manager) RemoveAgent(name string) error {
 
 // GetAgent returns an agent by name
 func (m *Manager) GetAgent(name string) (*AgentConfig, error) {
+
+	if m.agentStore != nil {
+		sa, err := m.agentStore.GetAgent(context.Background(), name)
+		if err != nil {
+			return nil, err
+		}
+		if sa == nil {
+			return nil, fmt.Errorf("agent '%s' not found", name)
+		}
+		ac := m.fromStore(*sa)
+		return &ac, nil
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -185,6 +240,17 @@ func (m *Manager) GetAgent(name string) (*AgentConfig, error) {
 
 // ListAgents returns all configured agents
 func (m *Manager) ListAgents() []AgentConfig {
+
+	if m.agentStore != nil {
+		storeAgents, err := m.agentStore.ListAgents(context.Background())
+		if err == nil {
+			result := make([]AgentConfig, len(storeAgents))
+			for i, sa := range storeAgents {
+				result[i] = m.fromStore(sa)
+			}
+			return result
+		}
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -195,6 +261,10 @@ func (m *Manager) ListAgents() []AgentConfig {
 
 // EnableAgent enables or disables an agent
 func (m *Manager) EnableAgent(name string, enabled bool) error {
+
+	if m.agentStore != nil {
+		return m.agentStore.EnableAgent(context.Background(), name, enabled)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -210,6 +280,27 @@ func (m *Manager) EnableAgent(name string, enabled bool) error {
 
 // UpdateAgent updates an agent's configuration (partial update)
 func (m *Manager) UpdateAgent(name string, updates map[string]interface{}) error {
+
+	if m.agentStore != nil {
+		agent, err := m.agentStore.GetAgent(context.Background(), name)
+		if err != nil || agent == nil {
+			return fmt.Errorf("agent '%s' not found", name)
+		}
+		
+		if subAgent, ok := updates["sub_agent"].(string); ok {
+			agent.SubAgent = subAgent
+		}
+		if enabled, ok := updates["enabled"].(bool); ok {
+			agent.Enabled = enabled
+		}
+		if desc, ok := updates["description"].(string); ok {
+			agent.Description = desc
+		}
+		if workDir, ok := updates["workdir"].(string); ok {
+			agent.WorkDir = workDir
+		}
+		return m.agentStore.SaveAgent(context.Background(), *agent)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -245,18 +336,12 @@ func (m *Manager) GetClient(name string) (*Client, error) {
 		return client, nil
 	}
 
-	// Find agent config
-	var agentConfig *AgentConfig
-	for _, a := range m.config.Agents {
-		if a.Name == name {
-			agentConfig = &a
-			break
-		}
+
+	agentConfig, err := m.GetAgent(name)
+	if err != nil {
+		return nil, err
 	}
 
-	if agentConfig == nil {
-		return nil, fmt.Errorf("agent '%s' not found", name)
-	}
 
 	if !agentConfig.Enabled {
 		return nil, fmt.Errorf("agent '%s' is disabled", name)
@@ -294,6 +379,11 @@ func (m *Manager) TestAgent(name string) (*AgentTestResult, error) {
 	// Handle stdio agents (simple command execution agents)
 	if agent.Type == "stdio" {
 		return m.testSimpleStdioAgent(agent, result)
+	}
+
+	// If agent has no URL, it implies an emergent agent via internal execution
+	if agent.URL == "" {
+		return m.testEmergentAgent(agent, result)
 	}
 
 	// Handle ACP agents (proper ACP protocol over stdio)
@@ -672,6 +762,19 @@ func (m *Manager) Reload() error {
 
 // GetEnabledAgents returns all enabled agents
 func (m *Manager) GetEnabledAgents() []AgentConfig {
+
+	if m.agentStore != nil {
+		storeAgents, err := m.agentStore.ListAgents(context.Background())
+		if err == nil {
+			result := make([]AgentConfig, 0, len(storeAgents))
+			for _, sa := range storeAgents {
+				if sa.Enabled {
+					result = append(result, m.fromStore(sa))
+				}
+			}
+			return result
+		}
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -769,6 +872,11 @@ func (m *Manager) RunAgent(name, prompt string) (*Run, error) {
 	// Handle simple stdio agents (just run command with prompt as arg)
 	if agent.Type == "stdio" {
 		return m.runSimpleStdioAgent(agent, prompt)
+	}
+
+	// If agent has no URL, it implies an emergent agent via internal execution
+	if agent.URL == "" {
+		return m.runEmergentAgent(agent, prompt)
 	}
 
 	// Handle ACP agents (proper ACP protocol over stdio)
@@ -956,4 +1064,38 @@ func (m *Manager) runSimpleStdioAgent(agent *AgentConfig, prompt string) (*Run, 
 	}
 
 	return run, nil
+}
+
+func (m *Manager) toStore(a AgentConfig) store.ACPAgentConfig {
+	return store.ACPAgentConfig{
+		Name:        a.Name,
+		URL:         a.URL,
+		Type:        a.Type,
+		Command:     a.Command,
+		Args:        a.Args,
+		Env:         a.Env,
+		WorkDir:     a.WorkDir,
+		Port:        a.Port,
+		SubAgent:    a.SubAgent,
+		Enabled:     a.Enabled,
+		Description: a.Description,
+		Tags:        a.Tags,
+	}
+}
+
+func (m *Manager) fromStore(a store.ACPAgentConfig) AgentConfig {
+	return AgentConfig{
+		Name:        a.Name,
+		URL:         a.URL,
+		Type:        a.Type,
+		Command:     a.Command,
+		Args:        a.Args,
+		Env:         a.Env,
+		WorkDir:     a.WorkDir,
+		Port:        a.Port,
+		SubAgent:    a.SubAgent,
+		Enabled:     a.Enabled,
+		Description: a.Description,
+		Tags:        a.Tags,
+	}
 }

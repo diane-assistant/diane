@@ -16,11 +16,13 @@ struct AgentConfig: Codable, Identifiable, Equatable {
     let enabled: Bool
     let description: String?
     let tags: [String]?
+    let workspaceConfig: WorkspaceConfig?
     
     enum CodingKeys: String, CodingKey {
         case name, url, type, command, args, env, workdir, port
         case subAgent = "sub_agent"
         case enabled, description, tags
+        case workspaceConfig = "workspace_config"
     }
     
     /// Display name (without workspace suffix)

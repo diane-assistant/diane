@@ -250,6 +250,18 @@ func buildACPSessionStore() store.ACPSessionStore {
 	return store.NewEmergentACPSessionStore(client)
 }
 
+
+// buildACPAgentStore creates the ACPAgentStore backed by Emergent.
+func buildACPAgentStore() store.ACPAgentStore {
+	client, err := emergent.GetClient()
+	if err != nil {
+		slog.Error("Emergent not configured — ACP agent store unavailable", "error", err)
+		return nil
+	}
+	slog.Info("ACP agent store: Emergent")
+	return store.NewEmergentACPAgentStore(client)
+}
+
 // buildContextStore creates the ContextStore backed by Emergent.
 func buildContextStore() store.ContextStore {
 	client, err := emergent.GetClient()
@@ -288,13 +300,21 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 	}
 
 	// Wire ACP session store into manager
+
 	if acpManager != nil {
+		// Wire ACP agent store into manager
+		agentStore := buildACPAgentStore()
+		if agentStore != nil {
+			acpManager.SetAgentStore(agentStore)
+		}
+
 		sessionStore := buildACPSessionStore()
 		if sessionStore != nil {
 			acpManager.SetSessionStore(sessionStore)
 			acpManager.InitSessions(context.Background())
 		}
 	}
+
 
 	// Build Emergent-backed stores
 	slaveStore := buildSlaveStore()

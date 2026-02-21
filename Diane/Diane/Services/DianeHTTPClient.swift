@@ -374,6 +374,11 @@ class DianeHTTPClient: DianeClientProtocol {
 
     // MARK: - Agents
 
+    func addAgent(agent: AgentConfig) async throws {
+        let bodyData = try JSONEncoder().encode(agent)
+        _ = try await requestWithBody("/agents", method: "POST", body: bodyData)
+    }
+
     func getAgents() async throws -> [AgentConfig] {
         let data = try await request("/agents")
         return try decode([AgentConfig].self, from: data)
@@ -386,15 +391,27 @@ class DianeHTTPClient: DianeClientProtocol {
     }
 
     func testAgent(name: String) async throws -> AgentTestResult {
-        throw DianeHTTPClientError.readOnlyMode
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let data = try await requestWithBody("/agents/\(encodedName)/test", method: "POST", body: nil)
+        return try decode(AgentTestResult.self, from: data)
     }
 
     func toggleAgent(name: String, enabled: Bool) async throws {
-        throw DianeHTTPClientError.readOnlyMode
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let body = ["enabled": enabled]
+        let bodyData = try JSONEncoder().encode(body)
+        _ = try await requestWithBody("/agents/\(encodedName)/toggle", method: "POST", body: bodyData)
     }
 
     func runAgentPrompt(agentName: String, prompt: String, remoteAgentName: String?) async throws -> AgentRunResult {
-        throw DianeHTTPClientError.readOnlyMode
+        let encodedName = agentName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentName
+        var body: [String: String] = ["prompt": prompt]
+        if let remoteAgent = remoteAgentName {
+            body["agent_name"] = remoteAgent
+        }
+        let bodyData = try JSONEncoder().encode(body)
+        let data = try await requestWithBody("/agents/\(encodedName)/run", method: "POST", body: bodyData)
+        return try decodeGo(AgentRunResult.self, from: data)
     }
 
     func getAgentLogs(agentName: String?, limit: Int) async throws -> [AgentLog] {
@@ -408,7 +425,8 @@ class DianeHTTPClient: DianeClientProtocol {
     }
 
     func removeAgent(name: String) async throws {
-        throw DianeHTTPClientError.readOnlyMode
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        _ = try await requestWithBody("/agents/\(encodedName)", method: "DELETE")
     }
 
     func getRemoteAgents(agentName: String) async throws -> [RemoteAgentInfo] {
@@ -418,7 +436,24 @@ class DianeHTTPClient: DianeClientProtocol {
     }
 
     func updateAgent(name: String, subAgent: String?, enabled: Bool?, description: String?, workdir: String?) async throws {
-        throw DianeHTTPClientError.readOnlyMode
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        var body: [String: Any] = [:]
+        if let subAgent = subAgent {
+            body["sub_agent"] = subAgent
+        }
+        if let enabled = enabled {
+            body["enabled"] = enabled
+        }
+        if let description = description {
+            body["description"] = description
+        }
+        if let workdir = workdir {
+            body["workdir"] = workdir
+        }
+        
+        guard !body.isEmpty else { return }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        _ = try await requestWithBody("/agents/\(encodedName)/update", method: "POST", body: bodyData)
     }
 
     // MARK: - Gallery (read-only: no install)
@@ -430,7 +465,21 @@ class DianeHTTPClient: DianeClientProtocol {
     }
 
     func installGalleryAgent(id: String, name: String?, workdir: String?, port: Int?) async throws -> GalleryInstallResponse {
-        throw DianeHTTPClientError.readOnlyMode
+        var body: [String: Any] = [:]
+        if let name = name {
+            body["name"] = name
+        }
+        if let workdir = workdir {
+            body["workdir"] = workdir
+        }
+        if let port = port, port > 0 {
+            body["port"] = port
+            body["type"] = "acp"
+        }
+        
+        let bodyData = body.isEmpty ? nil : try JSONSerialization.data(withJSONObject: body)
+        let data = try await requestWithBody("/gallery/\(id)/install", method: "POST", body: bodyData)
+        return try decode(GalleryInstallResponse.self, from: data)
     }
 
     // MARK: - Contexts

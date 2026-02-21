@@ -220,6 +220,13 @@ final class MockDianeClient: DianeClientProtocol {
 
     // MARK: - Agents
 
+    var mockAddAgent: (() throws -> Void)?
+    func addAgent(agent: AgentConfig) async throws {
+        if let mock = mockAddAgent {
+            try mock()
+        }
+    }
+
     /// Agents returned by `getAgents()`.
     var agentsList: [AgentConfig] = []
 

@@ -490,6 +490,12 @@ class DianeClient: DianeClientProtocol {
         _ = try await request("/agents/\(encodedName)/update", method: "POST", body: bodyData)
     }
     
+
+    func addAgent(agent: AgentConfig) async throws {
+        let bodyData = try JSONEncoder().encode(agent)
+        _ = try await request("/agents", method: "POST", timeout: 10, body: bodyData)
+    }
+
     // MARK: - Gallery API
     
     /// Get all available agents from the gallery
@@ -1131,4 +1137,5 @@ enum DianeClientError: LocalizedError {
             return "Failed to send signal to Diane"
         }
     }
+
 }

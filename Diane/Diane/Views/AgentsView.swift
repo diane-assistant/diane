@@ -53,14 +53,19 @@ struct AgentsView: View {
                 .font(.headline)
             
             Spacer()
-            
             // Add Agent button
-            Button {
-                viewModel.showAddAgent = true
-                Task { await viewModel.loadGallery() }
+            Menu {
+                Button("From Gallery") {
+                    viewModel.showGallerySheet = true
+                    Task { await viewModel.loadGallery() }
+                }
+                Button("Custom Agent") {
+                    viewModel.showAddAgent = true
+                }
             } label: {
                 Label("Add Agent", systemImage: "plus")
             }
+
             
             // Refresh button
             Button {
@@ -78,7 +83,14 @@ struct AgentsView: View {
         }
         .padding()
         .sheet(isPresented: $viewModel.showAddAgent) {
+            customAgentSheet
+        }
+        .sheet(isPresented: $viewModel.showGallerySheet) {
             addAgentSheet
+        }
+
+        .sheet(isPresented: $viewModel.showEditAgent) {
+            editAgentSheet
         }
     }
     
@@ -94,6 +106,71 @@ struct AgentsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
+
+    // MARK: - Custom Agent Setup
+    
+    private var customAgentSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Add Custom Agent")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    viewModel.showAddAgent = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding()
+            
+            Divider()
+            
+            Form {
+                Section("Basic Settings") {
+                    TextField("Name (required)", text: $viewModel.newAgentName)
+                    TextField("URL (optional)", text: $viewModel.newAgentURL)
+                    TextField("Description", text: $viewModel.newAgentDescription)
+                    TextField("Working Directory", text: $viewModel.newAgentWorkdir)
+                }
+                
+                Section("Workspace Configuration (Emergent Agents)") {
+                    TextField("Base Image", text: $viewModel.newAgentBaseImage)
+                    TextField("Repository URL", text: $viewModel.newAgentRepoURL)
+                    TextField("Repository Branch", text: $viewModel.newAgentRepoBranch)
+                    TextField("Provider (e.g. firecracker, e2b)", text: $viewModel.newAgentProvider)
+                    // We simplify the setup commands here since StringArrayEditor requires more setup
+                    // For now, emergent engine supports them but we don't block the UI update on it
+                }
+            }
+            .padding()
+            
+            if let error = viewModel.installError {
+                Text(error)
+                    .foregroundColor(.red)
+                    .font(.caption)
+                    .padding()
+            }
+            
+            Divider()
+            
+            HStack {
+                Button("Cancel") {
+                    viewModel.showAddAgent = false
+                }
+                Spacer()
+                Button("Add Agent") {
+                    Task { await viewModel.addCustomAgent() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.newAgentName.isEmpty || viewModel.isInstalling)
+            }
+            .padding()
+        }
+        .frame(width: 450, height: 350)
+    }
+
     // MARK: - Error View
     
     private func errorView(_ message: String) -> some View {
@@ -193,6 +270,15 @@ struct AgentsView: View {
                         }
                         
                         Spacer()
+                        
+
+                        Button {
+                            viewModel.startEditing()
+                        } label: {
+                            Image(systemName: "pencil")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Edit Agent")
                         
                         // Status badge
                         if let result = viewModel.testResults[agent.name] {
@@ -534,6 +620,87 @@ struct AgentsView: View {
         }
     }
     
+
+    // MARK: - Edit Agent Sheet
+    
+    private var editAgentSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Edit Agent")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    viewModel.showEditAgent = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding()
+            
+            Divider()
+            
+            VStack(alignment: .leading, spacing: 16) {
+                if let agent = viewModel.selectedAgent {
+                    Text("Editing: \(agent.displayName)")
+                        .font(.subheadline.weight(.medium))
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Description")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("Optional description", text: $viewModel.editAgentDescription)
+                        .textFieldStyle(.roundedBorder)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Working Directory")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("Optional absolute path", text: $viewModel.editAgentWorkdir)
+                        .textFieldStyle(.roundedBorder)
+                }
+                
+                if let error = viewModel.editError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                
+                Spacer()
+            }
+            .padding()
+            
+            Divider()
+            
+            HStack {
+                Button("Cancel") {
+                    viewModel.showEditAgent = false
+                }
+                .keyboardShortcut(.escape, modifiers: [])
+                
+                Spacer()
+                
+                Button {
+                    Task { await viewModel.saveEdit() }
+                } label: {
+                    if viewModel.isEditing {
+                        ProgressView().scaleEffect(0.6)
+                    } else {
+                        Text("Save")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(viewModel.isEditing)
+            }
+            .padding()
+        }
+        .frame(width: 400, height: 300)
+    }
+
     // MARK: - Add Agent Sheet
     
     private var addAgentSheet: some View {

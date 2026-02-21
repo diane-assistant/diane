@@ -105,6 +105,26 @@ struct AgentDetailView: View {
                 if let url = agent.url, !url.isEmpty {
                     InfoRow(label: "URL", value: url)
                 }
+            
+            if let wc = agent.workspaceConfig {
+                DetailSection(title: "Workspace Configuration") {
+                    if let img = wc.baseImage, !img.isEmpty {
+                        InfoRow(label: "Base Image", value: img)
+                    }
+                    if let repo = wc.repoUrl, !repo.isEmpty {
+                        InfoRow(label: "Repo URL", value: repo)
+                    }
+                    if let branch = wc.repoBranch, !branch.isEmpty {
+                        InfoRow(label: "Repo Branch", value: branch)
+                    }
+                    if let provider = wc.provider, !provider.isEmpty {
+                        InfoRow(label: "Provider", value: provider)
+                    }
+                    if let commands = wc.setupCommands, !commands.isEmpty {
+                        InfoRow(label: "Setup Commands", value: commands.joined(separator: ", "))
+                    }
+                }
+            }
                 if let command = agent.command, !command.isEmpty {
                     InfoRow(label: "Command", value: command)
                 }

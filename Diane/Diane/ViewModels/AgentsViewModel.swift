@@ -44,6 +44,18 @@ final class AgentsViewModel {
     // MARK: - Gallery State
 
     var showAddAgent = false
+
+    var showGallerySheet = false
+    var newAgentURL = ""
+    var newAgentDescription = ""
+    
+    // Workspace Config State
+    var newAgentBaseImage = ""
+    var newAgentRepoURL = ""
+    var newAgentRepoBranch = ""
+    var newAgentProvider = ""
+    var newAgentSetupCommands = [String]()
+    
     var galleryEntries: [GalleryEntry] = []
     var isLoadingGallery = false
     var selectedGalleryEntry: GalleryEntry?
@@ -52,6 +64,14 @@ final class AgentsViewModel {
     var newAgentPort = ""
     var isInstalling = false
     var installError: String?
+
+
+    // MARK: - Edit Agent State
+    var showEditAgent = false
+    var editAgentDescription = ""
+    var editAgentWorkdir = ""
+    var isEditing = false
+    var editError: String?
 
     // MARK: - Init
 
@@ -285,6 +305,104 @@ final class AgentsViewModel {
             // TODO: Show error
             FileLogger.shared.error("Failed to remove agent '\(name)': \(error.localizedDescription)", category: "Agents")
         }
+    }
+
+
+
+    func addCustomAgent() async {
+        isInstalling = true
+        installError = nil
+        
+        do {
+            var workspaceConfig: WorkspaceConfig? = nil
+            if !newAgentBaseImage.isEmpty || !newAgentRepoURL.isEmpty || !newAgentSetupCommands.isEmpty {
+                workspaceConfig = WorkspaceConfig(
+                    baseImage: newAgentBaseImage.isEmpty ? nil : newAgentBaseImage,
+                    repoUrl: newAgentRepoURL.isEmpty ? nil : newAgentRepoURL,
+                    repoBranch: newAgentRepoBranch.isEmpty ? nil : newAgentRepoBranch,
+                    provider: newAgentProvider.isEmpty ? nil : newAgentProvider,
+                    setupCommands: newAgentSetupCommands.isEmpty ? nil : newAgentSetupCommands
+                )
+            }
+
+            let agent = AgentConfig(
+                name: newAgentName,
+                url: newAgentURL.isEmpty ? nil : newAgentURL,
+                type: "acp",
+                command: nil,
+                args: nil,
+                env: nil,
+                workdir: newAgentWorkdir.isEmpty ? nil : newAgentWorkdir,
+                port: nil,
+                subAgent: nil,
+                enabled: true,
+                description: newAgentDescription.isEmpty ? nil : newAgentDescription,
+                tags: nil,
+                workspaceConfig: workspaceConfig
+            )
+            
+            try await client.addAgent(agent: agent)
+            
+            // Refresh
+            agents = try await client.getAgents()
+            showAddAgent = false
+            
+            // Reset
+            newAgentName = ""
+            newAgentURL = ""
+            newAgentDescription = ""
+            newAgentWorkdir = ""
+            newAgentBaseImage = ""
+            newAgentRepoURL = ""
+            newAgentRepoBranch = ""
+            newAgentProvider = ""
+            newAgentSetupCommands = []
+        } catch {
+            installError = error.localizedDescription
+        }
+        
+        isInstalling = false
+    }
+
+    func startEditing() {
+        guard let agent = selectedAgent else { return }
+        editAgentDescription = agent.description ?? ""
+        editAgentWorkdir = agent.workdir ?? ""
+        editError = nil
+        showEditAgent = true
+    }
+
+    func saveEdit() async {
+        guard let agent = selectedAgent else { return }
+        
+        isEditing = true
+        editError = nil
+        FileLogger.shared.info("Updating agent '\(agent.name)'", category: "Agents")
+        
+        do {
+            let newDesc = editAgentDescription.isEmpty ? nil : editAgentDescription
+            let newWorkdir = editAgentWorkdir.isEmpty ? nil : editAgentWorkdir
+            
+            try await client.updateAgent(
+                name: agent.name,
+                subAgent: nil,
+                enabled: nil,
+                description: newDesc,
+                workdir: newWorkdir
+            )
+            
+            // Refresh
+            agents = try await client.getAgents()
+            if let updated = agents.first(where: { $0.name == agent.name }) {
+                selectedAgent = updated
+            }
+            showEditAgent = false
+        } catch {
+            editError = error.localizedDescription
+            FileLogger.shared.error("Failed to update agent '\(agent.name)': \(error.localizedDescription)", category: "Agents")
+        }
+        
+        isEditing = false
     }
 
     // MARK: - Helpers

@@ -124,6 +124,7 @@ protocol DianeClientProtocol {
     func toggleJob(name: String, enabled: Bool) async throws
 
     // MARK: - Agents
+    func addAgent(agent: AgentConfig) async throws
 
     /// Get all configured agents
     func getAgents() async throws -> [AgentConfig]
