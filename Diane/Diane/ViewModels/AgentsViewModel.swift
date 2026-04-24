@@ -46,10 +46,10 @@ final class AgentsViewModel {
     var showAddAgent = false
 
     var showGallerySheet = false
-    var newAgentURL = ""
+    var newAgentType = "local"  // "local" or "cloud"
     var newAgentDescription = ""
     
-    // Workspace Config State
+    // Workspace Config State (Cloud Agents)
     var newAgentBaseImage = ""
     var newAgentRepoURL = ""
     var newAgentRepoBranch = ""
@@ -70,6 +70,11 @@ final class AgentsViewModel {
     var showEditAgent = false
     var editAgentDescription = ""
     var editAgentWorkdir = ""
+    var editAgentTriggerType = "manual"
+    var editAgentExecutionMode = "suggest"
+    var editAgentPrompt = ""
+    var editAgentCronSchedule = ""
+    var editAgentEnabled = false
     var isEditing = false
     var editError: String?
 
@@ -315,7 +320,7 @@ final class AgentsViewModel {
         
         do {
             var workspaceConfig: WorkspaceConfig? = nil
-            if !newAgentBaseImage.isEmpty || !newAgentRepoURL.isEmpty || !newAgentSetupCommands.isEmpty {
+            if newAgentType == "cloud" && (!newAgentBaseImage.isEmpty || !newAgentRepoURL.isEmpty || !newAgentSetupCommands.isEmpty) {
                 workspaceConfig = WorkspaceConfig(
                     baseImage: newAgentBaseImage.isEmpty ? nil : newAgentBaseImage,
                     repoUrl: newAgentRepoURL.isEmpty ? nil : newAgentRepoURL,
@@ -325,10 +330,12 @@ final class AgentsViewModel {
                 )
             }
 
+            let isCloud = newAgentType == "cloud"
+            
             let agent = AgentConfig(
                 name: newAgentName,
-                url: newAgentURL.isEmpty ? nil : newAgentURL,
-                type: "acp",
+                url: nil,
+                type: isCloud ? "emergent" : nil,
                 command: nil,
                 args: nil,
                 env: nil,
@@ -338,7 +345,12 @@ final class AgentsViewModel {
                 enabled: true,
                 description: newAgentDescription.isEmpty ? nil : newAgentDescription,
                 tags: nil,
-                workspaceConfig: workspaceConfig
+                workspaceConfig: workspaceConfig,
+                cloudId: nil,
+                triggerType: nil,
+                executionMode: nil,
+                prompt: nil,
+                cronSchedule: nil
             )
             
             try await client.addAgent(agent: agent)
@@ -349,7 +361,7 @@ final class AgentsViewModel {
             
             // Reset
             newAgentName = ""
-            newAgentURL = ""
+            newAgentType = "local"
             newAgentDescription = ""
             newAgentWorkdir = ""
             newAgentBaseImage = ""
@@ -368,6 +380,11 @@ final class AgentsViewModel {
         guard let agent = selectedAgent else { return }
         editAgentDescription = agent.description ?? ""
         editAgentWorkdir = agent.workdir ?? ""
+        editAgentTriggerType = agent.triggerType ?? "manual"
+        editAgentExecutionMode = agent.executionMode ?? "suggest"
+        editAgentPrompt = agent.prompt ?? ""
+        editAgentCronSchedule = agent.cronSchedule ?? ""
+        editAgentEnabled = agent.enabled
         editError = nil
         showEditAgent = true
     }
@@ -381,15 +398,33 @@ final class AgentsViewModel {
         
         do {
             let newDesc = editAgentDescription.isEmpty ? nil : editAgentDescription
-            let newWorkdir = editAgentWorkdir.isEmpty ? nil : editAgentWorkdir
             
-            try await client.updateAgent(
-                name: agent.name,
-                subAgent: nil,
-                enabled: nil,
-                description: newDesc,
-                workdir: newWorkdir
-            )
+            if agent.type == "emergent" {
+                if let cloudId = agent.cloudId {
+                    let update = EmergentAgentUpdateDTO(
+                        name: agent.name,
+                        description: newDesc,
+                        prompt: editAgentPrompt.isEmpty ? nil : editAgentPrompt,
+                        triggerType: EmergentAgentTriggerType(rawValue: editAgentTriggerType) ?? .manual,
+                        executionMode: EmergentAgentExecutionMode(rawValue: editAgentExecutionMode) ?? .suggest,
+                        strategyType: "react",
+                        cronSchedule: editAgentCronSchedule.isEmpty ? nil : editAgentCronSchedule,
+                        enabled: editAgentEnabled,
+                        capabilities: nil,
+                        reactionConfig: nil
+                    )
+                    _ = try await client.updateCloudAgent(agentId: cloudId, update: update)
+                }
+            } else {
+                let newWorkdir = editAgentWorkdir.isEmpty ? nil : editAgentWorkdir
+                try await client.updateAgent(
+                    name: agent.name,
+                    subAgent: nil,
+                    enabled: nil,
+                    description: newDesc,
+                    workdir: newWorkdir
+                )
+            }
             
             // Refresh
             agents = try await client.getAgents()

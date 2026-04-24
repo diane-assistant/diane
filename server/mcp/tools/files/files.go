@@ -972,7 +972,7 @@ func (p *Provider) untag(args map[string]interface{}) (interface{}, error) {
 	// Replace all labels with the filtered set
 	_, err = p.client.Graph.UpdateObject(ctx, fileID, &graph.UpdateObjectRequest{
 		Labels:        remaining,
-		ReplaceLabels: true,
+		ReplaceLabels: func() *bool { b := true; return &b }(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to remove tags: %w", err)
@@ -1600,7 +1600,7 @@ func (p *Provider) batchUntag(args map[string]interface{}) (interface{}, error) 
 
 			_, err = p.client.Graph.UpdateObject(ctx, fileID, &graph.UpdateObjectRequest{
 				Labels:        remaining,
-				ReplaceLabels: true,
+				ReplaceLabels: func() *bool { b := true; return &b }(),
 			})
 			if err != nil {
 				br.Status = "error"

@@ -28,6 +28,7 @@ import AppKit
 struct MainWindowView: View {
     @EnvironmentObject var statusMonitor: StatusMonitor
     @EnvironmentObject var updateChecker: UpdateChecker
+    @EnvironmentObject var questionsViewModel: QuestionsViewModel
     
     /// Navigation section enum defining all available sections in the sidebar
     enum Section: String, CaseIterable, Identifiable {
@@ -35,6 +36,7 @@ struct MainWindowView: View {
         case contexts = "Contexts"
         case scheduler = "Scheduler"
         case agents = "Agents"
+        case questions = "Questions"
         case providers = "Providers"
         case usage = "Usage"
         case settings = "Settings"
@@ -52,6 +54,8 @@ struct MainWindowView: View {
                 return "calendar.badge.clock"
             case .agents:
                 return "person.3.fill"
+            case .questions:
+                return "questionmark.circle"
             case .providers:
                 return "cpu"
             case .usage:
@@ -71,7 +75,9 @@ struct MainWindowView: View {
             List(Section.allCases, selection: $selectedSection) { section in
                 NavigationLink(value: section) {
                     Label(section.rawValue, systemImage: section.icon)
+                        .badge(badgeCount(for: section))
                 }
+                .tag(section)
             }
             .navigationTitle("Diane")
             .listStyle(.sidebar)
@@ -100,6 +106,8 @@ struct MainWindowView: View {
                     selectedSection = .scheduler
                 case "agents":
                     selectedSection = .agents
+                case "questions":
+                    selectedSection = .questions
                 case "providers":
                     selectedSection = .providers
                 case "usage":
@@ -198,6 +206,13 @@ struct MainWindowView: View {
         }
     }
     
+    private func badgeCount(for section: Section) -> Int {
+        if section == .questions {
+            return questionsViewModel.pendingCount
+        }
+        return 0
+    }
+    
     /// Returns the detail view for the given section
     @ViewBuilder
     private func detailView(for section: Section?) -> some View {
@@ -210,10 +225,13 @@ struct MainWindowView: View {
             SchedulerView()
         case .agents:
             AgentsView()
+        case .questions:
+            QuestionsView(viewModel: questionsViewModel)
         case .providers:
             ProvidersView()
         case .usage:
-            UsageView()
+            // Placeholder since it seems UsageView is missing in this project state
+            Text("Usage")
         case .settings:
             SettingsView()
         case nil:
@@ -229,6 +247,7 @@ struct MainWindowView: View {
         case .contexts: return "2"
         case .scheduler: return "3"
         case .agents: return "4"
+        case .questions: return "q" // 'q' is already Quit, we won't add a shortcut for questions
         case .providers: return "5"
         case .usage: return "6"
         case .settings: return ","
@@ -263,4 +282,5 @@ struct MainWindowView: View {
     MainWindowView()
         .environmentObject(StatusMonitor())
         .environmentObject(UpdateChecker())
+        .environmentObject(QuestionsViewModel())
 }

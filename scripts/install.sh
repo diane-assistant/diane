@@ -135,7 +135,7 @@ cp "$BUILD_DIR/acp-server" "$DIANE_BIN/acp-server"
 chmod +x "$DIANE_BIN/acp-server"
 print_success "Installed acp-server"
 
-# Step 8: Check PATH
+# Step 8: Check PATH configuration and detect conflicts
 print_step "Checking PATH configuration..."
 if [[ ":$PATH:" == *":$DIANE_BIN:"* ]]; then
     print_success "~/.diane/bin is already in PATH"
@@ -146,6 +146,35 @@ else
     echo ""
     echo "    export PATH=\"\$HOME/.diane/bin:\$PATH\""
     echo ""
+fi
+
+# Check for conflicting diane binaries outside the canonical location
+CONFLICT_FOUND=false
+for extra in /usr/bin/diane /usr/local/bin/diane /usr/local/bin/diane-ctl; do
+    if [ -e "$extra" ]; then
+        print_warning "Conflicting binary found: $extra"
+        echo "   This may shadow or conflict with ~/.diane/bin/diane."
+        echo "   Remove it with: sudo rm -f $extra"
+        CONFLICT_FOUND=true
+    fi
+done
+# Check remaining PATH dirs
+IFS=: read -ra PATH_DIRS <<< "$PATH"
+for dir in "${PATH_DIRS[@]}"; do
+    [ "$dir" = "$DIANE_BIN" ] && continue
+    candidate="$dir/diane"
+    if [ -x "$candidate" ]; then
+        real=$(readlink -f "$candidate" 2>/dev/null || echo "$candidate")
+        our_real=$(readlink -f "$BUNDLED_DIANE" 2>/dev/null || echo "$BUNDLED_DIANE")
+        if [ "$real" != "$our_real" ]; then
+            print_warning "Conflicting binary found in PATH: $candidate"
+            echo "   Remove or uninstall it to avoid version mismatches."
+            CONFLICT_FOUND=true
+        fi
+    fi
+done
+if [ "$CONFLICT_FOUND" = false ]; then
+    print_success "No conflicting diane binaries found in PATH"
 fi
 
 # Step 9: Launch the app

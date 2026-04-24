@@ -368,7 +368,7 @@ func (s *EmergentAgentStore) ToggleAgent(ctx context.Context, id int64, enabled 
 	_, err = s.client.Graph.UpdateObject(ctx, obj.ID, &graph.UpdateObjectRequest{
 		Properties:    props,
 		Labels:        labels,
-		ReplaceLabels: true,
+		ReplaceLabels: func() *bool { b := true; return &b }(),
 	})
 	if err != nil {
 		return fmt.Errorf("emergent toggle agent: %w", err)

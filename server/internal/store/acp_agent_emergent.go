@@ -96,7 +96,7 @@ func (s *EmergentACPAgentStore) SaveAgent(ctx context.Context, agent ACPAgentCon
 		_, err = s.client.Graph.UpdateObject(ctx, obj.ID, &graph.UpdateObjectRequest{
 			Properties: props,
 			Labels:     labels,
-			ReplaceLabels: true,
+			ReplaceLabels: func() *bool { b := true; return &b }(),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to update agent %q: %w", agent.Name, err)

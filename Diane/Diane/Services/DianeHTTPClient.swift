@@ -465,21 +465,45 @@ class DianeHTTPClient: DianeClientProtocol {
     }
 
     func installGalleryAgent(id: String, name: String?, workdir: String?, port: Int?) async throws -> GalleryInstallResponse {
-        var body: [String: Any] = [:]
-        if let name = name {
-            body["name"] = name
-        }
-        if let workdir = workdir {
-            body["workdir"] = workdir
-        }
-        if let port = port, port > 0 {
-            body["port"] = port
-            body["type"] = "acp"
-        }
-        
-        let bodyData = body.isEmpty ? nil : try JSONSerialization.data(withJSONObject: body)
-        let data = try await requestWithBody("/gallery/\(id)/install", method: "POST", body: bodyData)
-        return try decode(GalleryInstallResponse.self, from: data)
+        throw DianeHTTPClientError.readOnlyMode
+    }
+
+    // MARK: - Cloud Agent Methods
+    
+    func triggerRun(agentId: String) async throws -> EmergentTriggerResponseDTO {
+        let encodedId = agentId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentId
+        let data = try await requestWithBody("/agents/\(encodedId)/trigger", method: "POST")
+        return try decodeGo(EmergentTriggerResponseDTO.self, from: data)
+    }
+
+    func getAgentRuns(agentId: String, limit: Int = 10) async throws -> [EmergentAgentRunDTO] {
+        let encodedId = agentId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentId
+        let data = try await request("/agents/\(encodedId)/runs?limit=\(limit)")
+        return try decodeGo([EmergentAgentRunDTO].self, from: data)
+    }
+
+    func cancelRun(agentId: String, runId: String) async throws {
+        let encodedAgent = agentId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentId
+        let encodedRun = runId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? runId
+        _ = try await requestWithBody("/agents/\(encodedAgent)/runs/\(encodedRun)/cancel", method: "POST")
+    }
+
+    func getPendingEvents(agentId: String, limit: Int = 100) async throws -> EmergentPendingEventsResponseDTO {
+        let encodedId = agentId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentId
+        let data = try await request("/agents/\(encodedId)/pending-events?limit=\(limit)")
+        return try decodeGo(EmergentPendingEventsResponseDTO.self, from: data)
+    }
+
+    func batchTrigger(agentId: String, objectIds: [String]) async throws -> EmergentBatchTriggerResponseDTO {
+        let encodedId = agentId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentId
+        let body = ["objectIds": objectIds]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let data = try await requestWithBody("/agents/\(encodedId)/batch-trigger", method: "POST", body: bodyData)
+        return try decodeGo(EmergentBatchTriggerResponseDTO.self, from: data)
+    }
+
+    func updateCloudAgent(agentId: String, update: EmergentAgentUpdateDTO) async throws -> EmergentAgentDTO {
+        throw DianeHTTPClientError.readOnlyMode
     }
 
     // MARK: - Contexts

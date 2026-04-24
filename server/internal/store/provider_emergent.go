@@ -442,7 +442,7 @@ func (s *EmergentProviderStore) UpdateProvider(p *db.Provider) error {
 	_, err = s.client.Graph.UpdateObject(ctx, obj.ID, &graph.UpdateObjectRequest{
 		Properties:    props,
 		Labels:        labels,
-		ReplaceLabels: replaceLabels,
+		ReplaceLabels: &replaceLabels,
 	})
 	if err != nil {
 		return fmt.Errorf("emergent update provider %d: %w", p.ID, err)

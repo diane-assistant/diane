@@ -370,7 +370,7 @@ func (s *EmergentMCPServerStore) UpdateMCPServer(ctx context.Context, server *db
 	_, err = s.client.Graph.UpdateObject(ctx, obj.ID, &graph.UpdateObjectRequest{
 		Properties:    props,
 		Labels:        labels,
-		ReplaceLabels: true,
+		ReplaceLabels: func() *bool { b := true; return &b }(),
 	})
 	if err != nil {
 		return fmt.Errorf("emergent update mcp server: %w", err)
@@ -647,7 +647,7 @@ func (s *EmergentMCPServerStore) UpsertPlacement(ctx context.Context, serverID i
 
 	_, err = s.client.Graph.UpdateObject(ctx, obj.ID, &graph.UpdateObjectRequest{
 		Labels:        newLabels,
-		ReplaceLabels: true,
+		ReplaceLabels: func() *bool { b := true; return &b }(),
 		Properties: map[string]any{
 			"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
 		},
@@ -692,7 +692,7 @@ func (s *EmergentMCPServerStore) DeletePlacement(ctx context.Context, serverID i
 
 	_, err = s.client.Graph.UpdateObject(ctx, obj.ID, &graph.UpdateObjectRequest{
 		Labels:        newLabels,
-		ReplaceLabels: true,
+		ReplaceLabels: func() *bool { b := true; return &b }(),
 		Properties: map[string]any{
 			"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
 		},
@@ -733,7 +733,7 @@ func (s *EmergentMCPServerStore) DeletePlacementsForServer(ctx context.Context, 
 
 	_, err = s.client.Graph.UpdateObject(ctx, obj.ID, &graph.UpdateObjectRequest{
 		Labels:        newLabels,
-		ReplaceLabels: true,
+		ReplaceLabels: func() *bool { b := true; return &b }(),
 		Properties: map[string]any{
 			"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
 		},
@@ -770,7 +770,7 @@ func (s *EmergentMCPServerStore) DeletePlacementsForHost(ctx context.Context, ho
 
 		_, err := s.client.Graph.UpdateObject(ctx, obj.ID, &graph.UpdateObjectRequest{
 			Labels:        newLabels,
-			ReplaceLabels: true,
+			ReplaceLabels: func() *bool { b := true; return &b }(),
 			Properties: map[string]any{
 				"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
 			},

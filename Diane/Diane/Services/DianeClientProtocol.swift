@@ -153,6 +153,26 @@ protocol DianeClientProtocol {
     /// Update an agent's configuration
     func updateAgent(name: String, subAgent: String?, enabled: Bool?, description: String?, workdir: String?) async throws
 
+    // MARK: - Cloud Agent Methods
+
+    /// Trigger a run for a cloud agent
+    func triggerRun(agentId: String) async throws -> EmergentTriggerResponseDTO
+
+    /// Get runs for a cloud agent
+    func getAgentRuns(agentId: String, limit: Int) async throws -> [EmergentAgentRunDTO]
+
+    /// Cancel a running run for a cloud agent
+    func cancelRun(agentId: String, runId: String) async throws
+
+    /// Get pending events for a cloud reaction agent
+    func getPendingEvents(agentId: String, limit: Int) async throws -> EmergentPendingEventsResponseDTO
+
+    /// Batch trigger events for a cloud reaction agent
+    func batchTrigger(agentId: String, objectIds: [String]) async throws -> EmergentBatchTriggerResponseDTO
+
+    /// Update a cloud agent
+    func updateCloudAgent(agentId: String, update: EmergentAgentUpdateDTO) async throws -> EmergentAgentDTO
+
     // MARK: - Gallery
 
     /// Get all available agents from the gallery

@@ -49,6 +49,10 @@ class DianeClient: DianeClientProtocol {
             .appendingPathComponent(".diane/bin/diane").path
     }
     
+    /// Cached conflict warning from the last ensureSymlink() call.
+    /// Non-nil means another `diane` binary exists in PATH outside ~/.diane/bin.
+    static private(set) var binaryConflictWarning: String? = nil
+    
     /// Get the best available binary path (bundled preferred, then symlink/installed)
     static var binaryPath: String {
         // First check if bundled binary exists
@@ -73,16 +77,19 @@ class DianeClient: DianeClientProtocol {
         
         self.session = URLSession(configuration: config)
         
-        // Ensure symlink to bundled binary exists
-        Self.ensureSymlink()
+        // Ensure symlink to bundled binary exists; cache any conflict warning
+        DianeClient.binaryConflictWarning = Self.ensureSymlink()
     }
     
-    /// Ensures ~/.diane/bin/diane is a symlink to the bundled binary
-    static func ensureSymlink() {
+    /// Ensures ~/.diane/bin/diane is a symlink to the bundled binary.
+    /// Returns a conflict warning string if another `diane` binary was found in PATH
+    /// outside the canonical location, or nil if everything is clean.
+    @discardableResult
+    static func ensureSymlink() -> String? {
         guard let bundledPath = bundledBinaryPath,
               FileManager.default.fileExists(atPath: bundledPath) else {
             logger.info("No bundled binary found, skipping symlink setup")
-            return
+            return nil
         }
         
         let fm = FileManager.default
@@ -95,7 +102,7 @@ class DianeClient: DianeClientProtocol {
                 logger.info("Created directory: \(binDir.path)")
             } catch {
                 logger.error("Failed to create bin directory: \(error.localizedDescription)")
-                return
+                return nil
             }
         }
         
@@ -111,7 +118,7 @@ class DianeClient: DianeClientProtocol {
                     let destination = try fm.destinationOfSymbolicLink(atPath: symlinkPath)
                     if destination == bundledPath {
                         logger.debug("Symlink already points to bundled binary")
-                        return
+                        return checkForConflictingBinaries()
                     }
                 }
                 // Remove existing file/symlink to replace it
@@ -119,7 +126,7 @@ class DianeClient: DianeClientProtocol {
                 logger.info("Removed existing file at symlink path")
             } catch {
                 logger.error("Failed to check/remove existing symlink: \(error.localizedDescription)")
-                return
+                return nil
             }
         }
         
@@ -132,6 +139,53 @@ class DianeClient: DianeClientProtocol {
             logger.error("Failed to create symlink: \(error.localizedDescription)")
             FileLogger.shared.error("Failed to create symlink: \(error.localizedDescription)", category: "DianeClient")
         }
+        
+        return checkForConflictingBinaries()
+    }
+    
+    /// Searches PATH for `diane` binaries outside the canonical ~/.diane/bin location.
+    /// Returns a human-readable warning string if conflicts are found, nil otherwise.
+    static func checkForConflictingBinaries() -> String? {
+        let canonicalDir = (symlinkPath as NSString).deletingLastPathComponent
+        let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let pathDirs = pathEnv.split(separator: ":").map(String.init)
+        
+        var conflicts: [String] = []
+        let fm = FileManager.default
+        
+        for dir in pathDirs {
+            // Resolve ~ manually since FileManager doesn't do it for arbitrary strings
+            let resolvedDir: String
+            if dir.hasPrefix("~") {
+                resolvedDir = fm.homeDirectoryForCurrentUser.path + dir.dropFirst()
+            } else {
+                resolvedDir = dir
+            }
+            
+            // Skip our canonical directory
+            let resolvedCanonical = (canonicalDir as NSString).standardizingPath
+            let resolvedCheck = (resolvedDir as NSString).standardizingPath
+            if resolvedCheck == resolvedCanonical { continue }
+            
+            let candidate = (resolvedDir as NSString).appendingPathComponent("diane")
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: candidate, isDirectory: &isDir), !isDir.boolValue {
+                // Resolve symlinks to see if it ultimately points to our binary
+                let resolved = (candidate as NSString).resolvingSymlinksInPath
+                let canonicalBin = (symlinkPath as NSString).resolvingSymlinksInPath
+                if resolved != canonicalBin {
+                    conflicts.append(candidate)
+                }
+            }
+        }
+        
+        if conflicts.isEmpty { return nil }
+        
+        let paths = conflicts.joined(separator: ", ")
+        let warning = "Conflicting `diane` binary found in PATH: \(paths). The canonical location is ~/.diane/bin/diane (symlink to Diane.app). Remove the conflicting binary to avoid version mismatches."
+        logger.warning("\(warning)")
+        FileLogger.shared.warning(warning, category: "DianeClient")
+        return warning
     }
     
     /// Check if the socket file exists
@@ -345,6 +399,24 @@ class DianeClient: DianeClientProtocol {
         _ = try await request("/jobs/\(name)/toggle", method: "POST", body: bodyData)
     }
     
+    // --- Questions ---
+    
+    /// Fetch pending agent questions from the Emergent backend (via daemon).
+    func fetchPendingQuestions() async throws -> [AgentQuestion] {
+        let data = try await request("/questions?status=pending")
+        return try makeGoCompatibleDecoder().decode([AgentQuestion].self, from: data)
+    }
+    
+    /// Submit an answer for a pending agent question.
+    /// Throws if the question is not found, already answered, or the request fails.
+    func respondToQuestion(id: String, response: String) async throws {
+        struct Body: Encodable { let response: String }
+        let bodyData = try JSONEncoder().encode(Body(response: response))
+        let data = try await request("/questions/\(id)/respond", method: "POST", timeout: 10, body: bodyData)
+        // The daemon returns 202 with {"status":"ok"}; any error throws from request().
+        _ = data
+    }
+    
     /// Start Diane (launches the process)
     func startDiane() throws {
         // Use bundled binary if available, otherwise fall back to ~/.diane/bin/diane
@@ -494,6 +566,47 @@ class DianeClient: DianeClientProtocol {
     func addAgent(agent: AgentConfig) async throws {
         let bodyData = try JSONEncoder().encode(agent)
         _ = try await request("/agents", method: "POST", timeout: 10, body: bodyData)
+    }
+
+    // MARK: - Cloud Agent Methods
+    
+    func triggerRun(agentId: String) async throws -> EmergentTriggerResponseDTO {
+        let encodedId = agentId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentId
+        let data = try await request("/agents/\(encodedId)/trigger", method: "POST", timeout: 30)
+        return try makeGoCompatibleDecoder().decode(EmergentTriggerResponseDTO.self, from: data)
+    }
+
+    func getAgentRuns(agentId: String, limit: Int = 10) async throws -> [EmergentAgentRunDTO] {
+        let encodedId = agentId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentId
+        let data = try await request("/agents/\(encodedId)/runs?limit=\(limit)", method: "GET", timeout: 30)
+        return try makeGoCompatibleDecoder().decode([EmergentAgentRunDTO].self, from: data)
+    }
+
+    func cancelRun(agentId: String, runId: String) async throws {
+        let encodedAgent = agentId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentId
+        let encodedRun = runId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? runId
+        _ = try await request("/agents/\(encodedAgent)/runs/\(encodedRun)/cancel", method: "POST", timeout: 15)
+    }
+
+    func getPendingEvents(agentId: String, limit: Int = 100) async throws -> EmergentPendingEventsResponseDTO {
+        let encodedId = agentId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentId
+        let data = try await request("/agents/\(encodedId)/pending-events?limit=\(limit)", method: "GET", timeout: 30)
+        return try makeGoCompatibleDecoder().decode(EmergentPendingEventsResponseDTO.self, from: data)
+    }
+
+    func batchTrigger(agentId: String, objectIds: [String]) async throws -> EmergentBatchTriggerResponseDTO {
+        let encodedId = agentId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentId
+        let body = ["objectIds": objectIds]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let data = try await request("/agents/\(encodedId)/batch-trigger", method: "POST", timeout: 30, body: bodyData)
+        return try makeGoCompatibleDecoder().decode(EmergentBatchTriggerResponseDTO.self, from: data)
+    }
+
+    func updateCloudAgent(agentId: String, update: EmergentAgentUpdateDTO) async throws -> EmergentAgentDTO {
+        let encodedId = agentId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? agentId
+        let bodyData = try JSONEncoder().encode(update)
+        let data = try await request("/agents/\(encodedId)", method: "PATCH", timeout: 30, body: bodyData)
+        return try makeGoCompatibleDecoder().decode(EmergentAgentDTO.self, from: data)
     }
 
     // MARK: - Gallery API

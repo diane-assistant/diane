@@ -19,19 +19,26 @@ import (
 
 // AgentConfig represents a configured ACP agent
 type AgentConfig struct {
-	Name        string            `json:"name"`
-	URL         string            `json:"url,omitempty"`
-	Type        string            `json:"type,omitempty"`      // "acp" (default), "stdio" for local agents
-	Command     string            `json:"command,omitempty"`   // For stdio agents
-	Args        []string          `json:"args,omitempty"`      // For stdio agents
-	Env         map[string]string `json:"env,omitempty"`       // Environment variables
-	WorkDir     string            `json:"workdir,omitempty"`   // Working directory/project path for the agent
-	Port        int               `json:"port,omitempty"`      // Port for ACP server (auto-assigned if 0)
-	SubAgent    string            `json:"sub_agent,omitempty"` // Sub-agent name to use (for servers with multiple agents)
+	Name            string                 `json:"name"`
+	URL             string                 `json:"url,omitempty"`
+	Type            string                 `json:"type,omitempty"`      // "acp" (default), "stdio" for local agents
+	Command         string                 `json:"command,omitempty"`   // For stdio agents
+	Args            []string               `json:"args,omitempty"`      // For stdio agents
+	Env             map[string]string      `json:"env,omitempty"`       // Environment variables
+	WorkDir         string                 `json:"workdir,omitempty"`   // Working directory/project path for the agent
+	Port            int                    `json:"port,omitempty"`      // Port for ACP server (auto-assigned if 0)
+	SubAgent        string                 `json:"sub_agent,omitempty"` // Sub-agent name to use (for servers with multiple agents)
 	Enabled         bool                   `json:"enabled"`
 	Description     string                 `json:"description,omitempty"`
 	Tags            []string               `json:"tags,omitempty"`
 	WorkspaceConfig *store.WorkspaceConfig `json:"workspace_config,omitempty"`
+
+	// Cloud Agent Specific Fields
+	CloudID       string `json:"cloud_id,omitempty"`
+	TriggerType   string `json:"trigger_type,omitempty"`
+	ExecutionMode string `json:"execution_mode,omitempty"`
+	Prompt        string `json:"prompt,omitempty"`
+	CronSchedule  string `json:"cron_schedule,omitempty"`
 }
 
 // UniqueKey returns a unique identifier for this agent instance (name + workdir)
@@ -71,7 +78,7 @@ func (m *Manager) SetAgentStore(s store.ACPAgentStore) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.agentStore = s
-	
+
 	// Sync local config to store if store is empty
 	ctx := context.Background()
 	storeAgents, err := s.ListAgents(ctx)
@@ -286,7 +293,7 @@ func (m *Manager) UpdateAgent(name string, updates map[string]interface{}) error
 		if err != nil || agent == nil {
 			return fmt.Errorf("agent '%s' not found", name)
 		}
-		
+
 		if subAgent, ok := updates["sub_agent"].(string); ok {
 			agent.SubAgent = subAgent
 		}
@@ -336,12 +343,10 @@ func (m *Manager) GetClient(name string) (*Client, error) {
 		return client, nil
 	}
 
-
 	agentConfig, err := m.GetAgent(name)
 	if err != nil {
 		return nil, err
 	}
-
 
 	if !agentConfig.Enabled {
 		return nil, fmt.Errorf("agent '%s' is disabled", name)

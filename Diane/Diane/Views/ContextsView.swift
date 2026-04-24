@@ -40,6 +40,13 @@ struct ContextsView: View {
             }
             await viewModel.loadContexts()
         }
+        .onChange(of: statusMonitor.isRemoteMode) { _, _ in
+            if let configuredClient = statusMonitor.configuredClient {
+                viewModel = ContextsViewModel(client: configuredClient)
+                clientInitialized = true
+                Task { await viewModel.loadContexts() }
+            }
+        }
         .sheet(isPresented: $viewModel.showCreateContext) {
             createContextSheet
         }

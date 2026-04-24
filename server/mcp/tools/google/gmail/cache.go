@@ -396,7 +396,7 @@ func (c *Cache) SaveEmail(email *Email) error {
 		_, err = c.client.Graph.UpdateObject(ctx(), existing.ID, &graph.UpdateObjectRequest{
 			Properties:    props,
 			Labels:        labels,
-			ReplaceLabels: true,
+			ReplaceLabels: func() *bool { b := true; return &b }(),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to update email: %w", err)
@@ -564,7 +564,7 @@ func (c *Cache) SaveAttachment(a *Attachment) error {
 		_, err = c.client.Graph.UpdateObject(ctx(), existing.ID, &graph.UpdateObjectRequest{
 			Properties:    props,
 			Labels:        labels,
-			ReplaceLabels: true,
+			ReplaceLabels: func() *bool { b := true; return &b }(),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to update attachment: %w", err)
@@ -604,7 +604,7 @@ func (c *Cache) UpdateAttachmentLocalPath(gmailID, attachmentID, localPath strin
 			fmt.Sprintf("gmail_id:%s", gmailID),
 			"downloaded:true",
 		},
-		ReplaceLabels: true,
+		ReplaceLabels: func() *bool { b := true; return &b }(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update attachment local path: %w", err)
@@ -730,7 +730,7 @@ func (c *Cache) SaveSyncState(state *SyncState) error {
 		_, err = c.client.Graph.UpdateObject(ctx(), existing.ID, &graph.UpdateObjectRequest{
 			Properties:    props,
 			Labels:        labels,
-			ReplaceLabels: true,
+			ReplaceLabels: func() *bool { b := true; return &b }(),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to update sync state: %w", err)

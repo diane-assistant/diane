@@ -5,6 +5,8 @@ struct AgentsView: View {
     @EnvironmentObject var statusMonitor: StatusMonitor
     @State private var viewModel: AgentsViewModel
     @State private var clientInitialized = false
+    @State private var wsConnectRepo = false
+    @State private var availableImages: [EmergentWorkspaceImageDTO] = []
     
     init(viewModel: AgentsViewModel = AgentsViewModel()) {
         _viewModel = State(initialValue: viewModel)
@@ -39,6 +41,14 @@ struct AgentsView: View {
                 clientInitialized = true
             }
             await viewModel.loadData()
+        }
+        .onChange(of: statusMonitor.isRemoteMode) { _, _ in
+            // Re-initialize viewModel when StatusMonitor switches between local/remote
+            if let configuredClient = statusMonitor.configuredClient {
+                viewModel = AgentsViewModel(client: configuredClient)
+                clientInitialized = true
+                Task { await viewModel.loadData() }
+            }
         }
     }
     
@@ -128,23 +138,74 @@ struct AgentsView: View {
             Divider()
             
             Form {
-                Section("Basic Settings") {
-                    TextField("Name (required)", text: $viewModel.newAgentName)
-                    TextField("URL (optional)", text: $viewModel.newAgentURL)
-                    TextField("Description", text: $viewModel.newAgentDescription)
-                    TextField("Working Directory", text: $viewModel.newAgentWorkdir)
+                Section("Agent Type") {
+                    Picker("Type", selection: $viewModel.newAgentType) {
+                        Text("Local Agent").tag("local")
+                        Text("Cloud Agent").tag("cloud")
+                    }
+                    .pickerStyle(.segmented)
                 }
                 
-                Section("Workspace Configuration (Emergent Agents)") {
-                    TextField("Base Image", text: $viewModel.newAgentBaseImage)
-                    TextField("Repository URL", text: $viewModel.newAgentRepoURL)
-                    TextField("Repository Branch", text: $viewModel.newAgentRepoBranch)
-                    TextField("Provider (e.g. firecracker, e2b)", text: $viewModel.newAgentProvider)
-                    // We simplify the setup commands here since StringArrayEditor requires more setup
-                    // For now, emergent engine supports them but we don't block the UI update on it
+                Section("Basic Settings") {
+                    TextField("Name (required)", text: $viewModel.newAgentName)
+                    TextField("Description", text: $viewModel.newAgentDescription)
+                    if viewModel.newAgentType == "local" {
+                        TextField("Working Directory", text: $viewModel.newAgentWorkdir)
+                    }
+                }
+                
+                if viewModel.newAgentType == "cloud" {
+                    Section("Cloud Workspace Configuration") {
+                        HStack {
+                            Text("Base Image").frame(width: 100, alignment: .leading)
+                            if availableImages.isEmpty {
+                                TextField("e.g. ubuntu:latest", text: $viewModel.newAgentBaseImage)
+                            } else {
+                                Picker("", selection: $viewModel.newAgentBaseImage) {
+                                    Text("Select an image...").tag("")
+                                    ForEach(availableImages, id: \.id) { img in
+                                        Text(img.name).tag(img.dockerRef ?? img.name)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                            }
+                        }
+                        
+                        HStack {
+                            Text("Provider").frame(width: 100, alignment: .leading)
+                            Picker("", selection: $viewModel.newAgentProvider) {
+                                Text("Auto").tag("")
+                                Text("Firecracker").tag("firecracker")
+                                Text("gVisor").tag("gvisor")
+                                Text("E2B").tag("e2b")
+                            }
+                            .pickerStyle(.menu)
+                        }
+                        
+                        Toggle("Connect Repository", isOn: $wsConnectRepo.animation())
+                            .padding(.vertical, 4)
+                        
+                        if wsConnectRepo {
+                            VStack(alignment: .leading, spacing: 8) {
+                                TextField("Repository URL", text: $viewModel.newAgentRepoURL)
+                                TextField("Repository Branch", text: $viewModel.newAgentRepoBranch)
+                            }
+                            .padding()
+                            .background(Color.secondary.opacity(0.05))
+                            .cornerRadius(8)
+                        }
+                    }
                 }
             }
             .padding()
+            .task {
+                do {
+                    let images = try await EmergentAdminClient.shared.getWorkspaceImages()
+                    availableImages = images.filter { $0.status == "ready" }
+                } catch {
+                    // Ignore errors silently for this optional feature
+                }
+            }
             
             if let error = viewModel.installError {
                 Text(error)
@@ -168,7 +229,7 @@ struct AgentsView: View {
             }
             .padding()
         }
-        .frame(width: 450, height: 350)
+        .frame(width: 500, height: 450)
     }
 
     // MARK: - Error View
@@ -317,51 +378,56 @@ struct AgentsView: View {
                 .padding()
                 .background(Color(nsColor: .windowBackgroundColor))
                 
-                // Sub-agent configuration section (for ACP agents)
-                if agent.type == "acp" || agent.type == nil {
-                    subAgentConfigSection(agent: agent)
-                }
-                
-                // Connection error section
-                if let result = viewModel.testResults[agent.name], let error = result.error {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                            Text("Connection Error")
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Button {
-                                Task { await viewModel.testAgent(agent) }
-                            } label: {
-                                Label("Retry", systemImage: "arrow.clockwise")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        
-                        Text(error)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .padding(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.red.opacity(0.1))
-                            .cornerRadius(6)
+                if agent.type == "emergent" {
+                    CloudAgentDetailView(agent: agent)
+                        .id(agent.id)
+                } else {
+                    // Sub-agent configuration section (for ACP agents)
+                    if agent.type == "acp" || agent.type == nil {
+                        subAgentConfigSection(agent: agent)
                     }
-                    .padding()
-                    .background(Color.orange.opacity(0.05))
+                    
+                    // Connection error section
+                    if let result = viewModel.testResults[agent.name], let error = result.error {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                Text("Connection Error")
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Button {
+                                    Task { await viewModel.testAgent(agent) }
+                                } label: {
+                                    Label("Retry", systemImage: "arrow.clockwise")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            
+                            Text(error)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.red.opacity(0.1))
+                                .cornerRadius(6)
+                        }
+                        .padding()
+                        .background(Color.orange.opacity(0.05))
+                    }
+                    
+                    Divider()
+                    
+                    // Test message section
+                    testMessageSection(agent: agent)
+                    
+                    Divider()
+                    
+                    // Logs section
+                    logsSection(agent: agent)
                 }
-                
-                Divider()
-                
-                // Test message section
-                testMessageSection(agent: agent)
-                
-                Divider()
-                
-                // Logs section
-                logsSection(agent: agent)
                 
             } else {
                 // No agent selected
@@ -645,22 +711,80 @@ struct AgentsView: View {
                 if let agent = viewModel.selectedAgent {
                     Text("Editing: \(agent.displayName)")
                         .font(.subheadline.weight(.medium))
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Description")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("Optional description", text: $viewModel.editAgentDescription)
-                        .textFieldStyle(.roundedBorder)
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Working Directory")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("Optional absolute path", text: $viewModel.editAgentWorkdir)
-                        .textFieldStyle(.roundedBorder)
+                        
+                    if agent.type == "emergent" {
+                        Toggle("Enabled", isOn: $viewModel.editAgentEnabled)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Description")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("Optional description", text: $viewModel.editAgentDescription)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Trigger Type")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker("", selection: $viewModel.editAgentTriggerType) {
+                                Text("Manual").tag("manual")
+                                Text("Schedule").tag("schedule")
+                                Text("Reaction").tag("reaction")
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Execution Mode")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker("", selection: $viewModel.editAgentExecutionMode) {
+                                Text("Suggest").tag("suggest")
+                                Text("Execute").tag("execute")
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        
+                        if viewModel.editAgentTriggerType == "schedule" {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Cron Schedule")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                TextField("e.g. 0 * * * *", text: $viewModel.editAgentCronSchedule)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Prompt")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextEditor(text: $viewModel.editAgentPrompt)
+                                .font(.system(.body, design: .monospaced))
+                                .frame(height: 100)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                                )
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Description")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("Optional description", text: $viewModel.editAgentDescription)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Working Directory")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("Optional absolute path", text: $viewModel.editAgentWorkdir)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
                 }
                 
                 if let error = viewModel.editError {

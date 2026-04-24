@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/diane serve
+ExecStart=/root/.diane/bin/diane serve
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=/root

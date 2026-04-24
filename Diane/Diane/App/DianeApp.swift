@@ -137,6 +137,7 @@ struct DianeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var statusMonitor = StatusMonitor()
     @StateObject private var updateChecker = UpdateChecker()
+    @StateObject private var questionsViewModel = QuestionsViewModel()
     @State private var serverConfig = ServerConfiguration()
     @State private var hasStarted = false
     @Environment(\.openWindow) private var openWindow
@@ -160,6 +161,7 @@ struct DianeApp: App {
                     MainWindowView()
                         .environmentObject(statusMonitor)
                         .environmentObject(updateChecker)
+                        .environmentObject(questionsViewModel)
                         .environment(serverConfig)
                         .task {
                             await startServicesIfNeeded()
@@ -225,6 +227,11 @@ struct DianeApp: App {
                     NotificationCenter.default.post(name: NSNotification.Name("NavigateToSection"), object: "usage")
                 }
                 .keyboardShortcut("6", modifiers: .command)
+                
+                Button("Emergent") {
+                    NotificationCenter.default.post(name: NSNotification.Name("NavigateToSection"), object: "emergent")
+                }
+                .keyboardShortcut("7", modifiers: .command)
             }
         }
         
@@ -233,6 +240,7 @@ struct DianeApp: App {
             MenuBarView()
                 .environmentObject(statusMonitor)
                 .environmentObject(updateChecker)
+                .environmentObject(questionsViewModel)
                 // Disable all SwiftUI animations inside the MenuBarExtra panel.
                 // On macOS 26.x, animated content size changes trigger a recursive
                 // constraint update in NSHostingView.updateAnimatedWindowSize():
@@ -269,6 +277,7 @@ struct DianeApp: App {
             SettingsView()
                 .environmentObject(statusMonitor)
                 .environmentObject(updateChecker)
+                .environmentObject(questionsViewModel)
                 .environment(serverConfig)
         }
     }

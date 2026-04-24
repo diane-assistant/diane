@@ -60,6 +60,7 @@ func NewRootCmd(client *api.Client, version string) *cobra.Command {
 	rootCmd.AddCommand(newSlaveCmd(client))
 	rootCmd.AddCommand(newUpgradeCmd())
 	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newQuestionsCmd(client))
 
 	return rootCmd
 }

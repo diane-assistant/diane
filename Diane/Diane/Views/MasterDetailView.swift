@@ -29,31 +29,51 @@ struct MasterDetailView<Master: View, Detail: View>: View {
 /// Standard list section header for master column
 /// Provides consistent styling across all master-detail views
 struct MasterListHeader: View {
-    let icon: String
+    var icon: String? = nil
     let title: String
     var count: Int? = nil
+    var trailingIcon: String? = nil
+    var trailingTooltip: String? = nil
+    var action: (() -> Void)? = nil
     
     var body: some View {
-        HStack(spacing: Spacing.medium) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: Layout.iconColumnWidth, alignment: .center)
+        HStack(spacing: 8) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, alignment: .center)
+            }
             Text(title)
                 .font(.subheadline.weight(.semibold))
             if let count {
                 Text("\(count)")
                     .font(.caption2.weight(.medium).monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, Badge.horizontalPadding)
-                    .padding(.vertical, Badge.verticalPadding)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
                     .background(Color(nsColor: .separatorColor).opacity(0.3))
-                    .cornerRadius(Badge.cornerRadius)
+                    .cornerRadius(4)
             }
             Spacer()
+            
+            if let trailingIcon {
+                if let action {
+                    Button(action: action) {
+                        Image(systemName: trailingIcon)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(trailingTooltip ?? "")
+                } else {
+                    Image(systemName: trailingIcon)
+                        .foregroundStyle(.secondary)
+                        .help(trailingTooltip ?? "")
+                }
+            }
         }
         .padding(.horizontal)
-        .padding(.vertical, Spacing.medium)
+        .padding(.vertical, 8)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 }

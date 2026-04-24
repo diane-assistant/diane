@@ -7,6 +7,12 @@ struct SettingsView: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = false
     @AppStorage("autoStartDiane") private var autoStartDiane = true
     @AppStorage("pollInterval") private var pollInterval = 5.0
+    
+    // Cloud Platform API Config
+    @AppStorage("emergentBaseURL") private var emergentBaseURL = "http://localhost:5300"
+    @AppStorage("emergentAPIKey") private var emergentAPIKey = ""
+    @AppStorage("emergentProjectID") private var emergentProjectID = ""
+    
     @State private var showingChangeServerAlert = false
     @State private var showingRevokeAlert = false
     @State private var slaveToRevoke: SlaveInfo?
@@ -70,6 +76,18 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     
+                    if let conflict = statusMonitor.binaryConflictWarning {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text(conflict)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    
                     LabeledContent("Socket Path") {
                         Text("~/.diane/diane.sock")
                             .font(.system(.body, design: .monospaced))
@@ -94,6 +112,16 @@ struct SettingsView: View {
                 } message: {
                     Text("This will disconnect from the current server and return to the setup screen.")
                 }
+            }
+            
+            Section("Cloud Platform") {
+                TextField("Base URL", text: $emergentBaseURL)
+                    .autocorrectionDisabled()
+                
+                SecureField("API Key (Bearer Token)", text: $emergentAPIKey)
+                
+                TextField("Project ID", text: $emergentProjectID)
+                    .autocorrectionDisabled()
             }
             
             Section("Status") {

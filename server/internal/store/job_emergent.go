@@ -320,7 +320,7 @@ func (s *EmergentJobStore) UpdateJobFull(ctx context.Context, id int64, command,
 	_, err = s.client.Graph.UpdateObject(ctx, obj.ID, &graph.UpdateObjectRequest{
 		Properties:    props,
 		Labels:        labels,
-		ReplaceLabels: true,
+		ReplaceLabels: func() *bool { b := true; return &b }(),
 	})
 	if err != nil {
 		return fmt.Errorf("emergent update job: %w", err)

@@ -52,6 +52,13 @@ struct ToolsBrowserView: View {
                 }
             }
         }
+        .onChange(of: statusMonitor.isRemoteMode) { _, _ in
+            if let configuredClient = statusMonitor.configuredClient {
+                viewModel = ToolsBrowserViewModel(client: configuredClient)
+                clientInitialized = true
+                Task { await viewModel.loadTools() }
+            }
+        }
     }
     
     // MARK: - Header

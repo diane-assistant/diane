@@ -425,7 +425,8 @@ func (s *EmergentACPSessionStore) UpdateSession(ctx context.Context, sessionID s
 	}
 	if rebuildLabels {
 		updateReq.Labels = newLabels
-		updateReq.ReplaceLabels = true
+		b := true
+		updateReq.ReplaceLabels = &b
 	}
 
 	_, err = s.client.Graph.UpdateObject(ctx, obj.ID, updateReq)
@@ -503,7 +504,7 @@ func (s *EmergentACPSessionStore) MarkDisconnected(ctx context.Context) error {
 				"status": "disconnected",
 			},
 			Labels:        newLabels,
-			ReplaceLabels: true,
+			ReplaceLabels: func() *bool { b := true; return &b }(),
 		})
 		if err != nil {
 			slog.Warn("failed to mark session disconnected",

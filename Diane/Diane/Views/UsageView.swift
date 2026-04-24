@@ -46,6 +46,13 @@ struct UsageView: View {
             }
             await viewModel.loadData()
         }
+        .onChange(of: statusMonitor.isRemoteMode) { _, _ in
+            if let configuredClient = statusMonitor.configuredClient {
+                viewModel = UsageViewModel(client: configuredClient)
+                clientInitialized = true
+                Task { await viewModel.loadData() }
+            }
+        }
         .onChange(of: viewModel.selectedTimeRange) { _, _ in
             Task { await viewModel.loadData() }
         }

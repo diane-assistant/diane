@@ -13,6 +13,7 @@ import (
 
 	"github.com/diane-assistant/diane/internal/acp"
 	"github.com/diane-assistant/diane/internal/db"
+	"github.com/diane-assistant/diane/internal/emergent"
 	"github.com/diane-assistant/diane/internal/store"
 )
 
@@ -1636,4 +1637,64 @@ func (c *Client) GetSessionMessages(agentName, sessionID string) ([]*store.ACPSe
 		return nil, fmt.Errorf("failed to decode messages: %w", err)
 	}
 	return messages, nil
+}
+
+// --- Questions Methods ---
+
+// ListQuestions returns agent questions from the Emergent backend.
+// status filters by question state (e.g., "pending"). Pass "" to return all.
+func (c *Client) ListQuestions(status string) ([]emergent.AgentQuestion, error) {
+	u, _ := url.Parse("http://unix/questions")
+	if status != "" {
+		q := u.Query()
+		q.Set("status", status)
+		u.RawQuery = q.Encode()
+	}
+
+	resp, err := c.httpClient.Get(u.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list questions: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("list questions failed: %s", errResp.Error)
+	}
+
+	var questions []emergent.AgentQuestion
+	if err := json.NewDecoder(resp.Body).Decode(&questions); err != nil {
+		return nil, fmt.Errorf("failed to decode questions: %w", err)
+	}
+	return questions, nil
+}
+
+// RespondToQuestion submits an answer for the given question ID.
+func (c *Client) RespondToQuestion(id, response string) error {
+	body, err := json.Marshal(map[string]string{"response": response})
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Post(
+		fmt.Sprintf("http://unix/questions/%s/respond", id),
+		"application/json",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to respond to question: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		return fmt.Errorf("respond to question failed (status %d): %s", resp.StatusCode, errResp.Error)
+	}
+	return nil
 }

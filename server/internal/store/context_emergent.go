@@ -459,7 +459,7 @@ func (s *EmergentContextStore) AddServerToContext(ctx context.Context, contextNa
 
 	_, err = s.client.Graph.UpdateObject(ctx, obj.ID, &graph.UpdateObjectRequest{
 		Labels:        newLabels,
-		ReplaceLabels: true,
+		ReplaceLabels: func() *bool { b := true; return &b }(),
 		Properties: map[string]any{
 			"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
 		},
@@ -519,7 +519,7 @@ func (s *EmergentContextStore) RemoveServerFromContext(ctx context.Context, cont
 
 	_, err = s.client.Graph.UpdateObject(ctx, obj.ID, &graph.UpdateObjectRequest{
 		Labels:        newLabels,
-		ReplaceLabels: true,
+		ReplaceLabels: func() *bool { b := true; return &b }(),
 		Properties: map[string]any{
 			"tool_overrides": toolOverrides,
 			"updated_at":     time.Now().UTC().Format(time.RFC3339Nano),

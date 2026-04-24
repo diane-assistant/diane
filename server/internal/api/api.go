@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"github.com/diane-assistant/diane/internal/pairing"
 	"github.com/diane-assistant/diane/internal/slave"
 	"github.com/diane-assistant/diane/internal/store"
+	emergent_agents "github.com/emergent-company/emergent/apps/server-go/pkg/sdk/agents"
 )
 
 // MCPServerStatus represents the status of an MCP server
@@ -187,22 +189,24 @@ type AgentLog struct {
 
 // Server is the Unix socket HTTP API server
 type Server struct {
-	socketPath     string
-	listener       net.Listener
-	server         *http.Server
-	httpAddr       string       // optional TCP address for HTTP listener (e.g., ":8080")
-	httpAPIKey     string       // API key for authenticating TCP HTTP requests
-	tcpListener    net.Listener // TCP listener for HTTP access (nil if disabled)
-	httpServer     *http.Server // separate http.Server for TCP listener
-	statusProvider StatusProvider
-	acpManager     *acp.Manager
-	gallery        *acp.Gallery
-	contextsAPI    *ContextsAPI
-	providersAPI   *ProvidersAPI
-	mcpServersAPI  *MCPServersAPI
-	hostsAPI       *HostsAPI
-	slaveManager   *slave.Manager
-	pairLimiter    *pairing.RateLimiter // rate limiter for pairing attempts
+	socketPath       string
+	listener         net.Listener
+	server           *http.Server
+	httpAddr         string       // optional TCP address for HTTP listener (e.g., ":8080")
+	httpAPIKey       string       // API key for authenticating TCP HTTP requests
+	tcpListener      net.Listener // TCP listener for HTTP access (nil if disabled)
+	httpServer       *http.Server // separate http.Server for TCP listener
+	slaveMode        bool         // true when running as a slave connected to a master
+	statusProvider   StatusProvider
+	acpManager       *acp.Manager
+	gallery          *acp.Gallery
+	contextsAPI      *ContextsAPI
+	providersAPI     *ProvidersAPI
+	mcpServersAPI    *MCPServersAPI
+	hostsAPI         *HostsAPI
+	slaveManager     *slave.Manager
+	pairLimiter      *pairing.RateLimiter // rate limiter for pairing attempts
+	questionsService *emergent.QuestionsService
 }
 
 // buildProviderStore creates the ProviderStore backed by Emergent.
@@ -249,7 +253,6 @@ func buildACPSessionStore() store.ACPSessionStore {
 	slog.Info("ACP session store: Emergent")
 	return store.NewEmergentACPSessionStore(client)
 }
-
 
 // buildACPAgentStore creates the ACPAgentStore backed by Emergent.
 func buildACPAgentStore() store.ACPAgentStore {
@@ -315,7 +318,6 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 		}
 	}
 
-
 	// Build Emergent-backed stores
 	slaveStore := buildSlaveStore()
 	mcpServerStore := buildMCPServerStore()
@@ -361,20 +363,75 @@ func NewServer(statusProvider StatusProvider, database *db.DB, cfg config.Config
 		slog.Warn("NewServer: Slave store is nil, Hosts API not initialized")
 	}
 
+	// Initialize Questions Service (Emergent questions API)
+	var questionsService *emergent.QuestionsService
+	if emergentCfg, err := emergent.LoadConfig(); err == nil {
+		if qs, err := emergent.NewQuestionsService(emergentCfg); err == nil {
+			questionsService = qs
+			slog.Info("Emergent questions service initialized")
+		} else {
+			slog.Warn("Emergent questions service unavailable", "error", err)
+		}
+	} else {
+		slog.Warn("Emergent not configured — questions service disabled", "error", err)
+	}
+
 	return &Server{
-		socketPath:     socketPath,
-		httpAddr:       cfg.HTTPAddr(),
-		httpAPIKey:     cfg.HTTP.APIKey,
-		statusProvider: statusProvider,
-		acpManager:     acpManager,
-		gallery:        gallery,
-		contextsAPI:    contextsAPI,
-		providersAPI:   providersAPI,
-		mcpServersAPI:  mcpServersAPI,
-		hostsAPI:       hostsAPI,
-		slaveManager:   slaveManager,
-		pairLimiter:    pairing.NewRateLimiter(),
+		socketPath:       socketPath,
+		httpAddr:         cfg.HTTPAddr(),
+		httpAPIKey:       cfg.HTTP.APIKey,
+		slaveMode:        cfg.Slave.Enabled,
+		statusProvider:   statusProvider,
+		acpManager:       acpManager,
+		gallery:          gallery,
+		contextsAPI:      contextsAPI,
+		providersAPI:     providersAPI,
+		mcpServersAPI:    mcpServersAPI,
+		hostsAPI:         hostsAPI,
+		slaveManager:     slaveManager,
+		pairLimiter:      pairing.NewRateLimiter(),
+		questionsService: questionsService,
 	}, nil
+}
+
+// slaveReadOnlyMiddleware blocks mutating requests on a slave server.
+// Read-only endpoints (GET/HEAD) are allowed so local CLI tools like
+// "diane status" and "diane doctor" still work. Mutating operations
+// (POST/PUT/PATCH/DELETE) are rejected with a clear error directing the
+// user to the master server.
+// Slave-specific endpoints (pairing, status, health, doctor) are exempt.
+func slaveReadOnlyMiddleware(next http.Handler) http.Handler {
+	// Paths that slaves must always handle (even for POST).
+	exemptPrefixes := []string{
+		"/slaves/pair",
+		"/pair",
+		"/health",
+		"/doctor",
+		"/status",
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Allow all GET/HEAD requests through
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Allow exempt paths (slave management, health checks)
+		for _, prefix := range exemptPrefixes {
+			if r.URL.Path == prefix || strings.HasPrefix(r.URL.Path, prefix+"/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		// Block all other mutating requests
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "This server is running in slave mode. Modifications must be made on the master server.",
+		})
+	})
 }
 
 // readOnlyMiddleware wraps a handler to reject non-GET/HEAD requests with 405.
@@ -470,6 +527,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/auth", s.handleAuth)
 	mux.HandleFunc("/auth/", s.handleAuthAction)
 	mux.HandleFunc("/pair", s.handlePair)
+	mux.HandleFunc("/questions", s.handleQuestions)
+	mux.HandleFunc("/questions/", s.handleQuestionAction)
 
 	// Register Contexts API routes
 	if s.contextsAPI != nil {
@@ -499,7 +558,15 @@ func (s *Server) Start() error {
 		RegisterSlaveRoutes(mux, s)
 	}
 
-	s.server = &http.Server{Handler: mux}
+	// In slave mode, wrap the mux to block mutating requests on the local socket.
+	// Read operations (GET/HEAD) still work so "diane status", "diane doctor" etc. function.
+	var handler http.Handler = mux
+	if s.slaveMode {
+		handler = slaveReadOnlyMiddleware(mux)
+		slog.Info("Slave mode: local socket is read-only (modifications must be made on the master)")
+	}
+
+	s.server = &http.Server{Handler: handler}
 
 	go func() {
 		slog.Info("API server listening", "socket", s.socketPath)
@@ -1071,15 +1138,51 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		agents := s.acpManager.ListAgents()
-		json.NewEncoder(w).Encode(agents)
+
+		var mergedAgents []acp.AgentConfig
+		mergedAgents = append(mergedAgents, agents...)
+
+		if client, err := emergent.GetClient(); err == nil && client != nil {
+			if resp, err := client.Agents.List(r.Context()); err == nil && resp != nil {
+				for _, ea := range resp.Data {
+					desc := ""
+					if ea.Description != nil {
+						desc = *ea.Description
+					}
+					prompt := ""
+					if ea.Prompt != nil {
+						prompt = *ea.Prompt
+					}
+
+					mergedAgents = append(mergedAgents, acp.AgentConfig{
+						Name:          ea.Name,
+						Type:          "emergent",
+						Enabled:       ea.Enabled,
+						Description:   desc,
+						CloudID:       ea.ID,
+						TriggerType:   string(ea.TriggerType),
+						ExecutionMode: string(ea.ExecutionMode),
+						Prompt:        prompt,
+						CronSchedule:  ea.CronSchedule,
+					})
+				}
+			}
+		}
+
+		json.NewEncoder(w).Encode(mergedAgents)
 
 	case http.MethodPost:
+		// Read raw body for logging before decoding
+		bodyBytes, _ := io.ReadAll(r.Body)
+		slog.Info("POST /agents request", "body", string(bodyBytes))
+
 		var agent acp.AgentConfig
-		if err := json.NewDecoder(r.Body).Decode(&agent); err != nil {
+		if err := json.Unmarshal(bodyBytes, &agent); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body: " + err.Error()})
 			return
 		}
+		slog.Info("POST /agents decoded", "name", agent.Name, "type", agent.Type, "url", agent.URL, "command", agent.Command)
 
 		if agent.Name == "" {
 			w.WriteHeader(http.StatusBadRequest)
@@ -1087,16 +1190,46 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if agent.URL == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "Agent URL is required"})
-			return
-		}
+		if agent.Type == "emergent" {
+			client, err := emergent.GetClient()
+			if err != nil || client == nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Cloud agents not configured"})
+				return
+			}
 
-		if err := s.acpManager.AddAgent(agent); err != nil {
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
+			// Try to construct CreateAgentRequest
+			req := &emergent_agents.CreateAgentRequest{
+				Name:          agent.Name,
+				Description:   &agent.Description,
+				StrategyType:  "react",
+				TriggerType:   agent.TriggerType,
+				ExecutionMode: agent.ExecutionMode,
+				Enabled:       &agent.Enabled,
+			}
+			if agent.Prompt != "" {
+				req.Prompt = &agent.Prompt
+			}
+			if agent.CronSchedule != "" {
+				req.CronSchedule = agent.CronSchedule
+			}
+
+			createResp, err := client.Agents.Create(r.Context(), req)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create cloud agent: " + err.Error()})
+				return
+			}
+			if createResp != nil {
+				agent.CloudID = createResp.Data.ID
+			}
+
+		} else {
+			if err := s.acpManager.AddAgent(agent); err != nil {
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
 		}
 
 		w.WriteHeader(http.StatusCreated)
@@ -1140,6 +1273,34 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request) {
 		case http.MethodGet:
 			agent, err := s.acpManager.GetAgent(agentName)
 			if err != nil {
+				// Fallback to cloud agent
+				client, cerr := emergent.GetClient()
+				if cerr == nil && client != nil {
+					if resp, gerr := client.Agents.Get(r.Context(), agentName); gerr == nil && resp != nil {
+						ea := resp.Data
+						desc := ""
+						if ea.Description != nil {
+							desc = *ea.Description
+						}
+						prompt := ""
+						if ea.Prompt != nil {
+							prompt = *ea.Prompt
+						}
+						agent = &acp.AgentConfig{
+							Name:          ea.Name,
+							Type:          "emergent",
+							Enabled:       ea.Enabled,
+							Description:   desc,
+							CloudID:       ea.ID,
+							TriggerType:   string(ea.TriggerType),
+							ExecutionMode: string(ea.ExecutionMode),
+							Prompt:        prompt,
+							CronSchedule:  ea.CronSchedule,
+						}
+						json.NewEncoder(w).Encode(agent)
+						return
+					}
+				}
 				w.WriteHeader(http.StatusNotFound)
 				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 				return
@@ -1148,11 +1309,48 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request) {
 
 		case http.MethodDelete:
 			if err := s.acpManager.RemoveAgent(agentName); err != nil {
+				// Fallback to cloud agent
+				client, cerr := emergent.GetClient()
+				if cerr == nil && client != nil {
+					if derr := client.Agents.Delete(r.Context(), agentName); derr == nil {
+						json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "agent": agentName})
+						return
+					}
+				}
 				w.WriteHeader(http.StatusNotFound)
 				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "agent": agentName})
+
+		case http.MethodPatch:
+			client, cerr := emergent.GetClient()
+			if cerr != nil || client == nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Cloud agents not configured"})
+				return
+			}
+
+			var req emergent_agents.UpdateAgentRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body: " + err.Error()})
+				return
+			}
+
+			resp, derr := client.Agents.Update(r.Context(), agentName, &req)
+			if derr != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": derr.Error()})
+				return
+			}
+
+			if resp != nil {
+				json.NewEncoder(w).Encode(resp.Data)
+			} else {
+				json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+			}
+			return
 
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -1176,6 +1374,18 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := s.acpManager.EnableAgent(agentName, body.Enabled); err != nil {
+			// Fallback to cloud agent
+			client, cerr := emergent.GetClient()
+			if cerr == nil && client != nil {
+				req := emergent_agents.UpdateAgentRequest{
+					Enabled: &body.Enabled,
+				}
+				if _, derr := client.Agents.Update(r.Context(), agentName, &req); derr == nil {
+					json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "agent": agentName, "enabled": body.Enabled})
+					return
+				}
+			}
+
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
@@ -1297,6 +1507,127 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request) {
 		}
 
 		json.NewEncoder(w).Encode(map[string]string{"status": "updated", "agent": agentName})
+
+	case "trigger":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+		client, err := emergent.GetClient()
+		if err != nil || client == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Cloud agents not configured"})
+			return
+		}
+		resp, err := client.Agents.Trigger(r.Context(), agentName)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(resp)
+
+	case "runs":
+		client, err := emergent.GetClient()
+		if err != nil || client == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Cloud agents not configured"})
+			return
+		}
+
+		if len(parts) > 3 && parts[3] == "cancel" {
+			if r.Method != http.MethodPost {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+				return
+			}
+			runID := parts[2]
+			err := client.Agents.CancelRun(r.Context(), agentName, runID)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"status": "cancelled", "run": runID})
+			return
+		}
+
+		if r.Method == http.MethodGet {
+			limit := 10
+			if l := r.URL.Query().Get("limit"); l != "" {
+				if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+					limit = parsed
+				}
+			}
+			resp, err := client.Agents.GetRuns(r.Context(), agentName, limit)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(resp.Data)
+		} else {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		}
+
+	case "pending-events":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+		client, err := emergent.GetClient()
+		if err != nil || client == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Cloud agents not configured"})
+			return
+		}
+		limit := 100
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+				limit = parsed
+			}
+		}
+		resp, err := client.Agents.GetPendingEvents(r.Context(), agentName, limit)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(resp.Data)
+
+	case "batch-trigger":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+			return
+		}
+		var body struct {
+			ObjectIDs []string `json:"objectIds"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+			return
+		}
+		client, err := emergent.GetClient()
+		if err != nil || client == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Cloud agents not configured"})
+			return
+		}
+		req := &emergent_agents.BatchTriggerRequest{
+			ObjectIDs: body.ObjectIDs,
+		}
+		resp, err := client.Agents.BatchTrigger(r.Context(), agentName, req)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(resp.Data)
 
 	case "sessions":
 		s.handleAgentSessions(w, r, agentName, parts)
@@ -1882,4 +2213,87 @@ func (s *Server) handleAgentSessions(w http.ResponseWriter, r *http.Request, age
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Unknown session action: " + subAction})
 	}
+}
+
+// handleQuestions handles GET /questions
+// Returns the list of agent questions, filtered by ?status= (default: pending).
+func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.questionsService == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Emergent not configured"})
+		return
+	}
+
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "pending"
+	}
+
+	questions, err := s.questionsService.ListQuestions(r.Context(), status)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(questions)
+}
+
+// handleQuestionAction handles POST /questions/{id}/respond
+func (s *Server) handleQuestionAction(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.questionsService == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Emergent not configured"})
+		return
+	}
+
+	// Path: /questions/{id}/respond
+	path := strings.TrimPrefix(r.URL.Path, "/questions/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[1] != "respond" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid path; expected /questions/{id}/respond"})
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	questionID := parts[0]
+
+	var body struct {
+		Response string `json:"response"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Response == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "response field is required"})
+		return
+	}
+
+	if err := s.questionsService.RespondToQuestion(r.Context(), questionID, body.Response); err != nil {
+		msg := err.Error()
+		code := http.StatusInternalServerError
+		if strings.Contains(msg, "not found") {
+			code = http.StatusNotFound
+		} else if strings.Contains(msg, "already answered") {
+			code = http.StatusConflict
+		}
+		w.WriteHeader(code)
+		json.NewEncoder(w).Encode(map[string]string{"error": msg})
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }

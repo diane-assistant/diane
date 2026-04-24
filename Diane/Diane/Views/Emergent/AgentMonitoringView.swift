@@ -30,7 +30,7 @@ struct AgentMonitoringView: View {
             },
             detail: {
                 if let selectedAgent = viewModel.selectedAgent {
-                    AgentDetailView(agent: selectedAgent, logs: viewModel.logs)
+                    AgentDetailView(agent: selectedAgent, viewModel: viewModel, logs: viewModel.logs)
                 } else {
                     Text("Select an agent to monitor")
                         .foregroundColor(.secondary)
@@ -70,7 +70,10 @@ struct AgentRow: View {
 
 struct AgentDetailView: View {
     let agent: EmergentAgentConfig
+    @ObservedObject var viewModel: EmergentAgentMonitoringViewModel
     let logs: [String]
+    
+    @State private var selectedTab = 0
     
     var body: some View {
         VStack(spacing: 0) {
@@ -78,56 +81,156 @@ struct AgentDetailView: View {
             HStack {
                 Text(agent.name).font(.title)
                 Spacer()
-                // Status badge
+                
+                Button {
+                    Task { await viewModel.triggerRun() }
+                } label: {
+                    Label("Run Now", systemImage: "play.fill")
+                }
             }
-            .padding(Padding.standard.rawValue)
+            .padding()
             
             Divider()
             
-            ScrollView {
-                VStack(spacing: Spacing.large.rawValue) {
-                    // 3.4 Build the agent detail view using SummaryCard for displaying key execution metrics
-                    HStack(spacing: Spacing.large.rawValue) {
-                        SummaryCard(title: "State", value: agent.state.rawValue.capitalized, icon: "info.circle")
-                        SummaryCard(title: "Tools Used", value: "\(agent.tools.count)", icon: "wrench.and.screwdriver")
-                        SummaryCard(title: "Uptime", value: agent.state == .running ? "2m 15s" : "--", icon: "clock")
+            if let err = viewModel.error {
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.1))
+            }
+            
+            Picker("", selection: $selectedTab) {
+                Text("Live Logs").tag(0)
+                Text("Runs (\(viewModel.runs.count))").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .padding()
+            
+            if selectedTab == 0 {
+                liveLogsTab
+            } else {
+                runsTab
+            }
+        }
+    }
+    
+    private var liveLogsTab: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                // 3.4 Build the agent detail view using SummaryCard for displaying key execution metrics
+                HStack(spacing: 12) {
+                    SummaryCard(title: "State", value: agent.state.rawValue.capitalized, icon: "info.circle")
+                    SummaryCard(title: "Tools Used", value: "\(agent.tools.count)", icon: "wrench.and.screwdriver")
+                    SummaryCard(title: "Uptime", value: agent.state == .running ? "2m 15s" : "--", icon: "clock")
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                
+                // 3.6 Handle offline/disconnect states in the detail view showing a clear message using Spacing.large
+                if agent.state == .offline || agent.state == .error {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle")
+                        Text(agent.state == .offline ? "Agent is currently offline." : "Agent encountered an error.")
                     }
-                    .padding(.horizontal, Padding.standard.rawValue)
-                    .padding(.top, Padding.standard.rawValue)
-                    
-                    // 3.6 Handle offline/disconnect states in the detail view showing a clear message using Spacing.large
-                    if agent.state == .offline || agent.state == .error {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle")
-                            Text(agent.state == .offline ? "Agent is currently offline." : "Agent encountered an error.")
-                        }
-                        .foregroundColor(.red)
-                        .padding(Spacing.large.rawValue)
-                        .background(Color.red.opacity(0.1))
-                        .cornerRadius(CornerRadius.standard.rawValue)
-                    }
-                    
-                    // 3.5 Implement the live log feed section using DetailSection component
-                    DetailSection(title: "Live Execution Logs") {
-                        VStack(alignment: .leading, spacing: Spacing.small.rawValue) {
-                            if logs.isEmpty {
-                                Text("No logs available yet.")
-                                    .foregroundColor(.secondary)
-                            } else {
-                                ForEach(logs, id: \.self) { log in
-                                    Text(log).font(.system(.caption, design: .monospaced))
-                                }
+                    .foregroundColor(.red)
+                    .padding(12)
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                
+                // 3.5 Implement the live log feed section using DetailSection component
+                DetailSection(title: "Live Execution Logs") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if logs.isEmpty {
+                            Text("No logs available yet.")
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(logs, id: \.self) { log in
+                                Text(log).font(.system(.caption, design: .monospaced))
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(Padding.small.rawValue)
-                        .background(Color(.textBackgroundColor))
-                        .cornerRadius(CornerRadius.medium.rawValue)
                     }
-                    .padding(.horizontal, Padding.standard.rawValue)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(Color(.textBackgroundColor))
+                    .cornerRadius(6)
                 }
-                .padding(.bottom, Padding.large.rawValue)
+                .padding(.horizontal, 16)
             }
+            .padding(.bottom, 20)
+        }
+    }
+    
+    private var runsTab: some View {
+        VStack {
+            if viewModel.isLoadingRuns && viewModel.runs.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if viewModel.runs.isEmpty {
+                Text("No runs recorded.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(viewModel.runs) { run in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            HStack {
+                                Text(run.id.prefix(8))
+                                    .font(.system(.body, design: .monospaced))
+                                
+                                Text(run.status.rawValue.uppercased())
+                                    .font(.system(size: 9, weight: .bold))
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 2)
+                                    .background(runStatusColor(run.status).opacity(0.2))
+                                    .foregroundColor(runStatusColor(run.status))
+                                    .cornerRadius(4)
+                            }
+                            
+                            HStack {
+                                Text(run.startedAt ?? "-")
+                                    .font(.caption)
+                                if let duration = run.durationMs {
+                                    Text("(\(duration)ms)")
+                                        .font(.caption)
+                                }
+                                if let steps = run.stepCount {
+                                    Text("\(steps) steps")
+                                        .font(.caption)
+                                }
+                            }
+                            .foregroundStyle(.secondary)
+                            
+                            if let err = run.errorMessage {
+                                Text(err)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        if run.status == .running || run.status == .paused {
+                            Button("Cancel") {
+                                Task { await viewModel.cancelRun(runId: run.id) }
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+    
+    private func runStatusColor(_ status: EmergentAgentRunStatus) -> Color {
+        switch status {
+        case .running: return .blue
+        case .success: return .green
+        case .skipped, .paused, .cancelled: return .orange
+        case .error: return .red
         }
     }
 }

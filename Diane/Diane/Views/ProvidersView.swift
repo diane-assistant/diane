@@ -40,6 +40,13 @@ struct ProvidersView: View {
             }
             await viewModel.loadData()
         }
+        .onChange(of: statusMonitor.isRemoteMode) { _, _ in
+            if let configuredClient = statusMonitor.configuredClient {
+                viewModel = ProvidersViewModel(client: configuredClient)
+                clientInitialized = true
+                Task { await viewModel.loadData() }
+            }
+        }
         .sheet(isPresented: $viewModel.showCreateProvider) {
             createProviderSheet
         }

@@ -18,11 +18,23 @@ struct AgentConfig: Codable, Identifiable, Equatable {
     let tags: [String]?
     let workspaceConfig: WorkspaceConfig?
     
+    // Cloud Agent Specific Fields
+    let cloudId: String?
+    let triggerType: String?
+    let executionMode: String?
+    let prompt: String?
+    let cronSchedule: String?
+    
     enum CodingKeys: String, CodingKey {
         case name, url, type, command, args, env, workdir, port
         case subAgent = "sub_agent"
         case enabled, description, tags
         case workspaceConfig = "workspace_config"
+        case cloudId = "cloud_id"
+        case triggerType = "trigger_type"
+        case executionMode = "execution_mode"
+        case prompt
+        case cronSchedule = "cron_schedule"
     }
     
     /// Display name (without workspace suffix)

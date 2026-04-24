@@ -27,6 +27,10 @@ class StatusMonitor: ObservableObject {
     @Published var restartingSlaves: Set<String> = []
     @Published var upgradingSlaves: Set<String> = []
     
+    // Binary install health
+    /// Non-nil when a conflicting `diane` binary is detected in PATH outside ~/.diane/bin.
+    @Published var binaryConflictWarning: String? = nil
+    
     private var client: DianeClientProtocol?
     
     /// Dedicated client for local process management (always a DianeClient singleton, independent of mode)
@@ -58,6 +62,8 @@ class StatusMonitor: ObservableObject {
         isRemoteMode = false
         remoteURL = nil
         serverDisplayName = "Local"
+        // DianeClient.shared init already ran ensureSymlink(); surface any conflict
+        binaryConflictWarning = DianeClient.binaryConflictWarning
     }
     
     /// Configure for remote mode (HTTP)

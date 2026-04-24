@@ -72,28 +72,42 @@ func newAgentCmd(client *api.Client) *cobra.Command {
 }
 
 func newAgentAddCmd(client *api.Client) *cobra.Command {
-	return &cobra.Command{
-		Use:   "add <name> <url> [description]",
-		Short: "Add a new ACP agent",
-		Args:  cobra.RangeArgs(2, 3),
+	cmd := &cobra.Command{
+		Use:   "add <name>",
+		Short: "Add a new agent",
+		Long: `Add a new agent.
+
+Examples:
+  diane agent add my-opencode --url http://localhost:4322
+  diane agent add my-cloud-agent --type emergent --description "My cloud agent"`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			agentType, _ := cmd.Flags().GetString("type")
+			url, _ := cmd.Flags().GetString("url")
+			description, _ := cmd.Flags().GetString("description")
+
 			agent := acp.AgentConfig{
-				Name:    args[0],
-				URL:     args[1],
-				Enabled: true,
-			}
-			if len(args) > 2 {
-				agent.Description = args[2]
+				Name:        args[0],
+				URL:         url,
+				Type:        agentType,
+				Description: description,
+				Enabled:     true,
 			}
 
 			if err := client.AddAgent(agent); err != nil {
 				return fmt.Errorf("failed to add agent: %w", err)
 			}
 
-			PrintSuccess(fmt.Sprintf("Agent '%s' added", agent.Name))
+			PrintSuccess(fmt.Sprintf("Agent '%s' added (type: %s)", agent.Name, agentType))
 			return nil
 		},
 	}
+
+	cmd.Flags().String("type", "acp", "Agent type: acp or emergent")
+	cmd.Flags().String("url", "", "ACP endpoint URL (for local ACP agents)")
+	cmd.Flags().String("description", "", "Agent description")
+
+	return cmd
 }
 
 func newAgentRemoveCmd(client *api.Client) *cobra.Command {

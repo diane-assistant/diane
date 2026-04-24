@@ -42,6 +42,13 @@ struct SchedulerView: View {
             }
             await viewModel.loadData()
         }
+        .onChange(of: statusMonitor.isRemoteMode) { _, _ in
+            if let configuredClient = statusMonitor.configuredClient {
+                viewModel = SchedulerViewModel(client: configuredClient)
+                clientInitialized = true
+                Task { await viewModel.loadData() }
+            }
+        }
     }
     
     // MARK: - Header

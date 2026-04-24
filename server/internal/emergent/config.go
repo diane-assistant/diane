@@ -5,7 +5,8 @@
 //   - EMERGENT_BASE_URL (default: http://localhost:3002)
 //   - EMERGENT_API_KEY (required)
 //
-// The API key is project-scoped, so no project ID is needed.
+// The API key is project-scoped; Diane can also load a project_id from the
+// config file to avoid the /api/auth/me bootstrap call.
 package emergent
 
 import (
@@ -25,19 +26,20 @@ const (
 
 // Config holds Emergent connection configuration.
 // The API key is project-scoped — Emergent automatically determines
-// which project the key belongs to, so no ProjectID is needed.
+// which project the key belongs to.
+// ProjectID is populated from the config file if present; otherwise it is
+// resolved lazily via GET /api/auth/me when a QuestionsService is created.
 type Config struct {
-	BaseURL string `json:"base_url"`
-	APIKey  string `json:"api_key"`
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // configFile represents the JSON structure of the config file.
-// It supports a legacy project_id field for backward compatibility,
-// but this field is ignored.
 type configFile struct {
 	BaseURL   string `json:"base_url"`
 	APIKey    string `json:"api_key"`
-	ProjectID string `json:"project_id,omitempty"` // Ignored — API key determines project
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // LoadConfig reads Emergent configuration from the config file and
@@ -69,6 +71,7 @@ func loadConfigFrom(configPath, envPrefix string) (*Config, error) {
 			if err := json.Unmarshal(data, &f); err == nil {
 				cfg.BaseURL = f.BaseURL
 				cfg.APIKey = f.APIKey
+				cfg.ProjectID = f.ProjectID
 			}
 		}
 	}

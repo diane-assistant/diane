@@ -26,7 +26,6 @@
 		017 /* ContextsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118 /* ContextsView.swift */; };
 		018 /* Provider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 119 /* Provider.swift */; };
 		019 /* ProvidersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120 /* ProvidersView.swift */; };
-		020 /* UsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121 /* UsageView.swift */; };
 		021 /* MCPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122 /* MCPServer.swift */; };
 		022 /* MCPServersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 123 /* MCPServersView.swift */; };
 		024 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124 /* MainWindowView.swift */; };
@@ -73,7 +72,6 @@
 		065 /* ContextsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118 /* ContextsView.swift */; };
 		066 /* Provider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 119 /* Provider.swift */; };
 		067 /* ProvidersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120 /* ProvidersView.swift */; };
-		068 /* UsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121 /* UsageView.swift */; };
 		069 /* MCPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122 /* MCPServer.swift */; };
 		070 /* MCPServersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 123 /* MCPServersView.swift */; };
 		071 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124 /* MainWindowView.swift */; };
@@ -105,7 +103,6 @@
 		097 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 159 /* EmptyStateView.swift */; };
 		098 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 159 /* EmptyStateView.swift */; };
 		099 /* TimeRangePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160 /* TimeRangePicker.swift */; };
-		161 /* TimeRangePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160 /* TimeRangePicker.swift */; };
 		1100 /* DianeIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000 /* DianeIOSApp.swift */; };
 		1101 /* DianeStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 106 /* DianeStatus.swift */; };
 		1102 /* Job.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112 /* Job.swift */; };
@@ -141,15 +138,57 @@
 		1502 /* ServerListPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1602 /* ServerListPopover.swift */; };
 		1503 /* Slave.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1601 /* Slave.swift */; };
 		1504 /* ServerListPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1602 /* ServerListPopover.swift */; };
+		161 /* TimeRangePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160 /* TimeRangePicker.swift */; };
 		1702 /* MCPRegistryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1700 /* MCPRegistryView.swift */; };
 		1703 /* MCPRegistryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1701 /* MCPRegistryViewModel.swift */; };
 		1704 /* MCPRegistryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1700 /* MCPRegistryView.swift */; };
 		1705 /* MCPRegistryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1701 /* MCPRegistryViewModel.swift */; };
+		1AABAF51C2B5333CE9870894 /* EmergentWorkspaceImagesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD8B9187B79B098B04862E30 /* EmergentWorkspaceImagesViewModel.swift */; };
+		2F0DBE4E7B5367EAFAA6B0AC /* CloudAgentViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8730D3294E826897E1F17674 /* CloudAgentViewModel.swift */; };
+		60681861994F5CEA7EF442EA /* QuestionsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75EAF79D7F59FBB6C07773B8 /* QuestionsViewModel.swift */; };
+		75CC6DBF4C760FA2BC6E3D70 /* EmergentMCPRegistryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D436A1C9F1452E1A1D7A485 /* EmergentMCPRegistryViewModel.swift */; };
+		798606D30BF811A8B8070940 /* EmergentMCPServerFormSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB7B4090FA7553FE5EC702C4 /* EmergentMCPServerFormSheet.swift */; };
+		7B0D6CAAEC5A2469A28113B0 /* QuestionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17FE92C2409092F75D3DDC2E /* QuestionsView.swift */; };
+		80F30B0D4AEB3EAEDBA27276 /* CloudAgentDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85AB579E0047519268D9CD06 /* CloudAgentDetailView.swift */; };
+		9A6A3E1B0CC828AB87B382CA /* EmergentWorkspaceImagesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD7C71A08D7968CAE356C754 /* EmergentWorkspaceImagesView.swift */; };
+		AA07749DE1CC3630510FA012 /* AgentWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = C94E10C1A3ACAAA6337ADAAC /* AgentWorkspace.swift */; };
+		BE20F46BD146D3B42E4D63AF /* EmergentModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71A62124B913223BFDC350FD /* EmergentModels.swift */; };
+		BE4D3823C21A64FBA6AA493A /* EmergentMCPServerRegistryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 245D28A9A8CA3CF1A60832BE /* EmergentMCPServerRegistryView.swift */; };
+		CC883D3A147525B105FBC1F4 /* AgentQuestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B5B16B96CAA111B578BF042 /* AgentQuestion.swift */; };
+		F993BB0B6A942D1F755BBED0 /* EmergentAdminClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65735933A13F4C149D8F8720 /* EmergentAdminClient.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		800 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 600 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 400;
+			remoteInfo = Diane;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		0B5B16B96CAA111B578BF042 /* AgentQuestion.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentQuestion.swift; sourceTree = "<group>"; };
 		100 /* Diane.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Diane.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1000 /* DianeIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeIOSApp.swift; sourceTree = "<group>"; };
+		1001 /* DianeIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DianeIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1002 /* DianeHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeHTTPClient.swift; sourceTree = "<group>"; };
+		1003 /* ServerConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConfiguration.swift; sourceTree = "<group>"; };
+		1004 /* IOSStatusMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSStatusMonitor.swift; sourceTree = "<group>"; };
+		1005 /* ServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSetupView.swift; sourceTree = "<group>"; };
+		1006 /* IOSContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSContentView.swift; sourceTree = "<group>"; };
+		1007 /* StatusDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDashboardView.swift; sourceTree = "<group>"; };
+		1008 /* MCPServersViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServersViews.swift; sourceTree = "<group>"; };
+		1009 /* AgentsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsViews.swift; sourceTree = "<group>"; };
 		101 /* DianeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeApp.swift; sourceTree = "<group>"; };
+		1010 /* ProvidersViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersViews.swift; sourceTree = "<group>"; };
+		1011 /* ContextsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextsViews.swift; sourceTree = "<group>"; };
+		1012 /* JobsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobsViews.swift; sourceTree = "<group>"; };
+		1013 /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
+		1014 /* IOSSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSettingsView.swift; sourceTree = "<group>"; };
+		1015 /* MacServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacServerSetupView.swift; sourceTree = "<group>"; };
+		1016 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		102 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		103 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		104 /* DianeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeClient.swift; sourceTree = "<group>"; };
@@ -157,7 +196,6 @@
 		106 /* DianeStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeStatus.swift; sourceTree = "<group>"; };
 		107 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		108 /* Diane.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Diane.entitlements; sourceTree = "<group>"; };
-		1016 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		109 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		110 /* ToolsBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsBrowserView.swift; sourceTree = "<group>"; };
 		111 /* WindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManager.swift; sourceTree = "<group>"; };
@@ -170,7 +208,6 @@
 		118 /* ContextsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextsView.swift; sourceTree = "<group>"; };
 		119 /* Provider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Provider.swift; sourceTree = "<group>"; };
 		120 /* ProvidersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersView.swift; sourceTree = "<group>"; };
-		121 /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
 		122 /* MCPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServer.swift; sourceTree = "<group>"; };
 		123 /* MCPServersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServersView.swift; sourceTree = "<group>"; };
 		124 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
@@ -210,29 +247,32 @@
 		158 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		159 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		160 /* TimeRangePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeRangePicker.swift; sourceTree = "<group>"; };
-		1000 /* DianeIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeIOSApp.swift; sourceTree = "<group>"; };
-		1001 /* DianeIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DianeIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		1002 /* DianeHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DianeHTTPClient.swift; sourceTree = "<group>"; };
-		1003 /* ServerConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConfiguration.swift; sourceTree = "<group>"; };
-		1004 /* IOSStatusMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSStatusMonitor.swift; sourceTree = "<group>"; };
-		1005 /* ServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSetupView.swift; sourceTree = "<group>"; };
-		1006 /* IOSContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSContentView.swift; sourceTree = "<group>"; };
-		1007 /* StatusDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDashboardView.swift; sourceTree = "<group>"; };
-		1008 /* MCPServersViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServersViews.swift; sourceTree = "<group>"; };
-		1009 /* AgentsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsViews.swift; sourceTree = "<group>"; };
-		1010 /* ProvidersViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersViews.swift; sourceTree = "<group>"; };
-		1011 /* ContextsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextsViews.swift; sourceTree = "<group>"; };
-		1012 /* JobsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobsViews.swift; sourceTree = "<group>"; };
-		1013 /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
-		1014 /* IOSSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSettingsView.swift; sourceTree = "<group>"; };
-		1015 /* MacServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacServerSetupView.swift; sourceTree = "<group>"; };
 		1601 /* Slave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Slave.swift; sourceTree = "<group>"; };
 		1602 /* ServerListPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerListPopover.swift; sourceTree = "<group>"; };
 		1700 /* MCPRegistryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPRegistryView.swift; sourceTree = "<group>"; };
 		1701 /* MCPRegistryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPRegistryViewModel.swift; sourceTree = "<group>"; };
+		17FE92C2409092F75D3DDC2E /* QuestionsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Emergent/QuestionsView.swift; sourceTree = "<group>"; };
+		245D28A9A8CA3CF1A60832BE /* EmergentMCPServerRegistryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmergentMCPServerRegistryView.swift; path = Diane/Views/Emergent/EmergentMCPServerRegistryView.swift; sourceTree = "<group>"; };
+		4D436A1C9F1452E1A1D7A485 /* EmergentMCPRegistryViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmergentMCPRegistryViewModel.swift; path = Diane/ViewModels/EmergentMCPRegistryViewModel.swift; sourceTree = "<group>"; };
+		65735933A13F4C149D8F8720 /* EmergentAdminClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmergentAdminClient.swift; path = Diane/Services/EmergentAdminClient.swift; sourceTree = "<group>"; };
+		71A62124B913223BFDC350FD /* EmergentModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmergentModels.swift; path = Diane/Models/EmergentModels.swift; sourceTree = "<group>"; };
+		75EAF79D7F59FBB6C07773B8 /* QuestionsViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QuestionsViewModel.swift; sourceTree = "<group>"; };
+		85AB579E0047519268D9CD06 /* CloudAgentDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CloudAgentDetailView.swift; path = Emergent/CloudAgentDetailView.swift; sourceTree = "<group>"; };
+		8730D3294E826897E1F17674 /* CloudAgentViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudAgentViewModel.swift; sourceTree = "<group>"; };
+		C94E10C1A3ACAAA6337ADAAC /* AgentWorkspace.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentWorkspace.swift; sourceTree = "<group>"; };
+		CD7C71A08D7968CAE356C754 /* EmergentWorkspaceImagesView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmergentWorkspaceImagesView.swift; path = Diane/Views/Emergent/EmergentWorkspaceImagesView.swift; sourceTree = "<group>"; };
+		DB7B4090FA7553FE5EC702C4 /* EmergentMCPServerFormSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmergentMCPServerFormSheet.swift; path = Diane/Views/Emergent/EmergentMCPServerFormSheet.swift; sourceTree = "<group>"; };
+		FD8B9187B79B098B04862E30 /* EmergentWorkspaceImagesViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmergentWorkspaceImagesViewModel.swift; path = Diane/ViewModels/EmergentWorkspaceImagesViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		1200 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		200 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -254,34 +294,18 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		1200 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
-/* Begin PBXContainerItemProxy section */
-		800 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 600 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 400;
-			remoteInfo = Diane;
-		};
-/* End PBXContainerItemProxy section */
-
-/* Begin PBXTargetDependency section */
-		801 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 400 /* Diane */;
-			targetProxy = 800 /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
-
 /* Begin PBXGroup section */
+		26D09762573BF4AEE51467A7 /* Emergent */ = {
+			isa = PBXGroup;
+			children = (
+				17FE92C2409092F75D3DDC2E /* QuestionsView.swift */,
+				85AB579E0047519268D9CD06 /* CloudAgentDetailView.swift */,
+			);
+			name = Emergent;
+			sourceTree = "<group>";
+		};
 		300 = {
 			isa = PBXGroup;
 			children = (
@@ -289,6 +313,13 @@
 				313 /* ComponentCatalog */,
 				309 /* DianeTests */,
 				302 /* Products */,
+				71A62124B913223BFDC350FD /* EmergentModels.swift */,
+				65735933A13F4C149D8F8720 /* EmergentAdminClient.swift */,
+				4D436A1C9F1452E1A1D7A485 /* EmergentMCPRegistryViewModel.swift */,
+				FD8B9187B79B098B04862E30 /* EmergentWorkspaceImagesViewModel.swift */,
+				245D28A9A8CA3CF1A60832BE /* EmergentMCPServerRegistryView.swift */,
+				CD7C71A08D7968CAE356C754 /* EmergentWorkspaceImagesView.swift */,
+				DB7B4090FA7553FE5EC702C4 /* EmergentMCPServerFormSheet.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -342,10 +373,10 @@
 				123 /* MCPServersView.swift */,
 				124 /* MainWindowView.swift */,
 				125 /* MasterDetailView.swift */,
-				121 /* UsageView.swift */,
 				1015 /* MacServerSetupView.swift */,
 				1602 /* ServerListPopover.swift */,
 				1700 /* MCPRegistryView.swift */,
+				26D09762573BF4AEE51467A7 /* Emergent */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -376,6 +407,8 @@
 				119 /* Provider.swift */,
 				122 /* MCPServer.swift */,
 				1601 /* Slave.swift */,
+				C94E10C1A3ACAAA6337ADAAC /* AgentWorkspace.swift */,
+				0B5B16B96CAA111B578BF042 /* AgentQuestion.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -399,6 +432,8 @@
 				140 /* AgentsViewModel.swift */,
 				142 /* ContextsViewModel.swift */,
 				1701 /* MCPRegistryViewModel.swift */,
+				75EAF79D7F59FBB6C07773B8 /* QuestionsViewModel.swift */,
+				8730D3294E826897E1F17674 /* CloudAgentViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -485,6 +520,23 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		1300 /* DianeIOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1400 /* Build configuration list for PBXNativeTarget "DianeIOS" */;
+			buildPhases = (
+				1201 /* Sources */,
+				1200 /* Frameworks */,
+				1202 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DianeIOS;
+			productName = DianeIOS;
+			productReference = 1001 /* DianeIOS.app */;
+			productType = "com.apple.product-type.application";
+		};
 		400 /* Diane */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 500 /* Build configuration list for PBXNativeTarget "Diane" */;
@@ -540,23 +592,6 @@
 			productReference = 152 /* ComponentCatalog.app */;
 			productType = "com.apple.product-type.application";
 		};
-		1300 /* DianeIOS */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 1400 /* Build configuration list for PBXNativeTarget "DianeIOS" */;
-			buildPhases = (
-				1201 /* Sources */,
-				1200 /* Frameworks */,
-				1202 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = DianeIOS;
-			productName = DianeIOS;
-			productReference = 1001 /* DianeIOS.app */;
-			productType = "com.apple.product-type.application";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -567,6 +602,9 @@
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
+					1300 = {
+						CreatedOnToolsVersion = 15.0;
+					};
 					400 = {
 						CreatedOnToolsVersion = 15.0;
 					};
@@ -575,9 +613,6 @@
 						TestTargetID = 400;
 					};
 					420 = {
-						CreatedOnToolsVersion = 15.0;
-					};
-					1300 = {
 						CreatedOnToolsVersion = 15.0;
 					};
 				};
@@ -591,6 +626,9 @@
 				Base,
 			);
 			mainGroup = 300;
+			packageReferences = (
+				900 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
+			);
 			productRefGroup = 302 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -600,13 +638,18 @@
 				420 /* ComponentCatalog */,
 				1300 /* DianeIOS */,
 			);
-			packageReferences = (
-				900 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
-			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		1202 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1114 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		402 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -630,17 +673,43 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		1202 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				1114 /* Assets.xcassets in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		1201 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1100 /* DianeIOSApp.swift in Sources */,
+				1101 /* DianeStatus.swift in Sources */,
+				1102 /* Job.swift in Sources */,
+				1103 /* Agent.swift in Sources */,
+				1104 /* Context.swift in Sources */,
+				1105 /* Provider.swift in Sources */,
+				1106 /* MCPServer.swift in Sources */,
+				1107 /* DianeClientProtocol.swift in Sources */,
+				1108 /* DesignTokens.swift in Sources */,
+				1109 /* EmptyStateView.swift in Sources */,
+				1110 /* InfoRow.swift in Sources */,
+				1111 /* TimeRangePicker.swift in Sources */,
+				1112 /* DetailSection.swift in Sources */,
+				1113 /* SummaryCard.swift in Sources */,
+				1115 /* DianeHTTPClient.swift in Sources */,
+				1116 /* ServerConfiguration.swift in Sources */,
+				1117 /* IOSStatusMonitor.swift in Sources */,
+				1118 /* ServerSetupView.swift in Sources */,
+				1119 /* IOSContentView.swift in Sources */,
+				1120 /* StatusDashboardView.swift in Sources */,
+				1121 /* MCPServersViews.swift in Sources */,
+				1122 /* AgentsViews.swift in Sources */,
+				1123 /* ProvidersViews.swift in Sources */,
+				1124 /* ContextsViews.swift in Sources */,
+				1125 /* JobsViews.swift in Sources */,
+				1126 /* UsageView.swift in Sources */,
+				1127 /* IOSSettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		401 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -663,7 +732,6 @@
 				017 /* ContextsView.swift in Sources */,
 				018 /* Provider.swift in Sources */,
 				019 /* ProvidersView.swift in Sources */,
-				020 /* UsageView.swift in Sources */,
 				021 /* MCPServer.swift in Sources */,
 				022 /* MCPServersView.swift in Sources */,
 				024 /* MainWindowView.swift in Sources */,
@@ -692,6 +760,19 @@
 				1502 /* ServerListPopover.swift in Sources */,
 				1702 /* MCPRegistryView.swift in Sources */,
 				1703 /* MCPRegistryViewModel.swift in Sources */,
+				7B0D6CAAEC5A2469A28113B0 /* QuestionsView.swift in Sources */,
+				AA07749DE1CC3630510FA012 /* AgentWorkspace.swift in Sources */,
+				BE20F46BD146D3B42E4D63AF /* EmergentModels.swift in Sources */,
+				F993BB0B6A942D1F755BBED0 /* EmergentAdminClient.swift in Sources */,
+				75CC6DBF4C760FA2BC6E3D70 /* EmergentMCPRegistryViewModel.swift in Sources */,
+				1AABAF51C2B5333CE9870894 /* EmergentWorkspaceImagesViewModel.swift in Sources */,
+				BE4D3823C21A64FBA6AA493A /* EmergentMCPServerRegistryView.swift in Sources */,
+				9A6A3E1B0CC828AB87B382CA /* EmergentWorkspaceImagesView.swift in Sources */,
+				798606D30BF811A8B8070940 /* EmergentMCPServerFormSheet.swift in Sources */,
+				CC883D3A147525B105FBC1F4 /* AgentQuestion.swift in Sources */,
+				60681861994F5CEA7EF442EA /* QuestionsViewModel.swift in Sources */,
+				2F0DBE4E7B5367EAFAA6B0AC /* CloudAgentViewModel.swift in Sources */,
+				80F30B0D4AEB3EAEDBA27276 /* CloudAgentDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -741,7 +822,6 @@
 				065 /* ContextsView.swift in Sources */,
 				066 /* Provider.swift in Sources */,
 				067 /* ProvidersView.swift in Sources */,
-				068 /* UsageView.swift in Sources */,
 				069 /* MCPServer.swift in Sources */,
 				070 /* MCPServersView.swift in Sources */,
 				071 /* MainWindowView.swift in Sources */,
@@ -770,43 +850,83 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		1201 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				1100 /* DianeIOSApp.swift in Sources */,
-				1101 /* DianeStatus.swift in Sources */,
-				1102 /* Job.swift in Sources */,
-				1103 /* Agent.swift in Sources */,
-				1104 /* Context.swift in Sources */,
-				1105 /* Provider.swift in Sources */,
-				1106 /* MCPServer.swift in Sources */,
-				1107 /* DianeClientProtocol.swift in Sources */,
-				1108 /* DesignTokens.swift in Sources */,
-				1109 /* EmptyStateView.swift in Sources */,
-				1110 /* InfoRow.swift in Sources */,
-				1111 /* TimeRangePicker.swift in Sources */,
-				1112 /* DetailSection.swift in Sources */,
-				1113 /* SummaryCard.swift in Sources */,
-				1115 /* DianeHTTPClient.swift in Sources */,
-				1116 /* ServerConfiguration.swift in Sources */,
-				1117 /* IOSStatusMonitor.swift in Sources */,
-				1118 /* ServerSetupView.swift in Sources */,
-				1119 /* IOSContentView.swift in Sources */,
-				1120 /* StatusDashboardView.swift in Sources */,
-				1121 /* MCPServersViews.swift in Sources */,
-				1122 /* AgentsViews.swift in Sources */,
-				1123 /* ProvidersViews.swift in Sources */,
-				1124 /* ContextsViews.swift in Sources */,
-				1125 /* JobsViews.swift in Sources */,
-				1126 /* UsageView.swift in Sources */,
-				1127 /* IOSSettingsView.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		801 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 400 /* Diane */;
+			targetProxy = 800 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		1401 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 74LC88G9SC;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Diane/App/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Diane;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.17.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diane.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1402 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 74LC88G9SC;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Diane/App/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Diane;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.17.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diane.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		700 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1077,75 +1197,18 @@
 			};
 			name = Release;
 		};
-		1401 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 74LC88G9SC;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Diane/App/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Diane;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.17.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.diane.ios;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		1402 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 74LC88G9SC;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Diane/App/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Diane;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.17.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.diane.ios;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		1400 /* Build configuration list for PBXNativeTarget "DianeIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1401 /* Debug */,
+				1402 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		500 /* Build configuration list for PBXNativeTarget "Diane" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -1169,15 +1232,6 @@
 			buildConfigurations = (
 				706 /* Debug */,
 				707 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		1400 /* Build configuration list for PBXNativeTarget "DianeIOS" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				1401 /* Debug */,
-				1402 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
