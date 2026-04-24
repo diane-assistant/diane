@@ -2,7 +2,7 @@
 dist/
 build/
 *.exe
-default.profraw
+*.profraw
 
 # Go binaries (but not Go source directories)
 *.test
@@ -10,6 +10,11 @@ default.profraw
 server/diane
 server/diane-ctl
 server/mcp/mcp
+
+# Pre-built binaries
+diane-linux-amd64
+diane-darwin-*
+diane-windows-*
 
 # IDE
 .idea/
@@ -21,7 +26,6 @@ server/mcp/mcp
 .DS_Store
 
 # Xcode
-Diane/build/
 *.xcuserstate
 xcuserdata/
 DerivedData/
